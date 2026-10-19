@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice Builder - Cepat, Mudah & Siap Cetak</title>
+  <meta name="description" content="Aplikasi pembuat invoice profesional, cepat, otomatis hitung total, dan langsung unduh PDF siap cetak.">
+  
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- High-fidelity HTML to Canvas & PDF Generation Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <link rel="stylesheet" href="css/style.css?v=26">
+</head>
+<body>
+
+  <!-- Application Layout Wrapper -->
+  <div class="app-layout">
+    
+    <!-- Main Content Area -->
+    <div class="main-viewport">
+      
+      <!-- Top Bar / Quick Action Bar -->
+      <header class="top-nav no-print">
+        <div class="nav-container">
+          <!-- Logo Brand InvoiceFlow di sisi kiri (sejajar tepat dengan Panel Daftar Invoice 320px) -->
+          <div class="nav-brand-logo">
+            <div class="brand-icon">
+              <i data-lucide="receipt"></i>
+            </div>
+            <span class="brand-name">Invoice<span>Flow</span></span>
+          </div>
+
+          <!-- Judul / Nama Invoice di Atas (Lega & Panjang) -->
+          <div class="top-nav-title-box">
+            <i data-lucide="pen-line" class="top-nav-title-icon"></i>
+            <input type="text" id="top-invoice-title-input" class="canva-title-input" placeholder="Beri nama invoice..." title="Klik untuk mengedit nama invoice (otomatis tersimpan)">
+          </div>
+
+          <div class="nav-actions">
+            <!-- Document Type Selector (Invoice / Quotation Letter) -->
+            <div class="doc-type-picker" title="Pilih Jenis Dokumen: Invoice atau Quotation Letter (Surat Penawaran)">
+              <i data-lucide="file-check-2" class="picker-icon"></i>
+              <select id="doc-type-select" class="doc-type-select">
+                <option value="invoice" selected>Dokumen: Invoice</option>
+                <option value="quotation">Dokumen: Quotation Letter</option>
+              </select>
+              <i data-lucide="chevron-down" class="picker-arrow"></i>
+            </div>
+
+            <!-- Document Language Selector (Indonesia / English) -->
+            <div class="doc-lang-picker" title="Pilih Bahasa Dokumen (Bahasa Indonesia / English)">
+              <i data-lucide="languages" class="picker-icon"></i>
+              <select id="doc-lang-select" class="doc-lang-select">
+                <option value="id" selected>Bahasa: Indonesia</option>
+                <option value="en">Language: English</option>
+              </select>
+              <i data-lucide="chevron-down" class="picker-arrow"></i>
+            </div>
+
+            <!-- Paper Size Selector (A4 / Letter) -->
+            <div class="paper-size-picker" title="Pilih Ukuran Kertas Dokumen (A4 / Letter)">
+              <i data-lucide="file-text" class="picker-icon"></i>
+              <select id="paper-size-select" class="paper-size-select">
+                <option value="a4" selected>Kertas: A4</option>
+                <option value="letter">Kertas: Letter</option>
+              </select>
+              <i data-lucide="chevron-down" class="picker-arrow"></i>
+            </div>
+
+            <button id="btn-save-profile" class="btn btn-primary" title="Simpan data profil usaha & rekening Anda">
+              <i data-lucide="save"></i>
+              <span>Simpan</span>
+            </button>
+
+            <button id="btn-print" class="btn btn-secondary">
+              <i data-lucide="printer"></i>
+              <span>Cetak</span>
+            </button>
+
+            <button id="btn-download-pdf" class="btn btn-accent">
+              <i data-lucide="download"></i>
+              <span>Unduh PDF</span>
+            </button>
+          </div> <!-- End .nav-actions -->
+      </div> <!-- End .nav-container -->
+    </header>
+
+      <!-- Notification Toast -->
+      <div id="toast" class="toast hidden"></div>
+
+      <!-- Main App Canvas / Sheet Wrapper -->
+      <main class="app-main">
+        <div class="workspace-layout">
+          
+          <!-- Left Panel: Saved Invoices Manager (Panel Daftar Invoice) -->
+          <aside class="invoices-manager-panel no-print" id="invoices-manager-panel">
+            <div class="panel-header">
+              <div class="panel-title-wrap">
+                <div class="panel-icon">
+                  <i data-lucide="folders"></i>
+                </div>
+                <div>
+                  <h3 class="panel-title">Daftar Dokumen</h3>
+                  <span class="panel-count" id="invoices-count">0 dokumen tersimpan</span>
+                </div>
+              </div>
+              <div class="panel-header-actions">
+                <span class="auto-save-badge" id="auto-save-badge" title="Status auto-save otomatis">
+                  <i data-lucide="cloud-check"></i>
+                  <span>Tersimpan</span>
+                </span>
+                <button id="btn-save-current" class="btn btn-sm btn-outline-primary" title="Simpan dokumen saat ini ke daftar">
+                  <i data-lucide="bookmark-plus"></i>
+                  <span>Simpan</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Tombol Tambah Dokumen Baru (Invoice / Quotation Letter) -->
+            <div class="panel-new-doc-grid">
+              <button id="btn-panel-new-inv" class="btn-panel-new-inv" title="Buka invoice baru kosong">
+                <i data-lucide="file-plus-2"></i>
+                <span>+ Invoice Baru</span>
+              </button>
+              <button id="btn-panel-new-quo" class="btn-panel-new-quo" title="Buka quotation letter baru khusus vendor foto, video & photobooth">
+                <i data-lucide="file-text"></i>
+                <span>+ Quotation Baru</span>
+              </button>
+            </div>
+
+            <!-- Search & Filter Input -->
+            <div class="panel-search-wrap">
+              <i data-lucide="search" class="search-icon"></i>
+              <input type="text" id="invoice-search-input" placeholder="Cari dokumen / invoice / klien..." class="panel-search-input">
+            </div>
+
+            <!-- Invoices List Container -->
+            <div class="saved-invoices-list" id="saved-invoices-list">
+              <!-- Dynamically populated invoice items -->
+            </div>
+          </aside>
+
+          <!-- The Printable Invoice Paper Sheet -->
+          <div class="invoice-container">
+            
+            <section id="invoice-sheet" class="invoice-sheet">
+            
+            <!-- Header Section: Top Bar (Logo Left, Meta Right) & Centered Title Below -->
+            <div class="invoice-header">
+              <div class="invoice-header-top">
+                <!-- Logo Uploader Box -->
+                <div class="logo-box" id="logo-container">
+                  <input type="file" id="logo-input" accept="image/*" class="file-hidden">
+                  <div class="logo-preview-wrapper" id="logo-preview-wrapper">
+                    <img id="logo-img" src="" alt="Logo Perusahaan" class="logo-img hidden">
+                    <div class="logo-placeholder" id="logo-placeholder">
+                      <i data-lucide="image-plus"></i>
+                      <span>Unggah Logo</span>
+                      <small>Klik atau seret logo ke sini</small>
+                    </div>
+                  </div>
+                  <div class="logo-actions hidden no-print" id="logo-actions">
+                    <button type="button" class="btn-icon" id="btn-change-logo" title="Ganti Logo">
+                      <i data-lucide="refresh-cw"></i>
+                    </button>
+                    <button type="button" class="btn-icon danger" id="btn-remove-logo" title="Hapus Logo">
+                      <i data-lucide="trash-2"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Document Meta: Number (Smaller) & Dates on Separate Lines (Top Right) -->
+                <div class="meta-box" id="meta-box">
+                  <div class="meta-number-row">
+                    <span class="meta-num-prefix" id="meta-num-prefix">#</span>
+                    <input type="text" id="invoice-number" class="doc-number-input" placeholder="No. Dokumen" value="190720260109" title="Nomor Dokumen">
+                  </div>
+
+                  <div class="meta-date-row">
+                    <span class="meta-date-label" id="meta-date-label-1">Issue date:</span>
+                    <div class="date-input-wrap">
+                      <input type="text" id="issue-date" class="input-date" placeholder="DD/MM/YYYY" maxlength="10" title="Format: Hari/Bulan/Tahun (contoh: 21/09/2026)">
+                      <input type="date" id="issue-date-native" class="native-date-hidden" tabindex="-1" aria-hidden="true">
+                      <button type="button" class="btn-date-trigger no-print" id="btn-issue-date-trigger" title="Pilih tanggal dari kalender">
+                        <i data-lucide="calendar"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="meta-date-row">
+                    <span class="meta-date-label" id="meta-date-label-2">Due date:</span>
+                    <div class="date-input-wrap">
+                      <input type="text" id="due-date" class="input-date" placeholder="DD/MM/YYYY" maxlength="10" title="Format: Hari/Bulan/Tahun (contoh: 28/09/2026)">
+                      <input type="date" id="due-date-native" class="native-date-hidden" tabindex="-1" aria-hidden="true">
+                      <button type="button" class="btn-date-trigger no-print" id="btn-due-date-trigger" title="Pilih tanggal dari kalender">
+                        <i data-lucide="calendar"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Centered Document Title (Gambar 1 - Baris Tengah di Bawah Logo & Meta) -->
+              <div class="header-center-title">
+                <input type="text" id="invoice-title-input" class="doc-title-input-centered" value="INVOICE" placeholder="INVOICE" list="doc-title-datalist" title="Klik untuk mengubah jenis dokumen">
+                <datalist id="doc-title-datalist">
+                  <option value="INVOICE">
+                  <option value="SURAT PENAWARAN HARGA">
+                  <option value="QUOTATION LETTER">
+                  <option value="KWITANSI">
+                  <option value="PROFORMA INVOICE">
+                </datalist>
+                <div class="invoice-project-title-wrap is-empty" id="invoice-project-title-wrap">
+                  <input type="text" id="invoice-subtitle-input" class="doc-project-title-input" placeholder="Ketik keterangan sub-judul di sini (opsional)..." value="" title="Keterangan tambahan dokumen (opsional, tidak terhubung dengan panel kiri)">
+                </div>
+                <!-- Perihal Dokumen (Muncul di Mode Quotation) -->
+                <div class="doc-subject-wrap hidden" id="doc-subject-wrap">
+                  <span class="subject-label" id="subject-label">Perihal:</span>
+                  <input type="text" id="doc-subject-input" class="doc-subject-input" placeholder="Perihal penawaran..." value="Penawaran Jasa Dokumentasi Video, Photo & Photobooth" title="Perihal penawaran harga">
+                </div>
+              </div>
+            </div>
+
+            <!-- Sender (From) and Client (To) Clean Columns -->
+            <div class="parties-grid">
+              <!-- From Column -->
+              <div class="party-card party-from">
+                <div class="party-badge" id="party-from-badge">From</div>
+                <input type="text" id="from-company" class="party-company" placeholder="Nama Bisnis / Perusahaan Anda" value="Bluudz Creative">
+                <input type="text" id="from-name" class="party-input" placeholder="Nama Anda (Penanggung Jawab)" value="Johan Habibie">
+                <input type="text" id="from-address" class="party-input" placeholder="Kota / Alamat" value="Surabaya - Indonesia">
+                <input type="email" id="from-email" class="party-input" placeholder="Email" value="johanhabibie12@gmail.com">
+                <input type="text" id="from-phone" class="party-input" placeholder="Nomor Telepon / WhatsApp" value="+6285854321667">
+              </div>
+
+              <!-- To Column -->
+              <div class="party-card party-to">
+                <div class="party-badge" id="party-to-badge">To</div>
+                <input type="text" id="to-company" class="party-company" placeholder="Nama Klien / Perusahaan Tujuan" value="PT Paragon Technology and Innovation">
+                <input type="text" id="to-name" class="party-input" placeholder="Nama Kontak / PIC" value="Pak Candra Kisaditiyanto">
+                <input type="text" id="to-address" class="party-input" placeholder="Kota / Alamat Klien" value="Surabaya - Indonesia">
+                <input type="email" id="to-email" class="party-input" placeholder="Email Klien" value="xxxxxxx@gmail.com">
+                <input type="text" id="to-phone" class="party-input" placeholder="Nomor Telepon Klien" value="+6281334696952">
+              </div>
+            </div>
+
+            <!-- Quotation Opening Greeting (Surat Pengantar / Salam Pembuka) -->
+            <div class="quotation-greeting-section hidden" id="quotation-greeting-section">
+              <div class="greeting-header no-print">
+                <div class="greeting-header-left">
+                  <i data-lucide="mail"></i>
+                  <span id="greeting-header-title">Surat Pengantar / Pembuka Penawaran:</span>
+                </div>
+
+                <div class="greeting-header-right">
+                  <!-- Toolbar Format Surat Pengantar -->
+                  <div class="notes-format-toolbar greeting-format-toolbar no-print" id="greeting-format-toolbar">
+                    <!-- Dropdown Ukuran Font -->
+                    <div class="notes-size-wrap" title="Pilih Ukuran Huruf Surat Pengantar">
+                      <i data-lucide="type" class="format-icon-type"></i>
+                      <select id="greeting-font-size-select" class="notes-size-select" title="Ukuran Huruf">
+                        <option value="12px">12px</option>
+                        <option value="13px">13px</option>
+                        <option value="14px" selected>14px</option>
+                        <option value="16px">16px</option>
+                      </select>
+                      <i data-lucide="chevron-down" class="notes-size-arrow"></i>
+                    </div>
+
+                    <div class="toolbar-sep"></div>
+
+                    <!-- Tombol Bold -->
+                    <button type="button" id="btn-greeting-bold" class="format-btn" title="Tebal (Ctrl+B)">
+                      <i data-lucide="bold"></i>
+                    </button>
+
+                    <!-- Tombol Italic -->
+                    <button type="button" id="btn-greeting-italic" class="format-btn" title="Miring (Ctrl+I)">
+                      <i data-lucide="italic"></i>
+                    </button>
+
+                    <!-- Tombol Bersihkan Format -->
+                    <button type="button" id="btn-greeting-clear" class="format-btn" title="Format Normal / Bersihkan Format">
+                      <i data-lucide="eraser"></i>
+                    </button>
+                  </div>
+
+                  <button type="button" class="btn-toggle-greeting" id="btn-toggle-greeting" title="Sembunyikan / Tampilkan surat pengantar di cetak & PDF">
+                    <i data-lucide="eye" id="icon-toggle-greeting"></i>
+                    <span id="label-toggle-greeting">Tampil di Dokumen</span>
+                  </button>
+                </div>
+              </div>
+              <div class="greeting-content" id="greeting-content" contenteditable="true" data-placeholder="Tulis salam pembuka surat penawaran...">Dengan hormat,<br>Sehubungan dengan rencana kegiatan / event yang akan diselenggarakan oleh Bapak/Ibu, bersama surat ini kami dari <strong>Bluudz Creative</strong> bermaksud mengajukan penawaran harga untuk paket jasa Dokumentasi Video, Foto, dan Photobooth dengan rincian layanan sebagai berikut:</div>
+            </div>
+
+            <!-- Items Table Section -->
+            <div class="items-table-section">
+              <!-- Vendor Quick Presets Toolbar (1-Klik Tambah Paket) -->
+              <div class="vendor-presets-toolbar no-print" id="vendor-presets-toolbar">
+                <div class="presets-header">
+                  <i data-lucide="sparkles"></i>
+                  <span id="presets-header-title">Preset Paket Vendor (1-Klik Tambah):</span>
+                </div>
+                <div class="preset-chips">
+                  <button type="button" class="preset-chip" id="preset-btn-video" title="Tambah Paket Video Dokumentasi Lengkap">
+                    <i data-lucide="video"></i>
+                    <span id="preset-label-video">+ Paket Video</span>
+                  </button>
+                  <button type="button" class="preset-chip" id="preset-btn-photo" title="Tambah Paket Foto Dokumentasi Lengkap">
+                    <i data-lucide="camera"></i>
+                    <span id="preset-label-photo">+ Paket Foto</span>
+                  </button>
+                  <button type="button" class="preset-chip" id="preset-btn-photobooth" title="Tambah Paket Photobooth Unlimited">
+                    <i data-lucide="printer"></i>
+                    <span id="preset-label-photobooth">+ Paket Photobooth</span>
+                  </button>
+                  <button type="button" class="preset-chip chip-accent" id="preset-btn-combo" title="Tambah Paket Bundling All-In (Foto + Video + Photobooth)">
+                    <i data-lucide="layers"></i>
+                    <span id="preset-label-combo">+ Paket Bundling All-In</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="items-table-card">
+                <div class="items-table-header">
+                  <div class="col-name" id="th-name">Name</div>
+                  <div class="col-qty" id="th-qty">Qty</div>
+                  <div class="col-price" id="th-price">Unit price</div>
+                  <div class="col-tax" id="th-tax">Tax (%)</div>
+                  <div class="col-subtotal" id="th-subtotal">Subtotal</div>
+                  <div class="col-action no-print"></div>
+                </div>
+
+                <div id="items-list" class="items-list">
+                  <!-- Dynamic item rows will be injected here -->
+                </div>
+              </div>
+
+              <div class="items-table-actions no-print">
+                <button type="button" id="btn-add-item" class="btn-add-item">
+                  <i data-lucide="plus"></i>
+                  <span id="btn-add-item-label">Add new Invoice Item</span>
+                </button>
+                <div class="undo-redo-group" id="items-undo-redo-group">
+                  <button type="button" id="btn-undo-item" class="btn-undo-redo" title="Urungkan / Undo (Ctrl+Z)" disabled>
+                    <i data-lucide="undo-2"></i>
+                    <span id="btn-undo-label">Undo</span>
+                  </button>
+                  <button type="button" id="btn-redo-item" class="btn-undo-redo" title="Ulangi / Redo (Ctrl+Y)" disabled>
+                    <i data-lucide="redo-2"></i>
+                    <span id="btn-redo-label">Redo</span>
+                  </button>
+                </div>
+                <button type="button" id="btn-toggle-tax-mode" class="btn-toggle-tax-mode" title="Beralih tipe invoice: Dengan Pajak atau Tanpa Pajak">
+                  <i data-lucide="percent"></i>
+                  <span id="toggle-tax-btn-label">Tipe: Dengan Pajak (PPN)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Bottom Split Section: Payment Notes (Left) & Summary (Right) -->
+            <div class="invoice-bottom-grid">
+              <!-- Payment Notes (Left) -->
+              <div class="payment-notes-section">
+                <div class="payment-notes-header">
+                  <div class="section-title">
+                    <span id="payment-notes-title-label">Keterangan :</span>
+                  </div>
+
+                  <!-- Toolbar Format Keterangan (Ukuran Font, Bold, Italic, Coret, Normal) -->
+                  <div class="notes-format-toolbar no-print" id="notes-format-toolbar">
+                    <!-- Dropdown Ukuran Font -->
+                    <div class="notes-size-wrap" title="Pilih Ukuran Huruf Keterangan">
+                      <i data-lucide="type" class="format-icon-type"></i>
+                      <select id="notes-font-size-select" class="notes-size-select" title="Ukuran Huruf">
+                        <option value="12px">12px</option>
+                        <option value="14px" selected>14px</option>
+                        <option value="16px">16px</option>
+                        <option value="18px">18px</option>
+                      </select>
+                      <i data-lucide="chevron-down" class="notes-size-arrow"></i>
+                    </div>
+
+                    <div class="toolbar-sep"></div>
+
+                    <!-- Tombol Bold -->
+                    <button type="button" id="btn-format-bold" class="format-btn" title="Tebal (Ctrl+B)">
+                      <i data-lucide="bold"></i>
+                    </button>
+
+                    <!-- Tombol Italic -->
+                    <button type="button" id="btn-format-italic" class="format-btn" title="Miring (Ctrl+I)">
+                      <i data-lucide="italic"></i>
+                    </button>
+
+                    <!-- Tombol Coret / Strikethrough -->
+                    <button type="button" id="btn-format-strike" class="format-btn" title="Coretan (Strikethrough - Ctrl+Shift+X)">
+                      <i data-lucide="strikethrough"></i>
+                    </button>
+
+                    <!-- Tombol Normal / Bersihkan Format -->
+                    <button type="button" id="btn-format-clear" class="format-btn" title="Format Normal / Bersihkan Format">
+                      <i data-lucide="eraser"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="payment-notes-content">
+                  <div id="payment-notes" class="payment-notes-editor" contenteditable="true" data-placeholder="Tulis rincian keterangan, no rekening BCA, Mandiri, instruksi transfer, atau catatan lainnya..."></div>
+                </div>
+              </div>
+
+              <!-- Calculation & Summary Section (Right) -->
+              <div class="summary-section">
+                <div class="summary-box">
+                  <div class="summary-header">
+                    <span class="summary-title" id="summary-title-label">Invoice summary</span>
+                    <div class="currency-select-wrapper">
+                      <select id="currency-select" class="currency-select">
+                        <option value="IDR" selected>IDR</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="SGD">SGD (S$)</option>
+                        <option value="EUR">EUR (€)</option>
+                      </select>
+                      <i data-lucide="chevron-down" class="select-arrow"></i>
+                    </div>
+                  </div>
+
+                  <div class="summary-row">
+                    <span class="label" id="summary-subtotal-label">Subtotal</span>
+                    <span class="value" id="summary-subtotal">Rp 0</span>
+                  </div>
+
+                  <div class="summary-row" id="summary-tax-row">
+                    <span class="label" id="summary-tax-label">Tax</span>
+                    <span class="value" id="summary-tax">Rp 0</span>
+                  </div>
+
+                  <div class="summary-row total-row">
+                    <span class="label" id="summary-total-label">Total</span>
+                    <span class="value total-value" id="summary-total">Rp 0</span>
+                  </div>
+                  
+                  <div class="terbilang-box" id="terbilang-container">
+                    <span class="terbilang-label" id="terbilang-label">Terbilang:</span>
+                    <p id="terbilang-text" class="terbilang-text">-</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quotation Signatures & Approval Section (Muncul di Mode Quotation) -->
+            <div class="quotation-signatures-section hidden" id="quotation-signatures-section">
+              <div class="signature-column sig-vendor">
+                <div class="sig-title" id="sig-vendor-title">Hormat Kami,</div>
+                <div class="sig-company" id="sig-vendor-company">Bluudz Creative</div>
+                <div class="sig-space"></div>
+                <div class="sig-name" id="sig-vendor-name">( Johan Habibie )</div>
+              </div>
+              <div class="signature-column sig-client">
+                <div class="sig-title" id="sig-client-title">Disetujui & Dikonfirmasi Oleh,</div>
+                <div class="sig-company" id="sig-client-company">PT Paragon Technology and Innovation</div>
+                <div class="sig-space"></div>
+                <div class="sig-name" id="sig-client-name">( Pak Candra Kisaditiyanto )</div>
+              </div>
+            </div>
+
+            <!-- Divider Line at bottom of the invoice matching reference -->
+            <hr class="invoice-divider">
+
+          </section>
+          </div> <!-- End .invoice-container -->
+        </div> <!-- End .workspace-layout -->
+      </main>
+
+      <footer class="app-footer no-print">
+        <p>Dibuat untuk mempermudah dan mempercepat pembuatan invoice bisnis Anda. Data tersimpan di browser Anda dengan aman.</p>
+      </footer>
+
+    </div> <!-- End .main-viewport -->
+  </div> <!-- End .app-layout -->
+
+  <script src="js/storage.js?v=13"></script>
+  <script src="js/app.js?v=29"></script>
+</body>
+</html>
