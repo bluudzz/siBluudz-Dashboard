@@ -1,4 +1,4 @@
-﻿import * as React from 'react'
+import * as React from 'react'
 import { motion } from 'framer-motion'
 import {
   Mail,
@@ -41,6 +41,24 @@ export function EmailManagerPage() {
     if (mail.selectedAccountId) void mail.loadInbox(mail.selectedAccountId)
   }, [mail.selectedAccountId, mail.loadInbox])
 
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('gmailOAuth') === 'success') {
+      const email = params.get('email')
+      mail.setNotice(
+        email
+          ? `Akun Gmail ${email} berhasil dihubungkan via Google OAuth!`
+          : 'Akun Gmail berhasil dihubungkan via Google OAuth!'
+      )
+      window.history.replaceState({}, document.title, window.location.pathname)
+      void mail.loadAccounts()
+    } else if (params.get('gmailOAuthError')) {
+      const err = params.get('gmailOAuthError')
+      mail.setError(`Gagal menghubungkan Google OAuth: ${err || 'Otorisasi dibatalkan'}`)
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [mail])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -51,12 +69,12 @@ export function EmailManagerPage() {
             Email Manager
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Kelola akun email Outlook / Hotmail (OAuth2 Graph) dan IMAP dengan penyimpanan kredensial aman.
+            Kelola akun email Outlook / Hotmail (OAuth2 Graph), Gmail (OAuth2 API), dan IMAP dengan penyimpanan kredensial aman.
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {mail.selectedAccount && mail.isOutlookGraph && (
+          {mail.selectedAccount && (mail.isOutlookGraph || mail.isGmailApi) && (
             <>
               <Button
                 variant="outline"
@@ -185,6 +203,8 @@ export function EmailManagerPage() {
         setShowPassword={addAccount.setShowPassword}
         outlookSubMethod={addAccount.outlookSubMethod}
         setOutlookSubMethod={addAccount.setOutlookSubMethod}
+        gmailSubMethod={addAccount.gmailSubMethod}
+        setGmailSubMethod={addAccount.setGmailSubMethod}
         saving={addAccount.saving}
         imapForm={addAccount.imapForm}
         setImapForm={addAccount.setImapForm}
@@ -196,6 +216,17 @@ export function EmailManagerPage() {
         setShowOutlookPassword={addAccount.setShowOutlookPassword}
         showOutlookToken={addAccount.showOutlookToken}
         setShowOutlookToken={addAccount.setShowOutlookToken}
+        gmailForm={addAccount.gmailForm}
+        setGmailForm={addAccount.setGmailForm}
+        gmailBatchText={addAccount.gmailBatchText}
+        setGmailBatchText={addAccount.setGmailBatchText}
+        showGmailPassword={addAccount.showGmailPassword}
+        setShowGmailPassword={addAccount.setShowGmailPassword}
+        showGmailToken={addAccount.showGmailToken}
+        setShowGmailToken={addAccount.setShowGmailToken}
+        showGmailSecret={addAccount.showGmailSecret}
+        setShowGmailSecret={addAccount.setShowGmailSecret}
+        batchCountGmail={addAccount.batchCountGmail}
         deviceData={addAccount.deviceData}
         loadingDeviceCode={addAccount.loadingDeviceCode}
         pollingDevice={addAccount.pollingDevice}

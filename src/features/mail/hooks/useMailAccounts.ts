@@ -108,6 +108,11 @@ export function useMailAccounts() {
           `/api/outlook/accounts/${encodeURIComponent(account.id)}/credentials`
         )
         setCredentialsData(data)
+      } else if (account.provider === 'gmail_api') {
+        const data = await apiRequest<AccountCredentials>(
+          `/api/gmail/accounts/${encodeURIComponent(account.id)}/credentials`
+        )
+        setCredentialsData(data)
       } else {
         setCredentialsData({
           id: account.id,
@@ -135,11 +140,16 @@ export function useMailAccounts() {
     setError('')
     setNotice('')
     try {
+      const isGmail = selectedAccount?.provider === 'gmail_api'
+      const endpoint = isGmail ? '/api/gmail/accounts-export' : '/api/outlook/accounts-export'
+      const providerLabel = isGmail ? 'Gmail' : 'Outlook'
+      const filename = isGmail ? 'gmail_accounts_export' : 'outlook_accounts_export'
+
       const result = await apiRequest<{ count: number; accounts: AccountCredentials[]; raw_pipe_text: string }>(
-        '/api/outlook/accounts-export'
+        endpoint
       )
       if (!result.raw_pipe_text) {
-        setNotice('Belum ada akun Outlook terdaftar untuk diekspor.')
+        setNotice(`Belum ada akun ${providerLabel} terdaftar untuk diekspor.`)
         return
       }
 
@@ -149,15 +159,15 @@ export function useMailAccounts() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `outlook_accounts_export_${new Date().toISOString().slice(0, 10)}.txt`
+      link.download = `${filename}_${new Date().toISOString().slice(0, 10)}.txt`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
 
-      setNotice(`Berhasil mengekspor ${result.count} akun Outlook! File .txt terunduh dan teks pipa tersalin ke clipboard.`)
+      setNotice(`Berhasil mengekspor ${result.count} akun ${providerLabel}! File .txt terunduh dan teks pipa tersalin ke clipboard.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal mengekspor data akun Outlook.')
+      setError(err instanceof Error ? err.message : 'Gagal mengekspor data akun.')
     } finally {
       setExportingAll(false)
     }
@@ -187,9 +197,12 @@ export function useMailAccounts() {
       if (targetService) query.set('service', targetService)
       query.set('limit', '10')
 
-      const result = await apiRequest<{ code: string | null }>(
-        `/api/outlook/accounts/${encodeURIComponent(selectedAccountId)}/otp?${query}`
-      )
+      const isGmail = selectedAccount?.provider === 'gmail_api'
+      const endpoint = isGmail
+        ? `/api/gmail/accounts/${encodeURIComponent(selectedAccountId)}/otp?${query}`
+        : `/api/outlook/accounts/${encodeURIComponent(selectedAccountId)}/otp?${query}`
+
+      const result = await apiRequest<{ code: string | null }>(endpoint)
       setOtpResult(result.code)
       if (!result.code) {
         setNotice('Tidak ditemukan kode OTP pada email terbaru akun ini.')
@@ -215,13 +228,19 @@ export function useMailAccounts() {
     setError('')
     setNotice('')
     try {
+      const isGmail = selectedAccount?.provider === 'gmail_api'
+      const endpoint = isGmail
+        ? `/api/gmail/accounts/${encodeURIComponent(accountId)}/refresh`
+        : `/api/outlook/accounts/${encodeURIComponent(accountId)}/refresh`
+      const providerLabel = isGmail ? 'Google' : 'Microsoft'
+
       const result = await apiRequest<{ access_token: string }>(
-        `/api/outlook/accounts/${encodeURIComponent(accountId)}/refresh`,
+        endpoint,
         { method: 'POST' }
       )
-      setNotice(`Token valid! Berhasil me-refresh access token Microsoft: ${result.access_token.slice(0, 16)}...`)
+      setNotice(`Token valid! Berhasil me-refresh access token ${providerLabel}: ${result.access_token.slice(0, 16)}...`)
     } catch (refreshErr) {
-      setError(refreshErr instanceof Error ? refreshErr.message : 'Gagal me-refresh token akun Outlook.')
+      setError(refreshErr instanceof Error ? refreshErr.message : 'Gagal me-refresh token akun.')
     } finally {
       setRefreshingToken(false)
     }
@@ -229,13 +248,14 @@ export function useMailAccounts() {
 
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId)
   const isOutlookGraph = selectedAccount?.provider === 'outlook_graph'
+  const isGmailApi = selectedAccount?.provider === 'gmail_api'
 
   return {
     accounts, setAccounts,
     selectedAccountId, setSelectedAccountId,
     messages, setMessages,
     selectedMessage, setSelectedMessage,
-    selectedAccount, isOutlookGraph,
+    selectedAccount, isOutlookGraph, isGmailApi,
     loadingAccounts, loadingInbox, setLoadingInbox,
     error, setError,
     notice, setNotice,

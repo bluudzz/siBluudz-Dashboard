@@ -145,7 +145,7 @@ export function CredentialsModal({
 
                   {/* Client ID */}
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-muted-foreground">Client ID (Public Client)</label>
+                    <label className="text-xs font-semibold text-muted-foreground">Client ID</label>
                     <div className="flex items-center gap-2">
                       <input type="text" readOnly value={data.client_id || '-'} className="w-full rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-mono text-foreground select-all" />
                       <Button type="button" variant="outline" size="sm" onClick={() => onCopyField(data.client_id || '', 'client_id')} className="shrink-0 h-8 px-2.5 text-xs">
@@ -153,6 +153,19 @@ export function CredentialsModal({
                       </Button>
                     </div>
                   </div>
+
+                  {/* Client Secret (Gmail) */}
+                  {data.client_secret && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-muted-foreground">Client Secret</label>
+                      <div className="flex items-center gap-2">
+                        <input type="password" readOnly value={data.client_secret} className="w-full rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-mono text-foreground select-all" />
+                        <Button type="button" variant="outline" size="sm" onClick={() => onCopyField(data.client_secret || '', 'client_secret')} className="shrink-0 h-8 px-2.5 text-xs">
+                          {copiedField === 'client_secret' ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

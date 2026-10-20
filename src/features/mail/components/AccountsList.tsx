@@ -104,6 +104,11 @@ export function AccountsList({
                         <Fingerprint className="h-2.5 w-2.5" />
                         OAuth2 Graph
                       </span>
+                    ) : account.provider === 'gmail_api' ? (
+                      <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-400">
+                        <Fingerprint className="h-2.5 w-2.5" />
+                        Gmail REST API
+                      </span>
                     ) : (
                       <span className="text-[11px] text-muted-foreground truncate font-mono">
                         {account.host}

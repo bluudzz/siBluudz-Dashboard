@@ -18,6 +18,7 @@ export function useAddAccount(deps: {
   const [showAdvanced, setShowAdvanced] = React.useState(false)
   const [showPassword, setShowPassword] = React.useState(false)
   const [outlookSubMethod, setOutlookSubMethod] = React.useState<'device' | 'manual' | 'batch'>('device')
+  const [gmailSubMethod, setGmailSubMethod] = React.useState<'oauth' | 'batch' | 'manual' | 'imap'>('oauth')
   const [saving, setSaving] = React.useState(false)
 
   const [imapForm, setImapForm] = React.useState({
@@ -36,6 +37,18 @@ export function useAddAccount(deps: {
   const [outlookBatchText, setOutlookBatchText] = React.useState('')
   const [showOutlookPassword, setShowOutlookPassword] = React.useState(false)
   const [showOutlookToken, setShowOutlookToken] = React.useState(false)
+
+  const [gmailForm, setGmailForm] = React.useState({
+    email: '',
+    password: '',
+    refreshToken: '',
+    clientId: '',
+    clientSecret: '',
+  })
+  const [gmailBatchText, setGmailBatchText] = React.useState('')
+  const [showGmailPassword, setShowGmailPassword] = React.useState(false)
+  const [showGmailToken, setShowGmailToken] = React.useState(false)
+  const [showGmailSecret, setShowGmailSecret] = React.useState(false)
 
   // Device Auth State
   const [deviceData, setDeviceData] = React.useState<{
@@ -67,6 +80,17 @@ export function useAddAccount(deps: {
       .filter((l) => l.split('|').length >= 4).length
   }, [outlookBatchText])
 
+  const batchCountGmail = React.useMemo(() => {
+    if (!gmailBatchText.trim()) return 0
+    return gmailBatchText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => {
+        const parts = l.split('|')
+        return parts.length >= 4 && parts[0] && parts[1] && parts[2] && parts[3]
+      }).length
+  }, [gmailBatchText])
+
   const handleEmailInput = (val: string) => {
     const detected = detectProviderFromEmail(val)
     setProvider(detected)
@@ -77,6 +101,10 @@ export function useAddAccount(deps: {
       host: detected !== 'custom' ? PROVIDER_CONFIGS[detected].host : prev.host,
     }))
     setOutlookForm((prev) => ({
+      ...prev,
+      email: val,
+    }))
+    setGmailForm((prev) => ({
       ...prev,
       email: val,
     }))
@@ -97,14 +125,34 @@ export function useAddAccount(deps: {
     const trimmed = rawText.trim()
     if (trimmed.includes('|')) {
       const parts = trimmed.split('|').map((p) => p.trim())
-      if (parts.length >= 3) {
+      // Format 4 segmen: email|refresh_token|client_id|client_secret (Gmail) atau email|password|refresh_token|client_id (Outlook)
+      if (parts.length === 4) {
+        setGmailForm({
+          email: parts[0] || '',
+          password: '',
+          refreshToken: parts[1] || '',
+          clientId: parts[2] || '',
+          clientSecret: parts[3] || '',
+        })
         setOutlookForm({
           email: parts[0] || '',
           password: parts[1] || '',
           refreshToken: parts[2] || '',
           clientId: parts[3] || '04b07795-8ddb-461a-bbee-02f9e1bf7b46',
         })
-        setNotice('Format data pipa berhasil diisikan ke formulir!')
+        setNotice('Format data pipa (4 segmen) berhasil diisikan ke formulir!')
+        return true
+      }
+      // Format 5 segmen: email|password|refresh_token|client_id|client_secret (Gmail dengan password cadangan)
+      if (parts.length >= 5) {
+        setGmailForm({
+          email: parts[0] || '',
+          password: parts[1] || '',
+          refreshToken: parts[2] || '',
+          clientId: parts[3] || '',
+          clientSecret: parts[4] || '',
+        })
+        setNotice('Format data pipa Gmail (5 segmen) berhasil diisikan ke formulir!')
         return true
       }
     }
@@ -116,6 +164,61 @@ export function useAddAccount(deps: {
     setSaving(true)
     setError('')
     setNotice('')
+
+    if (provider === 'gmail') {
+      try {
+        if (gmailSubMethod === 'batch') {
+          if (!gmailBatchText.trim()) {
+            throw new Error('Masukkan data akun dalam format pipa (email|refresh_token|client_id|client_secret).')
+          }
+          const result = await apiRequest<{ imported: number; accounts: Array<{ id: string; email: string }> }>(
+            '/api/gmail/accounts/import',
+            {
+              method: 'POST',
+              body: JSON.stringify({ accounts: gmailBatchText.trim() }),
+            }
+          )
+          setNotice(`Berhasil mengimpor ${result.imported} akun Gmail!`)
+          setGmailBatchText('')
+          setAddAccountModalOpen(false)
+          await loadAccounts()
+          if (result.accounts?.[0]?.id) {
+            setSelectedAccountId(result.accounts[0].id)
+            void loadInbox(result.accounts[0].id)
+          }
+        } else if (gmailSubMethod === 'manual') {
+          if (!gmailForm.email || !gmailForm.refreshToken || !gmailForm.clientId || !gmailForm.clientSecret) {
+            throw new Error('Email, Refresh Token, Client ID, dan Client Secret wajib diisi.')
+          }
+          const result = await apiRequest<{ imported: number; accounts: Array<{ id: string; email: string }> }>(
+            '/api/gmail/accounts/import',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                email: gmailForm.email.trim(),
+                password: gmailForm.password.trim(),
+                refreshToken: gmailForm.refreshToken.trim(),
+                clientId: gmailForm.clientId.trim(),
+                clientSecret: gmailForm.clientSecret.trim(),
+              }),
+            }
+          )
+          setNotice(`Akun Gmail ${gmailForm.email} berhasil disimpan & dihubungkan!`)
+          setGmailForm({ email: '', password: '', refreshToken: '', clientId: '', clientSecret: '' })
+          setAddAccountModalOpen(false)
+          await loadAccounts()
+          if (result.accounts?.[0]?.id) {
+            setSelectedAccountId(result.accounts[0].id)
+            void loadInbox(result.accounts[0].id)
+          }
+        }
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : 'Gagal menyimpan akun Gmail.')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
 
     if (provider === 'outlook') {
       try {
@@ -308,14 +411,21 @@ export function useAddAccount(deps: {
     provider, showAdvanced, setShowAdvanced,
     showPassword, setShowPassword,
     outlookSubMethod, setOutlookSubMethod,
+    gmailSubMethod, setGmailSubMethod,
     saving,
     imapForm, setImapForm,
     outlookForm, setOutlookForm,
     outlookBatchText, setOutlookBatchText,
     showOutlookPassword, setShowOutlookPassword,
     showOutlookToken, setShowOutlookToken,
+    gmailForm, setGmailForm,
+    gmailBatchText, setGmailBatchText,
+    showGmailPassword, setShowGmailPassword,
+    showGmailToken, setShowGmailToken,
+    showGmailSecret, setShowGmailSecret,
     deviceData, loadingDeviceCode, pollingDevice, deviceCodeCopied, setDeviceCodeCopied,
     batchCount,
+    batchCountGmail,
     handleEmailInput,
     handleSelectProvider,
     handleAutoFillFromPipe,

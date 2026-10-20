@@ -40,6 +40,19 @@ interface AddAccountModalProps {
   setShowOutlookPassword: (v: boolean) => void
   showOutlookToken: boolean
   setShowOutlookToken: (v: boolean) => void
+  gmailSubMethod: 'oauth' | 'batch' | 'manual' | 'imap'
+  setGmailSubMethod: (v: 'oauth' | 'batch' | 'manual' | 'imap') => void
+  gmailForm: { email: string; password: string; refreshToken: string; clientId: string; clientSecret: string }
+  setGmailForm: (v: { email: string; password: string; refreshToken: string; clientId: string; clientSecret: string }) => void
+  gmailBatchText: string
+  setGmailBatchText: (v: string) => void
+  showGmailPassword: boolean
+  setShowGmailPassword: (v: boolean) => void
+  showGmailToken: boolean
+  setShowGmailToken: (v: boolean) => void
+  showGmailSecret: boolean
+  setShowGmailSecret: (v: boolean) => void
+  batchCountGmail: number
   deviceData: { user_code: string; device_code: string; verification_uri: string; client_id: string } | null
   loadingDeviceCode: boolean
   pollingDevice: boolean
@@ -66,6 +79,8 @@ export function AddAccountModal({
   setShowPassword,
   outlookSubMethod,
   setOutlookSubMethod,
+  gmailSubMethod,
+  setGmailSubMethod,
   saving,
   imapForm,
   setImapForm,
@@ -77,6 +92,17 @@ export function AddAccountModal({
   setShowOutlookPassword,
   showOutlookToken,
   setShowOutlookToken,
+  gmailForm,
+  setGmailForm,
+  gmailBatchText,
+  setGmailBatchText,
+  showGmailPassword,
+  setShowGmailPassword,
+  showGmailToken,
+  setShowGmailToken,
+  showGmailSecret,
+  setShowGmailSecret,
+  batchCountGmail,
   deviceData,
   loadingDeviceCode,
   pollingDevice,
@@ -143,7 +169,13 @@ export function AddAccountModal({
               <input
                 type="email"
                 required
-                value={provider === 'outlook' ? outlookForm.email : imapForm.email}
+                value={
+                  provider === 'outlook'
+                    ? outlookForm.email
+                    : provider === 'gmail'
+                      ? gmailForm.email
+                      : imapForm.email
+                }
                 onChange={(e) => onEmailInput(e.target.value)}
                 placeholder="Contoh: user@hotmail.com, user@outlook.com, nama@gmail.com"
                 className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/40"
@@ -419,8 +451,269 @@ export function AddAccountModal({
               </div>
             )}
 
+            {/* GMAIL PROVIDER */}
+            {provider === 'gmail' && (
+              <div className="space-y-4 pt-1">
+                {/* Method Switcher */}
+                <div className="flex items-center rounded-xl bg-muted/60 p-1 border border-border/40 text-xs overflow-x-auto gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setGmailSubMethod('oauth')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium text-center transition-all whitespace-nowrap ${
+                      gmailSubMethod === 'oauth'
+                        ? 'bg-background text-rose-600 dark:text-rose-400 shadow-xs font-semibold'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    One-Click OAuth
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGmailSubMethod('batch')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium text-center transition-all whitespace-nowrap ${
+                      gmailSubMethod === 'batch'
+                        ? 'bg-background text-rose-600 dark:text-rose-400 shadow-xs font-semibold'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Format Pipa ({batchCountGmail})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGmailSubMethod('manual')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium text-center transition-all whitespace-nowrap ${
+                      gmailSubMethod === 'manual'
+                        ? 'bg-background text-rose-600 dark:text-rose-400 shadow-xs font-semibold'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Manual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGmailSubMethod('imap')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium text-center transition-all whitespace-nowrap ${
+                      gmailSubMethod === 'imap'
+                        ? 'bg-background text-foreground shadow-xs font-semibold'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    App Password
+                  </button>
+                </div>
+
+                {/* GMAIL ONE-CLICK OAUTH */}
+                {gmailSubMethod === 'oauth' && (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3">
+                      <div className="flex items-start gap-2.5">
+                        <Sparkles className="h-4 w-4 text-rose-500 mt-0.5 shrink-0" />
+                        <div className="space-y-1 text-xs">
+                          <p className="font-semibold text-foreground">Login Otomatis via Google Web OAuth (One-Click)</p>
+                          <p className="text-muted-foreground leading-relaxed">
+                            Cukup klik tombol di bawah untuk membuka halaman otorisasi resmi Google dan konfirmasi akun Gmail Anda. Server akan otomatis menangkap dan menyimpan <b>Refresh Token, Client ID, dan Client Secret</b> ke database!
+                          </p>
+                        </div>
+                      </div>
+                      <a
+                        href="/api/gmail/oauth/authorize"
+                        className="flex items-center justify-center w-full rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-medium py-2.5 gap-2 shadow-md shadow-rose-500/20 text-xs text-center transition-all cursor-pointer"
+                      >
+                        <Fingerprint className="h-4 w-4" />
+                        <span>Hubungkan dengan Akun Google (Login Otomatis)</span>
+                        <ExternalLink className="h-3.5 w-3.5 opacity-80" />
+                      </a>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+                      <p className="font-medium text-foreground flex items-center gap-1.5">
+                        <Info className="h-3.5 w-3.5 text-blue-500" />
+                        Tips Multi-Akun Google:
+                      </p>
+                      <p className="text-[11px] leading-relaxed">
+                        Anda dapat menghubungkan akun Gmail berbeda secara berturut-turut. Setiap kali klik tombol di atas, Google akan meminta Anda memilih akun yang ingin dihubungkan.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* GMAIL BATCH */}
+                {gmailSubMethod === 'batch' && (
+                  <form onSubmit={onAddAccount} className="space-y-3">
+                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-2.5 text-xs text-rose-900 dark:text-rose-200">
+                      <p className="font-semibold text-rose-600 dark:text-rose-400">
+                        Format Pipa Standar Gmail (OAuth2):
+                      </p>
+                      <p className="font-mono text-[11px] text-muted-foreground pt-0.5 select-all">
+                        email|refresh_token|client_id|client_secret
+                      </p>
+                      <p className="text-[10px] text-muted-foreground pt-1">
+                        Atau 5 segmen jika ada password: <span className="font-mono select-all">email|password|refresh_token|client_id|client_secret</span>
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-foreground">Daftar Akun Format Pipa</label>
+                        <span className="text-[11px] text-muted-foreground font-mono">1 akun per baris</span>
+                      </div>
+                      <textarea
+                        rows={6}
+                        required
+                        value={gmailBatchText}
+                        onChange={(e) => setGmailBatchText(e.target.value)}
+                        placeholder={'user1@gmail.com|1//04xxxx|xxxx.apps.googleusercontent.com|GOCSPX-xxxx\nuser2@gmail.com|pass123|1//04xxxx|xxxx.apps.googleusercontent.com|GOCSPX-xxxx'}
+                        className="w-full rounded-xl border border-border bg-background p-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-rose-500/40 leading-relaxed"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-medium gap-2 shadow-sm"
+                      disabled={saving || batchCountGmail === 0}
+                    >
+                      {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {saving ? 'Mengimpor Akun...' : `Impor ${batchCountGmail || ''} Akun Gmail`}
+                    </Button>
+                  </form>
+                )}
+
+                {/* GMAIL MANUAL */}
+                {gmailSubMethod === 'manual' && (
+                  <form onSubmit={onAddAccount} className="space-y-3">
+                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-2.5 text-xs">
+                      <label className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                        Paste 1 Baris Format Pipa Gmail (Auto-fill Cepat):
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="email|refresh_token|client_id|client_secret"
+                        onChange={(e) => { if (onAutoFillFromPipe(e.target.value)) e.target.value = '' }}
+                        className="w-full rounded border border-rose-500/30 bg-background px-2.5 py-1.5 text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">Client ID Google</label>
+                      <input
+                        type="text"
+                        required
+                        value={gmailForm.clientId}
+                        onChange={(e) => setGmailForm({ ...gmailForm, clientId: e.target.value })}
+                        placeholder="xxxx.apps.googleusercontent.com"
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">Client Secret Google</label>
+                      <div className="relative">
+                        <input
+                          type={showGmailSecret ? 'text' : 'password'}
+                          required
+                          value={gmailForm.clientSecret}
+                          onChange={(e) => setGmailForm({ ...gmailForm, clientSecret: e.target.value })}
+                          placeholder="GOCSPX-xxxx"
+                          className="w-full rounded-lg border border-border bg-background pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40 font-mono"
+                        />
+                        <button type="button" onClick={() => setShowGmailSecret(!showGmailSecret)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1">
+                          {showGmailSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">Refresh Token OAuth2</label>
+                      <div className="relative">
+                        <input
+                          type={showGmailToken ? 'text' : 'password'}
+                          required
+                          value={gmailForm.refreshToken}
+                          onChange={(e) => setGmailForm({ ...gmailForm, refreshToken: e.target.value })}
+                          placeholder="1//04xxxx..."
+                          className="w-full rounded-lg border border-border bg-background pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40 font-mono"
+                        />
+                        <button type="button" onClick={() => setShowGmailToken(!showGmailToken)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1">
+                          {showGmailToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">
+                        Password Cadangan <span className="text-muted-foreground font-normal">(opsional)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showGmailPassword ? 'text' : 'password'}
+                          value={gmailForm.password}
+                          onChange={(e) => setGmailForm({ ...gmailForm, password: e.target.value })}
+                          placeholder="Password akun (opsional)"
+                          className="w-full rounded-lg border border-border bg-background pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40 font-mono"
+                        />
+                        <button type="button" onClick={() => setShowGmailPassword(!showGmailPassword)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1">
+                          {showGmailPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <Button type="submit" className="w-full bg-rose-600 hover:bg-rose-700 text-white font-medium gap-2 pt-2" disabled={saving}>
+                      {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Key className="h-4 w-4" />}
+                      {saving ? 'Menyimpan Akun...' : 'Simpan & Hubungkan Akun Gmail'}
+                    </Button>
+                  </form>
+                )}
+
+                {/* GMAIL IMAP */}
+                {gmailSubMethod === 'imap' && (
+                  <form onSubmit={onAddAccount} className="space-y-3.5 pt-1">
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+                      <div className="flex items-start gap-2">
+                        <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="space-y-1">
+                          <p className="font-semibold">Gunakan Sandi Aplikasi Google (App Password)</p>
+                          <p className="text-[11px] leading-relaxed text-muted-foreground dark:text-amber-200/80">
+                            Aktifkan 2-Step Verification pada Akun Google Anda, lalu buat Sandi Aplikasi 16-karakter khusus untuk Mail.
+                          </p>
+                          <a
+                            href="https://myaccount.google.com/apppasswords"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400 hover:underline pt-0.5"
+                          >
+                            <span>Buka Pengaturan App Password Google</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-foreground">Sandi Aplikasi (16 Karakter)</label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={imapForm.password}
+                          onChange={(e) => setImapForm({ ...imapForm, password: e.target.value })}
+                          placeholder="xxxx xxxx xxxx xxxx"
+                          className="w-full rounded-lg border border-border bg-background pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40 font-mono tracking-wider"
+                        />
+                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1">
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <Button type="submit" className="w-full bg-rose-600 hover:bg-rose-700 text-white font-medium gap-2 mt-3" disabled={saving}>
+                      {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Key className="h-4 w-4" />}
+                      {saving ? 'Memverifikasi & Menghubungkan...' : 'Masuk via IMAP Google'}
+                    </Button>
+                  </form>
+                )}
+              </div>
+            )}
+
             {/* IMAP PROVIDER */}
-            {provider !== 'outlook' && (
+            {provider !== 'outlook' && provider !== 'gmail' && (
               <form onSubmit={onAddAccount} className="space-y-3.5 pt-1">
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
                   <div className="flex items-start gap-2">
@@ -447,7 +740,7 @@ export function AddAccountModal({
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-foreground">
-                    {provider === 'gmail' || provider === 'yahoo' || provider === 'icloud'
+                    {provider === 'yahoo' || provider === 'icloud'
                       ? 'Sandi Aplikasi (16 Karakter)'
                       : 'Kata Sandi Email'}
                   </label>
@@ -458,7 +751,7 @@ export function AddAccountModal({
                       value={imapForm.password}
                       onChange={(e) => setImapForm({ ...imapForm, password: e.target.value })}
                       placeholder={
-                        provider === 'gmail' || provider === 'yahoo' || provider === 'icloud'
+                        provider === 'yahoo' || provider === 'icloud'
                           ? 'xxxx xxxx xxxx xxxx'
                           : 'Kata sandi email Anda'
                       }

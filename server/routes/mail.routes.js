@@ -7,6 +7,7 @@ import { simpleParser } from 'mailparser'
 import { db } from '../db.js'
 import { appOrigin, parseCookies, requireSameOrigin, requireUser, sessionCookieName, hashToken } from '../middleware/auth.js'
 import { getManager as getOutlookManager, outlookErrorStatus } from '../outlook/outlook.routes.js'
+import { getManager as getGmailManager, gmailErrorStatus } from '../gmail/gmail.routes.js'
 
 const router = Router()
 
@@ -372,6 +373,28 @@ router.get('/accounts/:id/messages', requireUser, async (req, res) => {
     }
   }
 
+  if (account.provider === 'gmail_api') {
+    try {
+      const manager = getGmailManager(account)
+      const rawMessages = await manager.getInboxMessages(20)
+      const messages = rawMessages.map((m) => ({
+        uid: m.id,
+        subject: m.subject || '(Tanpa subjek)',
+        from: m.from ? [{ name: m.fromName || '', address: m.from }] : [],
+        date: m.receivedDateTime || null,
+        unread: !m.isRead,
+        snippet: m.bodyPreview || '',
+      }))
+      return res.json({ messages })
+    } catch (error) {
+      const { status, code } = gmailErrorStatus(error)
+      return res.status(status).json({
+        error: error instanceof Error ? error.message : 'Gagal mengambil inbox Gmail.',
+        code,
+      })
+    }
+  }
+
   try {
     const messages = await withImapMailbox(account, async (client) => {
       const total = client.mailbox.exists
@@ -421,6 +444,19 @@ router.get('/accounts/:id/messages/:uid', requireUser, async (req, res) => {
       const { status, code } = outlookErrorStatus(error)
       return res.status(status).json({
         error: error instanceof Error ? error.message : 'Gagal membuka email Outlook.',
+        code,
+      })
+    }
+  }
+
+  if (account.provider === 'gmail_api') {
+    try {
+      const message = await getGmailManager(account).getMessage(req.params.uid)
+      return res.json({ message })
+    } catch (error) {
+      const { status, code } = gmailErrorStatus(error)
+      return res.status(status).json({
+        error: error instanceof Error ? error.message : 'Gagal membuka email Gmail.',
         code,
       })
     }

@@ -1,4 +1,4 @@
-import dotenv from 'dotenv'
+import './env.js'
 import express from 'express'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,11 +7,9 @@ import authRoutes, { googleEnabled } from './routes/auth.routes.js'
 import invoiceRoutes from './routes/invoice.routes.js'
 import mailRoutes from './routes/mail.routes.js'
 import outlookRoutes from './outlook/outlook.routes.js'
+import gmailRoutes from './gmail/gmail.routes.js'
 import aiRoutes from './routes/ai.routes.js'
 import adminRoutes from './routes/admin.routes.js'
-
-dotenv.config({ path: '.env.local' })
-dotenv.config()
 
 const app = express()
 const port = Number(process.env.API_PORT || 3001)
@@ -25,6 +23,7 @@ app.use('/api', authRoutes)
 app.use('/api/invoices', invoiceRoutes)
 app.use('/api/mail', mailRoutes)
 app.use('/api/outlook', outlookRoutes)
+app.use('/api/gmail', gmailRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/admin', adminRoutes)
 

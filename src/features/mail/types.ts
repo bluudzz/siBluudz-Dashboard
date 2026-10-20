@@ -34,6 +34,7 @@ export interface AccountCredentials {
   password?: string
   refresh_token?: string
   client_id?: string
+  client_secret?: string
   pipe_line?: string
 }
 
