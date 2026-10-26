@@ -1,18 +1,21 @@
 import * as React from 'react'
 import {
+  ArrowUpRight,
+  ExternalLink,
+  FileEdit,
+  ListFilter,
   Maximize2,
   Minimize2,
-  ExternalLink,
-  ListFilter,
-  FileEdit,
-  ArrowLeft,
-  Receipt,
+  PlusCircle,
+  RefreshCw,
+  Search,
+  X,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { useUser } from '@/context/UserContext'
-import { InvoicesListPage } from './InvoicesListPage'
-import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { InvoicesListPage, type InvoiceFilter } from './InvoicesListPage'
+import { calculateInvoiceTotal, formatMoney, isQuotation } from './invoice-utils'
+import './invoice-workspace.css'
 
 interface InvoicePageProps {
   initialInvoiceId?: string | null
@@ -22,16 +25,16 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
   const [view, setView] = React.useState<'list' | 'builder'>(initialInvoiceId ? 'builder' : 'list')
   const [isFullscreen, setIsFullscreen] = React.useState(false)
   const [currentInvoiceId, setCurrentInvoiceId] = React.useState<string | null>(initialInvoiceId || null)
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = React.useState('')
+  const [filterType, setFilterType] = React.useState<InvoiceFilter>('all')
+  const [editorKey, setEditorKey] = React.useState(0)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
   const { profile, invoices } = useUser()
 
-  const toggleFullscreen = () => {
-    setIsFullscreen((prev) => !prev)
-  }
+  const toggleFullscreen = () => setIsFullscreen((prev) => !prev)
 
-  const openInNewTab = () => {
-    window.open('/invoice-app/index.html', '_blank')
-  }
+  const openInNewTab = () => window.open('/invoice-app/index.html', '_blank')
 
   const handleOpenEditor = (invoiceId?: string) => {
     setView('builder')
@@ -39,13 +42,7 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
       setCurrentInvoiceId(invoiceId)
       const sendLoad = () => {
         try {
-          iframeRef.current?.contentWindow?.postMessage(
-            {
-              type: 'LOAD_INVOICE',
-              invoiceId,
-            },
-            window.location.origin
-          )
+          iframeRef.current?.contentWindow?.postMessage({ type: 'LOAD_INVOICE', invoiceId }, window.location.origin)
         } catch (e) {
           console.error('Error posting message to iframe:', e)
         }
@@ -55,36 +52,28 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
     }
   }
 
-  // Update view if initialInvoiceId changes
-  React.useEffect(() => {
+  // React's "adjust state when a prop changes" pattern: no effect needed.
+  const [prevInitialId, setPrevInitialId] = React.useState(initialInvoiceId)
+  if (initialInvoiceId !== prevInitialId) {
+    setPrevInitialId(initialInvoiceId)
     if (initialInvoiceId) {
-      handleOpenEditor(initialInvoiceId)
+      setView('builder')
+      setCurrentInvoiceId(initialInvoiceId)
     }
-  }, [initialInvoiceId])
+  }
 
-  // Sync profile and initial invoice to the editor iframe
+  const lastLoadedInvoiceIdRef = React.useRef<string | null>(null)
   React.useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe) return
 
     const syncProfile = () => {
       try {
-        iframe.contentWindow?.postMessage(
-          {
-            type: 'SYNC_USER_PROFILE',
-            profile,
-          },
-          window.location.origin
-        )
+        iframe.contentWindow?.postMessage({ type: 'SYNC_USER_PROFILE', profile }, window.location.origin)
         const targetId = currentInvoiceId || initialInvoiceId
-        if (targetId) {
-          iframe.contentWindow?.postMessage(
-            {
-              type: 'LOAD_INVOICE',
-              invoiceId: targetId,
-            },
-            window.location.origin
-          )
+        if (targetId && lastLoadedInvoiceIdRef.current !== targetId) {
+          lastLoadedInvoiceIdRef.current = targetId
+          iframe.contentWindow?.postMessage({ type: 'LOAD_INVOICE', invoiceId: targetId }, window.location.origin)
         }
       } catch (e) {
         console.error('Error posting message to iframe:', e)
@@ -93,22 +82,17 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
 
     iframe.addEventListener('load', syncProfile)
     syncProfile()
-
-    const timer = setTimeout(syncProfile, 350)
-    return () => {
-      iframe.removeEventListener('load', syncProfile)
-      clearTimeout(timer)
-    }
+    return () => iframe.removeEventListener('load', syncProfile)
   }, [profile, currentInvoiceId, initialInvoiceId])
 
-  // Sync invoices list changes to editor
   const lastSyncedInvoicesJsonRef = React.useRef<string>('')
   React.useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe) return
 
     const syncInvoices = () => {
-      const invoicesJson = JSON.stringify(invoices)
+      const stripped = invoices.map(({ updatedAt: _updatedAt, ...rest }) => rest)
+      const invoicesJson = JSON.stringify(stripped)
       if (lastSyncedInvoicesJsonRef.current === invoicesJson) return
       lastSyncedInvoicesJsonRef.current = invoicesJson
       iframe.contentWindow?.postMessage({ type: 'SYNC_INVOICES', invoices }, window.location.origin)
@@ -116,12 +100,9 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
 
     iframe.addEventListener('load', syncInvoices)
     syncInvoices()
-    return () => {
-      iframe.removeEventListener('load', syncInvoices)
-    }
+    return () => iframe.removeEventListener('load', syncInvoices)
   }, [invoices])
 
-  // Handle print requests from iframe
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'PRINT_INVOICE_REQUEST') {
@@ -132,137 +113,190 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
         }
       }
     }
-
     window.addEventListener('message', handleMessage)
-    return () => {
-      window.removeEventListener('message', handleMessage)
-    }
+    return () => window.removeEventListener('message', handleMessage)
   }, [])
 
+  const totals = React.useMemo(() => {
+    let value = 0
+    let quotations = 0
+    invoices.forEach((inv) => {
+      // Mixed currencies can't be summed meaningfully; the headline total counts rupiah documents only.
+      if (!inv.currency || inv.currency === 'IDR') value += calculateInvoiceTotal(inv)
+      if (isQuotation(inv)) quotations += 1
+    })
+    return { value, quotations, invoices: invoices.length - quotations, all: invoices.length }
+  }, [invoices])
+
+  const filterButtons: { key: InvoiceFilter; label: string; count: number }[] = [
+    { key: 'all', label: 'Semua dokumen', count: totals.all },
+    { key: 'invoice', label: 'Invoice', count: totals.invoices },
+    { key: 'quotation', label: 'Quotation', count: totals.quotations },
+  ]
+
+  const openBuilder = () => {
+    setCurrentInvoiceId(null)
+    setView('builder')
+  }
+
+  const resetEditor = () => {
+    if (!window.confirm('Muat ulang editor? Perubahan yang belum disimpan akan hilang.')) return
+    setCurrentInvoiceId(null)
+    setEditorKey((key) => key + 1)
+  }
+
   return (
-    <div className="space-y-4">
-      {/* Sub-navigation tabs (Hidden when Fullscreen) */}
-      {!isFullscreen && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary">
-              <Receipt className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                Invoice App
-                <Badge variant="outline" className="text-[11px] font-normal py-0">
-                  {view === 'list' ? 'Daftar Dokumen' : 'Editor Mode'}
-                </Badge>
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Satu aplikasi terpadu untuk mengelola riwayat tagihan & mendesain dokumen invoice / quotation PDF.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 self-start sm:self-auto bg-muted/60 p-1 rounded-xl border border-border/60">
-            <button
-              onClick={() => setView('list')}
-              className={cn(
-                'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-2 cursor-pointer',
-                view === 'list'
-                  ? 'bg-card text-foreground shadow-xs font-semibold'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <ListFilter className="h-3.5 w-3.5" />
-              Daftar Invoice
-              <span className="ml-0.5 rounded-full bg-primary/15 text-primary text-[10px] font-bold px-1.5 py-0.2">
-                {invoices.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setView('builder')}
-              className={cn(
-                'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-2 cursor-pointer',
-                view === 'builder'
-                  ? 'bg-card text-foreground shadow-xs font-semibold'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <FileEdit className="h-3.5 w-3.5" />
-              Invoice Builder
-            </button>
-          </div>
+    <div className="iv-workspace">
+      <header className="iv-page-header">
+        <div>
+          <h1>Invoice</h1>
+          <p>Kelola riwayat tagihan, periksa detail, dan susun dokumen PDF dalam satu tempat.</p>
         </div>
-      )}
+        <div className="iv-header-actions">
+          <Button data-testid="new-invoice" onClick={openBuilder}>
+            <PlusCircle size={16} />
+            Dokumen baru
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={resetEditor}
+            disabled={view !== 'builder'}
+            title="Muat ulang editor kosong"
+          >
+            <RefreshCw size={16} />
+            Reset editor
+          </Button>
+        </div>
+      </header>
 
-      {/* View 1: Daftar Invoice */}
-      <div className={view === 'list' ? 'block' : 'hidden'}>
-        <InvoicesListPage onOpenInvoiceEditor={handleOpenEditor} />
+      <div className="iv-summary" role="status">
+        <span className="iv-stat"><strong>{totals.all}</strong> dokumen</span>
+        <span className="iv-stat"><strong>{totals.invoices}</strong> invoice</span>
+        <span className="iv-stat"><strong>{totals.quotations}</strong> quotation</span>
+        <span className="iv-stat iv-stat-value">Nilai tagihan IDR <strong>{formatMoney(totals.value)}</strong></span>
       </div>
 
-      {/* View 2: Invoice Builder (Iframe preserved to retain edits) */}
-      <div
-        className={cn(
-          'flex-col',
-          view === 'builder' ? 'flex' : 'hidden',
-          isFullscreen
-            ? 'fixed inset-0 z-[100] bg-background'
-            : 'h-[calc(100vh-10rem)]'
-        )}
-      >
-        {/* Editor Sub-Toolbar */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card rounded-t-xl shrink-0">
-          <div className="flex items-center gap-2">
-            {!isFullscreen && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setView('list')}
-                className="h-8 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground mr-1"
+      <div className={`iv-studio${isFullscreen ? ' is-fullscreen' : ''}`}>
+        <aside className="iv-rail" aria-label="Navigasi invoice">
+          <div className="iv-rail-heading">
+            <h2>Ruang kerja</h2>
+          </div>
+
+          <div className="iv-rail-group">
+            <h3>Halaman</h3>
+            <button
+              type="button"
+              className={view === 'list' ? 'is-selected' : ''}
+              aria-pressed={view === 'list'}
+              onClick={() => setView('list')}
+            >
+              <span><ListFilter size={15} />Daftar dokumen</span>
+              <span className="iv-rail-count">{totals.all}</span>
+            </button>
+            <button
+              type="button"
+              className={view === 'builder' ? 'is-selected' : ''}
+              aria-pressed={view === 'builder'}
+              onClick={() => setView('builder')}
+            >
+              <span><FileEdit size={15} />Invoice Builder</span>
+              {view === 'builder' && <ArrowUpRight size={14} />}
+            </button>
+          </div>
+
+          <div className="iv-rail-group">
+            <h3>Filter</h3>
+            {filterButtons.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                data-filter={item.key}
+                className={filterType === item.key ? 'is-selected' : ''}
+                aria-pressed={filterType === item.key}
+                onClick={() => {
+                  setFilterType(item.key)
+                  setView('list')
+                }}
               >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Kembali ke Daftar
-              </Button>
+                <span>{item.label}</span>
+                <span className="iv-rail-count">{item.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <p className="iv-rail-note">Pratinjau dokumen tidak mengubah data. Perubahan hanya tersimpan lewat Invoice Builder.</p>
+        </aside>
+
+        <div className={`iv-sheet${view === 'builder' ? ' is-builder' : ''}`}>
+          <div className="iv-sheet-tools">
+            {view === 'list' ? (
+              <label className="iv-search">
+                <Search size={15} />
+                <input
+                  aria-label="Cari dokumen invoice"
+                  placeholder="Cari nomor, klien, atau perihal…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button type="button" aria-label="Hapus pencarian" onClick={() => setSearchQuery('')}>
+                    <X size={14} />
+                  </button>
+                )}
+              </label>
+            ) : (
+              <span className="iv-muted iv-builder-label">
+                InvoiceFlow — Invoice &amp; Quotation Builder
+              </span>
             )}
-            <div className="h-3 w-3 rounded-full bg-red-500/80" />
-            <div className="h-3 w-3 rounded-full bg-yellow-500/80" />
-            <div className="h-3 w-3 rounded-full bg-green-500/80" />
-            <span className="ml-2 text-xs sm:text-sm font-medium text-muted-foreground truncate">
-              InvoiceFlow — Invoice & Quotation Builder
-            </span>
+
+            {view === 'list' ? (
+              <Button size="sm" variant="outline" onClick={openBuilder}>
+                <PlusCircle size={15} />
+                Buat dokumen
+              </Button>
+            ) : (
+              <div className="iv-sheet-actions">
+                <button type="button" className="iv-icon-button" onClick={openInNewTab} title="Buka di tab baru">
+                  <ExternalLink size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="iv-icon-button"
+                  onClick={toggleFullscreen}
+                  title={isFullscreen ? 'Keluar fullscreen' : 'Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              onClick={openInNewTab}
-              className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-              title="Buka di tab baru"
-            >
-              <ExternalLink className="h-4 w-4" />
-            </button>
-            <button
-              onClick={toggleFullscreen}
-              className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-              title={isFullscreen ? 'Keluar fullscreen' : 'Fullscreen'}
-            >
-              {isFullscreen ? (
-                <Minimize2 className="h-4 w-4" />
-              ) : (
-                <Maximize2 className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Iframe */}
-        <div className="flex-1 overflow-hidden rounded-b-xl border border-t-0 border-border">
-          <iframe
-            id="invoice-editor"
-            ref={iframeRef}
-            src="/invoice-app/index.html"
-            title="Invoice Builder"
-            className="w-full h-full border-0 bg-white"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads allow-modals"
-          />
+          {view === 'list' ? (
+            <div className="iv-sheet-body">
+              <InvoicesListPage
+                invoices={invoices}
+                searchQuery={searchQuery}
+                filterType={filterType}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onOpenInvoiceEditor={handleOpenEditor}
+              />
+            </div>
+          ) : (
+            <div className="iv-builder">
+              <iframe
+                key={editorKey}
+                id="invoice-editor"
+                ref={iframeRef}
+                src="/invoice-app/index.html"
+                title="Invoice Builder"
+                className="iv-frame"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads allow-modals"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

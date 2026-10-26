@@ -1,4 +1,4 @@
-import type { ApiError, EmailProvider, ProviderConfig } from './types'
+import type { ApiError, EmailProvider, MailMessage, ProviderConfig } from './types'
 
 export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -20,6 +20,21 @@ export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T>
 export function formatDate(value: string | null) {
   if (!value) return 'Tanggal tidak tersedia'
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+}
+
+// Compact list label: today HH:mm, this year d MMM, otherwise d MMM yyyy.
+export function formatListDate(value: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  if (sameDay) return new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(date)
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  }).format(date)
 }
 
 export const PROVIDER_CONFIGS: Record<EmailProvider, ProviderConfig> = {
@@ -66,6 +81,21 @@ export const PROVIDER_CONFIGS: Record<EmailProvider, ProviderConfig> = {
     host: '',
     hint: 'Masukkan alamat Host IMAP dan port 993 dari hosting / penyedia email Anda.',
   },
+}
+
+export function providerLabel(provider?: string) {
+  if (provider === 'outlook_graph') return 'Graph OAuth'
+  if (provider === 'gmail_api') return 'Gmail API'
+  return 'IMAP'
+}
+
+export function filterMessages(messages: MailMessage[], query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return messages
+  return messages.filter((message) => {
+    const senders = (message.from || []).map((person) => `${person.name} ${person.address}`).join(' ')
+    return `${message.subject} ${senders} ${message.snippet ?? ''}`.toLowerCase().includes(q)
+  })
 }
 
 export function detectProviderFromEmail(email: string): EmailProvider {

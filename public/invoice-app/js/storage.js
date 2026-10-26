@@ -49,10 +49,13 @@ const StorageManager = {
     try {
       const list = StorageManager.getSavedInvoices();
       const existingIndex = list.findIndex(item => item.id === invoice.id);
+      const now = new Date().toISOString();
+      invoice.updatedAt = now;
       if (existingIndex >= 0) {
-        list[existingIndex] = { ...invoice, updatedAt: new Date().toISOString() };
+        list[existingIndex] = { ...invoice, updatedAt: now };
       } else {
-        list.unshift({ ...invoice, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        if (!invoice.createdAt) invoice.createdAt = now;
+        list.unshift({ ...invoice, createdAt: invoice.createdAt, updatedAt: now });
       }
       StorageManager.saveAllInvoices(list);
       StorageManager.setActiveInvoiceId(invoice.id);

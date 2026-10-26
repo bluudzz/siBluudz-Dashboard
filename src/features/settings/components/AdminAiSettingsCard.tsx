@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/Input'
 export interface AiConfigSettings {
   baseUrl: string
   model: string
+  imageModel?: string
   freeDailyLimit: number
   proDailyLimit: number
   hasApiKey: boolean
@@ -37,6 +38,7 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
   const [apiKeyInput, setApiKeyInput] = React.useState('')
   const [showApiKey, setShowApiKey] = React.useState(false)
   const [modelInput, setModelInput] = React.useState('')
+  const [imageModelInput, setImageModelInput] = React.useState('')
   const [availableModels, setAvailableModels] = React.useState<string[]>([])
   const [fetchingModels, setFetchingModels] = React.useState(false)
   const [isCustomModelMode, setIsCustomModelMode] = React.useState(false)
@@ -62,6 +64,7 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
       setAiSettings(data)
       setBaseUrlInput(data.baseUrl || 'https://api.9router.com/v1')
       setModelInput(data.model || '')
+      setImageModelInput(data.imageModel || '')
       if (Array.isArray(data.availableModels) && data.availableModels.length > 0) {
         setAvailableModels(data.availableModels)
       }
@@ -124,12 +127,14 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
       baseUrl?: string
       apiKey?: string
       model?: string
+      imageModel?: string
       freeDailyLimit?: number
       proDailyLimit?: number
       availableModels?: string[]
     } = {
       baseUrl: baseUrlInput.trim(),
       model: modelInput.trim(),
+      imageModel: imageModelInput.trim(),
       freeDailyLimit: Math.max(0, parseInt(freeLimitInput, 10) || 5),
       proDailyLimit: Math.max(0, parseInt(proLimitInput, 10) || 100),
       availableModels: availableModels.length > 0 ? availableModels : undefined,
@@ -151,9 +156,12 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
         throw new Error(data?.error || `Gagal menyimpan pengaturan (${res.status}). Pastikan backend server aktif.`)
       }
 
-      setAiSettings(data.settings)
-      if (Array.isArray(data.settings?.availableModels)) {
-        setAvailableModels(data.settings.availableModels)
+      const savedConfig = data.config || data.settings
+      if (savedConfig) {
+        setAiSettings(savedConfig)
+        if (Array.isArray(savedConfig.availableModels)) {
+          setAvailableModels(savedConfig.availableModels)
+        }
       }
       setApiKeyInput('')
       setSettingsMessage('Pengaturan 9router & kuota AI berhasil disimpan!')
@@ -336,6 +344,22 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
                 </p>
               </div>
             )}
+          </div>
+
+          {/* Model AI Image (Ganti Produk) */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground">
+              Model Image / Vision (Ganti Produk di Foto)
+            </label>
+            <Input
+              value={imageModelInput}
+              onChange={(e) => setImageModelInput(e.target.value)}
+              placeholder="ag/gemini-3.1-flash-image (default jika kosong)"
+              className="font-mono text-xs"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Model yang digunakan pada fitur &quot;Ganti Produk di Foto&quot; (misal: ag/gemini-3.1-flash-image atau model image 9router lainnya).
+            </p>
           </div>
 
           {/* API Key */}

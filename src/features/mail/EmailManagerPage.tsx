@@ -1,14 +1,5 @@
 import * as React from 'react'
-import { motion } from 'framer-motion'
-import {
-  Mail,
-  Plus,
-  Download,
-  Sparkles,
-  ShieldCheck,
-  CheckCircle2,
-  X,
-} from 'lucide-react'
+import { Plus, Download, ShieldCheck, Sparkles, X, Search, Key, Trash2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useUser } from '@/context/UserContext'
 import { useMailAccounts } from './hooks/useMailAccounts'
@@ -18,9 +9,12 @@ import { InboxPanel } from './components/InboxPanel'
 import { AddAccountModal } from './components/AddAccountModal'
 import { CredentialsModal } from './components/CredentialsModal'
 import { OtpModal } from './components/OtpModal'
+import { filterMessages } from './utils'
+import './mail-workspace.css'
 
 export function EmailManagerPage() {
   const { profile } = useUser()
+  const [query, setQuery] = React.useState('')
 
   const mail = useMailAccounts()
   const addAccount = useAddAccount({
@@ -32,14 +26,6 @@ export function EmailManagerPage() {
     setAccounts: mail.setAccounts,
     setLoadingInbox: mail.setLoadingInbox,
   })
-
-  React.useEffect(() => {
-    void mail.loadAccounts()
-  }, [mail.loadAccounts])
-
-  React.useEffect(() => {
-    if (mail.selectedAccountId) void mail.loadInbox(mail.selectedAccountId)
-  }, [mail.selectedAccountId, mail.loadInbox])
 
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -57,142 +43,168 @@ export function EmailManagerPage() {
       mail.setError(`Gagal menghubungkan Google OAuth: ${err || 'Otorisasi dibatalkan'}`)
       window.history.replaceState({}, document.title, window.location.pathname)
     }
-  }, [mail])
+    // Only run for the OAuth redirect query on mount.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const visibleMessages = React.useMemo(() => filterMessages(mail.messages, query), [mail.messages, query])
+
+  const refreshInbox = () => {
+    mail.setLoadingInbox(true)
+    void mail.loadInbox(mail.selectedAccountId)
+  }
+
+  const openAddAccount = () => {
+    addAccount.setAddAccountModalOpen(true)
+    mail.setError('')
+    mail.setNotice('')
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="em-workspace">
+      <header className="em-page-header">
         <div>
-          <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight text-foreground">
-            <Mail className="h-6 w-6 text-blue-500" />
-            Email Manager
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Kelola akun email Outlook / Hotmail (OAuth2 Graph), Gmail (OAuth2 API), dan IMAP dengan penyimpanan kredensial aman.
-          </p>
+          <h1>Email Manager</h1>
+          <p>Kelola akun Outlook Graph, Gmail API, dan IMAP, lalu baca inbox-nya di satu ruang kerja.</p>
         </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {mail.selectedAccount && (mail.isOutlookGraph || mail.isGmailApi) && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  mail.setOtpModalOpen(true)
-                  void mail.handleFetchOtp()
-                }}
-                className="gap-1.5 border-blue-500/40 bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-300"
-              >
-                <Sparkles className="h-4 w-4 text-blue-500" />
-                Cek OTP
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void mail.handleTestRefreshToken(mail.selectedAccount!.id)}
-                disabled={mail.refreshingToken}
-                className="gap-1.5 border-border"
-              >
-                <ShieldCheck className={`h-4 w-4 ${mail.refreshingToken ? 'animate-spin text-primary' : 'text-emerald-500'}`} />
-                Test Token
-              </Button>
-            </>
-          )}
-
+        <div className="em-header-actions">
+          <Button data-testid="add-account" onClick={openAddAccount}>
+            <Plus size={16} />
+            Tambah akun
+          </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={mail.handleExportAll}
             disabled={mail.exportingAll || mail.accounts.length === 0}
-            className="gap-1.5 border-border hover:bg-muted"
-            title="Download file .txt format pipa (email|password|refresh_token|client_id)"
+            title="Unduh .txt format pipa (email|password|refresh_token|client_id)"
           >
-            <Download className={`h-4 w-4 ${mail.exportingAll ? 'animate-bounce text-primary' : 'text-muted-foreground'}`} />
-            <span>Export Semua (.txt)</span>
-          </Button>
-
-          <Button
-            size="sm"
-            onClick={() => {
-              addAccount.setAddAccountModalOpen(true)
-              mail.setError('')
-              mail.setNotice('')
-            }}
-            className="gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Tambah Akun
+            <Download size={15} />
+            Export
           </Button>
         </div>
+      </header>
+
+      <div className="em-status" role="status">
+        <span className="em-stat"><strong>{mail.accounts.length}</strong> akun terhubung</span>
+        {mail.selectedAccount ? (
+          <span className="em-stat">Aktif <strong>{mail.selectedAccount.email}</strong></span>
+        ) : (
+          <span className="em-stat">Belum ada akun dipilih</span>
+        )}
+        {mail.selectedAccount && (
+          <span className="em-actions-inline">
+            {(mail.isOutlookGraph || mail.isGmailApi) && (
+              <>
+                <button
+                  type="button"
+                  className="em-tool-button"
+                  onClick={() => {
+                    mail.setOtpModalOpen(true)
+                    void mail.handleFetchOtp()
+                  }}
+                >
+                  <Sparkles size={14} />
+                  Cek OTP
+                </button>
+                <button
+                  type="button"
+                  className="em-tool-button"
+                  onClick={() => void mail.handleTestRefreshToken(mail.selectedAccount!.id)}
+                  disabled={mail.refreshingToken}
+                >
+                  <ShieldCheck size={14} className={mail.refreshingToken ? 'animate-spin' : ''} />
+                  Test token
+                </button>
+              </>
+            )}
+            <button type="button" className="em-tool-button" onClick={() => void mail.handleViewCredentials(mail.selectedAccount!)}>
+              <Key size={14} />
+              Kredensial
+            </button>
+            <button type="button" className="em-tool-button is-danger" onClick={() => void mail.handleDeleteAccount(mail.selectedAccount!)}>
+              <Trash2 size={14} />
+              Hapus akun
+            </button>
+          </span>
+        )}
       </div>
 
-      {/* Notifications */}
       {mail.error && (
-        <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          role="alert"
-          className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-300 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">Perhatian:</span>
-            <span>{mail.error}</span>
-          </div>
-          <button type="button" onClick={() => mail.setError('')} className="text-rose-400 hover:text-rose-200">
-            <X className="h-4 w-4" />
-          </button>
-        </motion.div>
+        <div className="em-notice is-error" role="alert">
+          <span>{mail.error}</span>
+          <button type="button" aria-label="Tutup pesan galat" onClick={() => mail.setError('')}><X size={14} /></button>
+        </div>
       )}
       {mail.notice && (
-        <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          role="status"
-          className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-            <span>{mail.notice}</span>
-          </div>
-          <button type="button" onClick={() => mail.setNotice('')} className="text-emerald-400 hover:text-emerald-200">
-            <X className="h-4 w-4" />
-          </button>
-        </motion.div>
+        <div className="em-notice is-success" role="status">
+          <span>{mail.notice}</span>
+          <button type="button" aria-label="Tutup pemberitahuan" onClick={() => mail.setNotice('')}><X size={14} /></button>
+        </div>
       )}
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <div className="space-y-4 xl:col-span-1">
+      <div className="em-studio">
+        <aside className="em-rail" aria-label="Akun dan tindakan email">
+          <div className="em-rail-heading">
+            <h2>Kotak masuk</h2>
+            <span>{mail.accounts.length}</span>
+          </div>
           <AccountsList
             accounts={mail.accounts}
             selectedAccountId={mail.selectedAccountId}
             loadingAccounts={mail.loadingAccounts}
-            onSelectAccount={mail.setSelectedAccountId}
+            onSelectAccount={(id) => {
+              setQuery('')
+              mail.setSelectedAccountId(id)
+            }}
             onSetLoadingInbox={mail.setLoadingInbox}
-            onViewCredentials={mail.handleViewCredentials}
-            onDeleteAccount={mail.handleDeleteAccount}
-            onAddAccount={() => addAccount.setAddAccountModalOpen(true)}
+            onAddAccount={openAddAccount}
+          />
+          <p className="em-rail-note">Kredensial tidak pernah ditampilkan otomatis. Buka lewat tombol Kredensial dan tutup kembali setelah selesai.</p>
+        </aside>
+
+        <div className="em-sheet">
+          <div className="em-sheet-tools">
+            <label className="em-search">
+              <Search size={15} />
+              <input
+                aria-label="Cari email"
+                placeholder="Cari subjek, pengirim, atau cuplikan…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                disabled={!mail.selectedAccount}
+              />
+              {query && (
+                <button type="button" aria-label="Hapus pencarian" onClick={() => setQuery('')}>
+                  <X size={14} />
+                </button>
+              )}
+            </label>
+            <button
+              type="button"
+              className="em-tool-button"
+              onClick={refreshInbox}
+              disabled={!mail.selectedAccount || mail.loadingInbox}
+            >
+              <RefreshCw size={14} className={mail.loadingInbox ? 'animate-spin' : ''} />
+              Muat ulang
+            </button>
+          </div>
+
+          <InboxPanel
+            selectedAccount={mail.selectedAccount}
+            isOutlookGraph={mail.isOutlookGraph}
+            query={query}
+            messages={visibleMessages}
+            totalMessages={mail.messages.length}
+            selectedMessage={mail.selectedMessage}
+            loadingInbox={mail.loadingInbox}
+            onOpenMessage={mail.handleOpenMessage}
+            onCloseMessage={() => mail.setSelectedMessage(null)}
           />
         </div>
-
-        <InboxPanel
-          selectedAccount={mail.selectedAccount}
-          isOutlookGraph={mail.isOutlookGraph}
-          messages={mail.messages}
-          selectedMessage={mail.selectedMessage}
-          loadingInbox={mail.loadingInbox}
-          onRefreshInbox={() => {
-            mail.setLoadingInbox(true)
-            void mail.loadInbox(mail.selectedAccountId)
-          }}
-          onOpenMessage={mail.handleOpenMessage}
-          onCloseMessage={() => mail.setSelectedMessage(null)}
-        />
       </div>
 
-      {/* Modals */}
       <AddAccountModal
         open={addAccount.addAccountModalOpen}
         profileEmail={profile.email}

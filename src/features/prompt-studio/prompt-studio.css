@@ -1,0 +1,47 @@
+.prompt-studio { color: var(--foreground); font-size: 14px; }
+.ps-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 24px; }
+.ps-heading h1 { font-size: 26px; font-weight: 650; letter-spacing: -.025em; margin-bottom: 6px; }
+.ps-heading p, .ps-help, .ps-plan p { color: var(--muted-foreground); line-height: 1.65; }
+.ps-local { flex-shrink: 0; font-size: 12px; color: var(--muted-foreground); }
+.ps-flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; padding: 18px 0; margin-bottom: 18px; list-style: none; border-top: 1px solid var(--border); }
+.ps-flow strong, .ps-flow span { display: block; }
+.ps-flow strong { font-weight: 600; margin-bottom: 5px; }
+.ps-flow span { color: var(--muted-foreground); font-size: 12px; }
+/* Two columns share the full canvas: 42% + 58% of available width after a 16px gutter. */
+.ps-workspace { display: grid; grid-template-columns: minmax(0, .42fr) minmax(0, .58fr); gap: 16px; align-items: start; }
+.ps-brief, .ps-result { background: var(--card); border: 1px solid var(--border); border-radius: 16px; min-width: 0; padding: 24px; }
+.prompt-studio h2 { font-size: 16px; font-weight: 600; }
+.ps-brief h2 { margin-bottom: 20px; }
+.prompt-studio label { display: block; font-weight: 500; margin: 16px 0 8px; }
+.prompt-studio label span { color: var(--muted-foreground); font-size: 12px; margin-left: 5px; font-weight: 400; }
+.prompt-studio input, .prompt-studio textarea, .prompt-studio select { width: 100%; border: 1px solid var(--input); background: var(--background); color: var(--foreground); border-radius: 8px; padding: 10px 12px; min-width: 0; font: inherit; line-height: 1.6; }
+.prompt-studio textarea { resize: vertical; }
+.prompt-studio textarea::placeholder { color: var(--muted-foreground); opacity: 1; }
+.prompt-studio :is(button,input,textarea,select,summary):focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.ps-fields { display: grid; gap: 0; grid-template-columns: 1fr; }
+.ps-context { margin: 20px 0; }
+.ps-context summary { cursor: pointer; padding: 8px 0; }
+.ps-context summary span { display: block; margin: 4px 0 0 16px; color: var(--muted-foreground); font-size: 12px; }
+.ps-primary { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 44px; background: var(--foreground); color: var(--background); border-radius: 8px; font-weight: 600; padding: 10px 14px; cursor: pointer; }
+.prompt-studio button { transition: opacity .15s; }
+.prompt-studio button:hover { opacity: .8; }
+.prompt-studio button:disabled { opacity: .45; cursor: not-allowed; }
+.ps-help { font-size: 12px; margin-top: 12px; }
+.ps-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin: -8px 0 20px; }
+.ps-tabs button { background: transparent; min-height: 44px; padding: 10px 0; color: var(--muted-foreground); border-bottom: 2px solid transparent; cursor: pointer; }
+.ps-tabs button[aria-selected=true] { color: var(--foreground); border-color: var(--primary); }
+.ps-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.ps-actions { display: flex; gap: 6px; }
+.ps-actions button { display: flex; gap: 6px; align-items: center; justify-content: center; min-height: 40px; min-width: 40px; padding: 8px; border-radius: 6px; background: var(--secondary); cursor: pointer; }
+.ps-empty { background: var(--background); border-radius: 8px; padding: 28px 24px; line-height: 1.8; }
+.ps-empty h3 { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.ps-empty p { margin-bottom: 22px; }
+.ps-empty ul { list-style: disc; padding-left: 18px; color: var(--muted-foreground); }
+.prompt-studio .ps-output { min-height: 460px; font-size: 13px; line-height: 1.8; }
+.ps-notice { min-height: 20px; margin-top: 12px; color: var(--muted-foreground); font-size: 12px; }
+.ps-warning { padding: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
+.ps-plan { margin-bottom: 24px; }
+.ps-plan p { font-size: 12px; margin-bottom: 10px; }
+@media (max-width: 1100px) { .ps-workspace { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .ps-heading { align-items: start; flex-direction: column; gap: 6px; } .ps-heading h1 { font-size: 24px; } .ps-flow { grid-template-columns: 1fr; gap: 14px; } .ps-flow li { border-left: 2px solid var(--border); padding-left: 12px; } .ps-flow span { font-size: 12px; } .ps-brief, .ps-result { padding: 18px; } .ps-fields { grid-template-columns: 1fr; gap: 0; } .ps-result-heading { flex-wrap: wrap; } .ps-actions button { min-height: 44px; min-width: 44px; } .prompt-studio .ps-output { min-height: 360px; } }
+@media (prefers-reduced-motion: reduce) { .prompt-studio button { transition: none; } }

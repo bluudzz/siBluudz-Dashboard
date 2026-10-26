@@ -1,20 +1,15 @@
-import {
-  Inbox,
-  RefreshCw,
-  X,
-} from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { ArrowLeft, Inbox, RefreshCw, X } from 'lucide-react'
 import type { MailAccount, MailMessage, MailMessageDetail } from '../types'
-import { formatDate } from '../utils'
+import { formatDate, formatListDate } from '../utils'
 
 interface InboxPanelProps {
   selectedAccount: MailAccount | undefined
   isOutlookGraph: boolean
+  query: string
   messages: MailMessage[]
+  totalMessages: number
   selectedMessage: MailMessageDetail | null
   loadingInbox: boolean
-  onRefreshInbox: () => void
   onOpenMessage: (uid: number | string) => void
   onCloseMessage: () => void
 }
@@ -22,110 +17,101 @@ interface InboxPanelProps {
 export function InboxPanel({
   selectedAccount,
   isOutlookGraph,
+  query,
   messages,
+  totalMessages,
   selectedMessage,
   loadingInbox,
-  onRefreshInbox,
   onOpenMessage,
   onCloseMessage,
 }: InboxPanelProps) {
   return (
-    <Card className="min-h-[32rem] xl:col-span-2 border-border/70 shadow-sm backdrop-blur-sm flex flex-col">
-      <CardHeader className="border-b border-border/40 pb-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <Inbox className="h-4 w-4 text-blue-500" />
-              {selectedAccount ? `Inbox · ${selectedAccount.email}` : 'Inbox Email'}
-            </CardTitle>
-            <CardDescription className="text-xs mt-0.5">
-              {selectedAccount
-                ? isOutlookGraph
-                  ? 'Sinkronisasi instan via Microsoft Graph API (Otorisasi Publik).'
-                  : 'Menampilkan pesan terbaru dari folder INBOX.'
-                : 'Pilih atau tambahkan akun di sebelah kiri untuk melihat pesan.'}
-            </CardDescription>
-          </div>
-
-          {selectedAccount && (
-            <div className="flex items-center gap-2 pt-1 sm:pt-0">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRefreshInbox}
-                disabled={loadingInbox}
-                className="gap-1.5 text-xs font-medium border-border hover:bg-muted"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${loadingInbox ? 'animate-spin text-primary' : ''}`} />
-                Refresh Inbox
-              </Button>
-            </div>
-          )}
+    <div className={`em-split${selectedMessage ? ' has-detail' : ''}`}>
+      <section className="em-list" aria-label="Daftar email">
+        <div className="em-sheet-heading">
+          <h2>Inbox</h2>
+          <span>
+            {selectedAccount ? `${messages.length} dari ${totalMessages}` : '—'}
+          </span>
         </div>
-      </CardHeader>
+        <p className="em-list-sub">
+          {selectedAccount
+            ? `${selectedAccount.email}${isOutlookGraph ? ' · Graph API' : ''}`
+            : 'Belum ada akun dipilih'}
+        </p>
 
-      <CardContent className="p-0 flex-1 flex flex-col">
-        {selectedMessage ? (
-          <div className="space-y-4 p-5 flex-1">
-            <div className="flex items-start justify-between gap-3 border-b border-border/40 pb-4">
-              <div className="min-w-0">
-                <h2 className="break-words text-lg font-semibold text-foreground">{selectedMessage.subject}</h2>
-                <p className="mt-1 break-all text-xs text-muted-foreground">{selectedMessage.from}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{formatDate(selectedMessage.date)}</p>
-              </div>
-              <Button type="button" variant="ghost" size="icon" aria-label="Tutup email" onClick={onCloseMessage}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <pre className="max-h-[38rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-4 text-sm font-sans leading-relaxed">
-              {selectedMessage.text || '(Email ini tidak memiliki isi teks yang dapat ditampilkan.)'}
-            </pre>
-            <p className="text-[11px] text-muted-foreground">Isi email ditampilkan dalam format teks bersih untuk keamanan.</p>
+        {!selectedAccount ? (
+          <div className="em-empty-stack">
+            <Inbox size={18} />
+            <p>Pilih akun di rail kiri untuk membaca inbox.</p>
           </div>
         ) : loadingInbox ? (
-          <div className="flex flex-1 min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <RefreshCw className="h-4 w-4 animate-spin text-primary" />
-            Mengambil pesan dari Microsoft Graph / IMAP...
-          </div>
-        ) : !selectedAccount ? (
-          <div className="flex flex-1 min-h-64 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
-            <Inbox className="h-8 w-8 opacity-40 text-blue-500" />
-            <p className="text-sm">Belum ada akun email yang dipilih.</p>
+          <p className="em-empty"><RefreshCw size={13} className="animate-spin" /> Mengambil pesan…</p>
+        ) : totalMessages === 0 ? (
+          <div className="em-empty-stack">
+            <Inbox size={18} />
+            <p>Inbox kosong atau tidak ada email terbaru.</p>
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-1 min-h-64 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
-            <Inbox className="h-8 w-8 opacity-40 text-blue-500" />
-            <p className="text-sm font-medium">Inbox kosong atau tidak ada email terbaru.</p>
-          </div>
+          <p className="em-empty">Tidak ada email yang cocok dengan “{query}”.</p>
         ) : (
-          <div className="divide-y divide-border/50 overflow-y-auto max-h-[46rem]">
+          <div className="em-rows">
             {messages.map((message) => {
               const sender = Array.isArray(message.from) ? message.from[0] : null
               return (
                 <button
                   key={String(message.uid)}
                   type="button"
+                  data-uid={String(message.uid)}
+                  className={`em-row${message.unread ? ' is-unread' : ''}`}
                   onClick={() => void onOpenMessage(message.uid)}
-                  className="w-full p-4 text-left transition-colors hover:bg-accent/40 flex flex-col gap-1"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className={`min-w-0 truncate text-sm ${message.unread ? 'font-bold text-foreground' : 'font-medium text-foreground/80'}`}>
-                      {message.subject}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{formatDate(message.date)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {message.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />}
-                    <span className="truncate text-xs text-muted-foreground">
-                      {sender?.name ? `${sender.name} · ` : ''}{sender?.address || 'Pengirim tidak diketahui'}
-                    </span>
-                  </div>
+                  <span className="em-row-top">
+                    {message.unread && <span className="em-dot" aria-label="Belum dibaca" />}
+                    <span className="em-row-subject">{message.subject || '(Tanpa subjek)'}</span>
+                    <span className="em-row-date">{formatListDate(message.date)}</span>
+                  </span>
+                  <span className="em-row-from">
+                    {sender?.name ? `${sender.name} · ` : ''}{sender?.address || 'Pengirim tidak diketahui'}
+                  </span>
                 </button>
               )
             })}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </section>
+
+      <section className="em-reader" aria-label="Isi email">
+        {!selectedMessage ? (
+          <div className="em-reader-empty">
+            <h4>Pilih email untuk membaca isinya.</h4>
+            <p>Isi pesan tampil di sini sebagai teks bersih, tanpa memuat HTML atau gambar dari pengirim.</p>
+          </div>
+        ) : (
+          <>
+            <div className="em-reader-head">
+              <div>
+                <h3>{selectedMessage.subject || '(Tanpa subjek)'}</h3>
+                <p className="em-reader-from">{selectedMessage.from}</p>
+                <p className="em-reader-date">{formatDate(selectedMessage.date)}</p>
+              </div>
+              <button type="button" className="em-icon-button" aria-label="Tutup email" onClick={onCloseMessage}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="em-reader-body">
+              <pre>{selectedMessage.text || '(Email ini tidak memiliki isi teks yang dapat ditampilkan.)'}</pre>
+            </div>
+            <div className="em-reader-foot">
+              <button type="button" className="em-text-button" onClick={onCloseMessage}>
+                <ArrowLeft size={15} />
+                Kembali ke daftar
+              </button>
+              <span className="em-muted">Teks bersih, tanpa HTML.</span>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
   )
 }

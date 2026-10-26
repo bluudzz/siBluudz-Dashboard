@@ -48,8 +48,10 @@ export function Header({
     'cat-cloud': 'Cloud & Deploy',
     'cat-utility': 'Utilities & Scraper',
     'ai-generator': 'AI Generator',
-    'invoices-list': 'Invoice App',
-    invoice: 'Invoice App',
+    'prompt-studio': 'Prompt Studio',
+    'invoices-list': 'Invoice',
+    invoice: 'Invoice',
+    'email-manager': 'Email Manager',
     'admin-users': 'Kelola Pengguna & AI',
     security: 'Security Vault',
     settings: 'Pengaturan',
@@ -59,7 +61,7 @@ export function Header({
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
       {/* Left side: Hamburger (mobile), Collapse button (desktop), Breadcrumbs */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         {/* Mobile menu trigger */}
         <Button
           variant="ghost"
@@ -87,25 +89,26 @@ export function Header({
         </Button>
 
         {/* Breadcrumb Navigation */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground hidden sm:inline">Dashboard</span>
-          <span className="text-muted-foreground/60 hidden sm:inline">/</span>
-          <span className="font-semibold text-foreground tracking-tight">{pageTitle}</span>
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <span className="text-muted-foreground hidden lg:inline">Dashboard</span>
+          <span className="text-muted-foreground/60 hidden lg:inline">/</span>
+          <span className="truncate font-semibold text-foreground tracking-tight">{pageTitle}</span>
         </div>
       </div>
 
       {/* Right side: Search, Theme, Notifications, User Profile */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         {/* Search trigger button */}
         <button
           onClick={onOpenSearch}
-          className="flex h-9 w-40 sm:w-60 items-center justify-between rounded-lg border border-input bg-card/60 px-3 text-xs text-muted-foreground shadow-2xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
+          aria-label="Cari apapun"
+          className="flex h-9 w-9 xl:w-60 items-center justify-between rounded-lg border border-input bg-card/60 px-2.5 xl:px-3 text-xs text-muted-foreground shadow-2xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
         >
           <span className="flex items-center gap-2 truncate">
             <Search className="h-3.5 w-3.5" />
-            <span className="truncate">Cari apapun...</span>
+            <span className="hidden truncate xl:inline">Cari apapun...</span>
           </span>
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+          <kbd className="hidden xl:inline-flex items-center gap-0.5 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
             ⌘K
           </kbd>
         </button>

@@ -16,7 +16,7 @@ const port = Number(process.env.API_PORT || 3001)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false)
-app.use(express.json({ limit: '16mb' }))
+app.use(express.json({ limit: '32mb' }))
 
 // Mount modular feature routes
 app.use('/api', authRoutes)

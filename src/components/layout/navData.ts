@@ -47,6 +47,12 @@ export const navigationSections: NavSection[] = [
     title: 'Aplikasi',
     items: [
       {
+        title: 'Prompt Studio',
+        id: 'prompt-studio',
+        icon: Sparkles,
+        description: 'Rancang dengan AI pintar, kerjakan dengan AI hemat',
+      },
+      {
         title: 'AI Generator',
         id: 'ai-generator',
         icon: Sparkles,

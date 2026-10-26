@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { db, getSetting, setSetting, getNineRouterConfig } from '../db.js'
 import { requireSameOrigin, requireAdmin, userResponse, hashPassword } from '../middleware/auth.js'
-import { fetchNineRouterModels, callNineRouterChat } from './ai.routes.js'
+import { fetchNineRouterModels, callNineRouterChat, getImageModelName } from './ai.routes.js'
 
 const router = Router()
 
@@ -147,6 +147,7 @@ router.get('/ai-settings', requireAdmin, (_req, res) => {
   res.json({
     baseUrl,
     model,
+    imageModel: getImageModelName(),
     freeDailyLimit,
     proDailyLimit,
     hasApiKey: Boolean(apiKey),
@@ -156,7 +157,7 @@ router.get('/ai-settings', requireAdmin, (_req, res) => {
 })
 
 router.post('/ai-settings', requireSameOrigin, requireAdmin, (req, res) => {
-  const { baseUrl, apiKey, model, freeDailyLimit, proDailyLimit, availableModels } = req.body || {}
+  const { baseUrl, apiKey, model, imageModel, freeDailyLimit, proDailyLimit, availableModels } = req.body || {}
 
   if (typeof baseUrl === 'string' && baseUrl.trim()) {
     setSetting('ninerouter_base_url', baseUrl.trim())
@@ -166,6 +167,9 @@ router.post('/ai-settings', requireSameOrigin, requireAdmin, (req, res) => {
   }
   if (typeof model === 'string' && model.trim()) {
     setSetting('ninerouter_model', model.trim())
+  }
+  if (typeof imageModel === 'string') {
+    setSetting('ninerouter_image_model', imageModel.trim())
   }
   if (Number.isInteger(Number(freeDailyLimit)) && Number(freeDailyLimit) >= 0) {
     setSetting('free_ai_daily_limit', String(freeDailyLimit))
@@ -189,6 +193,7 @@ router.post('/ai-settings', requireSameOrigin, requireAdmin, (req, res) => {
     config: {
       baseUrl: updated.baseUrl,
       model: updated.model,
+      imageModel: getImageModelName(),
       freeDailyLimit: updated.freeDailyLimit,
       proDailyLimit: updated.proDailyLimit,
       hasApiKey: Boolean(updated.apiKey),

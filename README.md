@@ -50,6 +50,33 @@ npm run dev
 ```
 Buka browser di: [http://localhost:5173/](http://localhost:5173/)
 
+## AI Generator workspace
+
+- Navigasi 12 tool dikelompokkan; cari tool tanpa menghapus draf yang sedang dikerjakan.
+- Desktop menampilkan editor dan hasil berdampingan; layar lebih sempit menumpuk panel, dengan pilihan tool bergulir pada ponsel.
+- Enter membuat baris baru. Gunakan **Ctrl + Enter** atau **⌘ + Enter** untuk menjalankan generasi.
+- Hasil teks dapat diedit dan disalin. Model dapat dicari, difilter menurut provider, serta disinkronkan dari katalog 9router.
+- Riwayat dapat dimuat kembali ke tool asal. Draf tiap tool hanya bertahan selama halaman terbuka; riwayat generasi disimpan melalui API.
+- Ganti Produk menerima dua gambar PNG/JPG/WEBP, maksimal 6 MB per gambar. Koneksi dan kuota harus tersedia sebelum generasi.
+
+## Invoice workspace
+
+- Rail kiri memuat halaman (Daftar dokumen, Invoice Builder) dan filter jenis dokumen; isinya hidup di panel kanan.
+- Daftar memakai baris ringkas dengan panel detail di samping pada desktop lebar; di bawah 1250px detail turun ke bawah daftar.
+- Cari nomor dokumen, klien, atau perihal langsung dari toolbar. Filter dan pencarian tidak mengubah data.
+- Tombol **Cetak** hanya mencetak panel detail. **Buka di Builder** meneruskan dokumen ke editor iframe dengan profil dan daftar invoice tersinkron.
+- **Reset editor** memuat ulang iframe setelah konfirmasi; perubahan yang belum disimpan akan hilang.
+- Perhitungan nominal memakai `src/features/invoices/invoice-utils.ts` (format ribuan Indonesia dan desimal koma). Uji: `npm test`.
+
+## Email Manager workspace
+
+- Rail kiri berisi daftar akun (Outlook Graph, Gmail API, IMAP) dengan penanda token kedaluwarsa; pilih akun untuk memuat inbox-nya.
+- Sheet kanan menampilkan daftar inbox dan pembaca email berdampingan di desktop; di bawah 1250px pembaca turun ke bawah daftar.
+- Pencarian memfilter subjek, nama pengirim, alamat, dan cuplikan tanpa permintaan ulang ke server.
+- Aksi tingkat akun (Cek OTP, Test token, Kredensial, Hapus akun) hanya muncul untuk akun yang sedang aktif.
+- Isi email selalu dirender sebagai teks bersih; HTML dari pengirim tidak pernah dieksekusi.
+- `npm test` mencakup filter pencarian, label provider, dan format tanggal ringkas.
+
 ## 🔐 Local API, Accounts, and SQLite
 
 This project includes a self-hosted Node API and a SQLite database. User credentials are password-hashed; profile, invoices, and sessions are stored in the local `data/sibluudz.sqlite` file and isolated by user ID. Existing browser invoices and the recovered-invoices JSON are not automatically imported into newly registered accounts.

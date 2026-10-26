@@ -1305,9 +1305,9 @@ function setupLogoUploader() {
   });
 }
 
-function setLogo(src) {
+function setLogo(src, silent = false) {
   const isEn = invoiceState.docLang === 'en';
-  pushHistoryState(isEn ? 'Change logo' : 'Ubah logo');
+  if (!silent) pushHistoryState(isEn ? 'Change logo' : 'Ubah logo');
   invoiceState.logo = src;
   if (src) {
     DOM.logoImg.src = src;
@@ -1316,13 +1316,13 @@ function setLogo(src) {
     DOM.logoActions.classList.remove('hidden');
     if (DOM.logoPreviewWrapper) DOM.logoPreviewWrapper.classList.add('has-logo');
   } else {
-    removeLogo();
+    removeLogo(silent);
   }
 }
 
-function removeLogo() {
+function removeLogo(silent = false) {
   const isEn = invoiceState.docLang === 'en';
-  pushHistoryState(isEn ? 'Remove logo' : 'Hapus logo');
+  if (!silent) pushHistoryState(isEn ? 'Remove logo' : 'Hapus logo');
   invoiceState.logo = '';
   DOM.logoImg.src = '';
   DOM.logoImg.classList.add('hidden');
@@ -1330,7 +1330,7 @@ function removeLogo() {
   DOM.logoActions.classList.add('hidden');
   if (DOM.logoPreviewWrapper) DOM.logoPreviewWrapper.classList.remove('has-logo');
   DOM.logoInput.value = '';
-  saveDraftToStorage();
+  if (!silent) saveDraftToStorage();
 }
 
 // Synchronize DOM inputs with invoiceState
@@ -1450,9 +1450,9 @@ function syncInputsWithState() {
   updateSignaturesView();
 
   if (invoiceState.logo) {
-    setLogo(invoiceState.logo);
+    setLogo(invoiceState.logo, true);
   } else {
-    removeLogo();
+    removeLogo(true);
   }
 }
 
@@ -3457,6 +3457,12 @@ function loadInvoiceIntoEditor(invoiceId, skipAutoSave = false) {
   const found = invoices.find(inv => inv.id === invoiceId);
   if (!found) return;
 
+  // If already loaded and active in the editor, ensure active ID is synced and avoid redundant reload
+  if (invoiceState && invoiceState.id === invoiceId) {
+    StorageManager.setActiveInvoiceId(invoiceState.id);
+    return;
+  }
+
   clearTimeout(saveTimeout);
 
   // Auto-save currently active invoice before switching (ONLY if not skipped and it exists in saved list)
@@ -3648,7 +3654,7 @@ function initApp() {
         StorageManager.saveDraft(invoiceState);
       }
     } else if (event.data.type === 'LOAD_INVOICE' && event.data.invoiceId) {
-      loadInvoiceIntoEditor(event.data.invoiceId);
+      loadInvoiceIntoEditor(event.data.invoiceId, true);
     } else if (event.data.type === 'SYNC_INVOICES' && Array.isArray(event.data.invoices)) {
       const syncedInvoices = event.data.invoices;
       StorageManager.saveAllInvoices(syncedInvoices, false);
@@ -3656,8 +3662,15 @@ function initApp() {
 
       const activeInvoice = syncedInvoices.find(inv => inv.id === invoiceState.id);
       if (activeInvoice) {
-        // Bandingkan isi invoice tanpa memicu auto-save ke parent
-        if (JSON.stringify(activeInvoice) !== JSON.stringify(invoiceState)) {
+        // Bandingkan isi invoice tanpa memicu auto-save ke parent dan abaikan perbedaan timestamp semata
+        const isContentEqual = (a, b) => {
+          if (!a || !b) return a === b;
+          const { updatedAt: _aU, createdAt: _aC, ...restA } = a;
+          const { updatedAt: _bU, createdAt: _bC, ...restB } = b;
+          return JSON.stringify(restA) === JSON.stringify(restB);
+        };
+
+        if (!isContentEqual(activeInvoice, invoiceState)) {
           invoiceState = JSON.parse(JSON.stringify(activeInvoice));
           syncInputsWithState();
           renderItems();

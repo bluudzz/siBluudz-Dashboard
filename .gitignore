@@ -23,3 +23,6 @@ data/
 *.njsproj
 *.sln
 *.sw?
+.codebase-memory/
+.taste-skill/
+

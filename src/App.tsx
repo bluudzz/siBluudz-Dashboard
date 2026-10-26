@@ -9,6 +9,7 @@ import { SecurityPage } from '@/features/settings/SecurityPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { InvoicePage } from '@/features/invoices/InvoicePage'
 import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
+import { PromptStudioPage } from '@/features/prompt-studio/PromptStudioPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { AuthPage } from '@/features/auth/AuthPage'
 import { useUser } from '@/context/UserContext'
@@ -21,7 +22,9 @@ function DashboardContent() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [searchOpen, setSearchOpen] = React.useState(false)
   const invoicesRef = React.useRef(invoices)
-  invoicesRef.current = invoices
+  React.useEffect(() => {
+    invoicesRef.current = invoices
+  }, [invoices])
 
   // Listen for internal tab navigation events (e.g. from app launcher cards)
   React.useEffect(() => {
@@ -56,8 +59,16 @@ function DashboardContent() {
       const updatedInvoices = event.data.invoices as InvoiceRecord[]
       if (!updatedInvoices.every((invoice) => invoice && typeof invoice.id === 'string')) return
       
-      // Prevent infinite feedback loop if incoming data identical to current state
-      if (JSON.stringify(updatedInvoices) === JSON.stringify(invoicesRef.current)) return
+      // Prevent infinite feedback loop if incoming data identical to current state (ignoring updatedAt)
+      const stripTimestamps = (list: InvoiceRecord[]) =>
+        list.map((inv) => {
+          const { updatedAt: _updatedAt, ...rest } = inv
+          return rest
+        })
+
+      if (JSON.stringify(stripTimestamps(updatedInvoices)) === JSON.stringify(stripTimestamps(invoicesRef.current))) {
+        return
+      }
 
       saveInvoices(updatedInvoices).catch((error: unknown) => {
         console.error('Invoice synchronization failed:', error)
@@ -97,6 +108,8 @@ function DashboardContent() {
         return <InvoicePage />
       case 'ai-generator':
         return <AiGeneratorPage />
+      case 'prompt-studio':
+        return <PromptStudioPage />
       case 'email-manager':
         return <EmailManagerPage />
       case 'admin-users':
