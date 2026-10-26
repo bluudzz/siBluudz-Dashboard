@@ -10,6 +10,7 @@ import outlookRoutes from './outlook/outlook.routes.js'
 import gmailRoutes from './gmail/gmail.routes.js'
 import aiRoutes from './routes/ai.routes.js'
 import adminRoutes from './routes/admin.routes.js'
+import automationRoutes from './routes/automation.routes.js'
 
 const app = express()
 const port = Number(process.env.API_PORT || 3001)
@@ -26,6 +27,7 @@ app.use('/api/outlook', outlookRoutes)
 app.use('/api/gmail', gmailRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/workflows', automationRoutes)
 
 // Error handler
 app.use('/api', (error, _req, res, _next) => {

@@ -52,6 +52,7 @@ export function CommandDialog({ open, onClose, onSelectTab }: CommandDialogProps
     { title: 'Cloud & Deploy', tab: 'cat-cloud', icon: Cloud, category: 'Kategori' },
     { title: 'Utilities & Scraper', tab: 'cat-utility', icon: Wrench, category: 'Kategori' },
     { title: 'AI Generator', tab: 'ai-generator', icon: Sparkles, category: 'Aplikasi' },
+    { title: 'Auto Workflow Studio (n8n Bot)', tab: 'automation', icon: Terminal, category: 'Aplikasi' },
     { title: 'Prompt Studio', tab: 'prompt-studio', icon: Sparkles, category: 'Aplikasi' },
     { title: 'Email Manager', tab: 'email-manager', icon: Mail, category: 'Aplikasi' },
     { title: 'Invoice App (Daftar & Builder)', tab: 'invoice', icon: Receipt, category: 'Aplikasi' },

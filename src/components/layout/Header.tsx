@@ -49,6 +49,7 @@ export function Header({
     'cat-utility': 'Utilities & Scraper',
     'ai-generator': 'AI Generator',
     'prompt-studio': 'Prompt Studio',
+    automation: 'Auto Workflow Studio',
     'invoices-list': 'Invoice',
     invoice: 'Invoice',
     'email-manager': 'Email Manager',

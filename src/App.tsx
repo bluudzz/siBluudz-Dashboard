@@ -11,6 +11,7 @@ import { InvoicePage } from '@/features/invoices/InvoicePage'
 import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
 import { PromptStudioPage } from '@/features/prompt-studio/PromptStudioPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
+import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
 import { AuthPage } from '@/features/auth/AuthPage'
 import { useUser } from '@/context/UserContext'
 import type { InvoiceRecord } from '@/types/invoice'
@@ -110,6 +111,8 @@ function DashboardContent() {
         return <AiGeneratorPage />
       case 'prompt-studio':
         return <PromptStudioPage />
+      case 'automation':
+        return <WorkflowStudioPage />
       case 'email-manager':
         return <EmailManagerPage />
       case 'admin-users':
@@ -142,7 +145,7 @@ function DashboardContent() {
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-in fade-in duration-200">
+        <main className={`flex-1 min-w-0 animate-in fade-in duration-200 ${activeTab === 'automation' ? 'p-0 w-full' : 'p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto'}`}>
           {dataError && (
             <div role="alert" className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {dataError}

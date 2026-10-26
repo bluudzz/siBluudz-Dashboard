@@ -6,6 +6,7 @@ import {
   Receipt,
   Sparkles,
   Mail,
+  Workflow,
 } from 'lucide-react'
 
 interface NavItem {
@@ -58,6 +59,13 @@ export const navigationSections: NavSection[] = [
         icon: Sparkles,
         badge: 'AI',
         description: 'Generate prompt, struktur invoice & follow-up',
+      },
+      {
+        title: 'Auto Workflow',
+        id: 'automation',
+        icon: Workflow,
+        badge: 'Bot',
+        description: 'Visual automation drag & drop ala n8n untuk bot otonom',
       },
       {
         title: 'Invoice',

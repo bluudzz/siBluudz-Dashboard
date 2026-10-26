@@ -76,6 +76,30 @@ db.exec(`
     key text primary key,
     value text not null
   );
+  create table if not exists workflows (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    name text not null,
+    description text default '',
+    nodes text not null default '[]',
+    edges text not null default '[]',
+    is_active integer default 0,
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now'))
+  );
+  create index if not exists workflows_user_idx on workflows(user_id, updated_at desc);
+  create table if not exists workflow_runs (
+    id text primary key,
+    workflow_id text not null references workflows(id) on delete cascade,
+    user_id text not null references users(id) on delete cascade,
+    status text not null default 'running',
+    trigger_type text not null default 'manual',
+    logs text not null default '[]',
+    result text default '',
+    started_at text not null default (datetime('now')),
+    completed_at text
+  );
+  create index if not exists workflow_runs_wf_idx on workflow_runs(workflow_id, started_at desc);
 `)
 
 // Dynamic column migrations for users
