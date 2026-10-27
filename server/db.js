@@ -100,6 +100,15 @@ db.exec(`
     completed_at text
   );
   create index if not exists workflow_runs_wf_idx on workflow_runs(workflow_id, started_at desc);
+  create table if not exists workflow_chat_memory (
+    user_id text not null references users(id) on delete cascade,
+    workflow_id text not null references workflows(id) on delete cascade,
+    memory_node_id text not null,
+    session_key text not null,
+    messages text not null default '[]',
+    updated_at text not null default (datetime('now')),
+    primary key (user_id,workflow_id,memory_node_id,session_key)
+  );
 `)
 
 // Dynamic column migrations for users

@@ -13,9 +13,13 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "node --experimental-strip-types --test \"tests/*.test.ts\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "worker:run": "node scripts/opencode-worker.mjs run",
+    "worker:status": "node scripts/opencode-worker.mjs status"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@openai/agents": "^0.21.0",
     "@xyflow/react": "^12.12.0",
     "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
@@ -26,11 +30,19 @@
     "imapflow": "^1.0.189",
     "lucide-react": "^1.54.0",
     "mailparser": "^3.7.4",
+    "openai": "^7.43.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tailwind-merge": "^3.7.0"
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7"
+  },
+  "overrides": {
+    "openai": {
+      "google-auth-library": "$google-auth-library"
+    }
   },
   "devDependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/mailparser": "^3.4.4",
     "@types/node": "^24.13.3",

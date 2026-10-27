@@ -25,4 +25,8 @@ data/
 *.sw?
 .codebase-memory/
 .taste-skill/
+.opencode/
+.env
+.env.*
+!.env.example
 

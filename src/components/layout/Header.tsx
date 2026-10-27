@@ -48,7 +48,7 @@ export function Header({
     'cat-cloud': 'Cloud & Deploy',
     'cat-utility': 'Utilities & Scraper',
     'ai-generator': 'AI Generator',
-    'prompt-studio': 'Prompt Studio',
+    'prompt-studio': 'AI Generator / Prompt Studio',
     automation: 'Auto Workflow Studio',
     'invoices-list': 'Invoice',
     invoice: 'Invoice',

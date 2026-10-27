@@ -1,322 +1,102 @@
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
-import { Button } from '@/components/ui/Button'
-import { Trash2, X, Sliders, Sparkles, Bot, Code, Send, Clock, Radar } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, Play, Trash2, Pin, Copy, Check } from 'lucide-react'
+import type { Edge } from '@xyflow/react'
+import { formatModelLabel, type StudioNode } from './workflow-model'
+import { agentResources, isSubNode } from '../../../shared/workflow-connections'
+import type { DataItem } from '../../../shared/workflow-engine'
+import { SimpleDataEditor, dataLabel, friendlyPrompt, technicalPrompt } from './SimpleDataEditor'
 
-interface NodePanelProps {
-  node: any | null
-  onUpdate: (id: string, updatedData: any) => void
-  onDelete: (id: string) => void
-  onClose: () => void
+const nodeHelp:Record<string,string>={trigger:'Tentukan bahan awal, seperti topik, produk, dan audiens. Langkah berikutnya akan memakai bahan ini.',chatTrigger:'Mulai percakapan dengan AI. Pesan yang dikirim lewat Uji chat akan menjadi tugas untuk agent.',aiAgent:'Tulis tugas AI, lalu pilih model, Memory, dan Tools yang diperlukan.',chatModel:'Pilih AI yang akan mengerjakan tugas. Model ini memakai koneksi 9router Anda.',memory:'Menyimpan pesan sebelumnya agar AI Agent memahami konteks percakapan.',tool:'Memberi kemampuan tambahan kepada AI Agent saat mengerjakan tugas.',set:'Tambahkan atau ubah informasi sebelum diteruskan ke langkah berikutnya.',if:'Tentukan kapan alur dilanjutkan ke cabang Ya atau Tidak.',aiGenerator:'Jelaskan gambar atau konten visual yang ingin dibuat.',publisher:'Tentukan akun dan format publikasi Instagram.',code:'Tentukan skrip yang ingin dipakai pada langkah ini.'}
+const optionNames:Record<string,string>={manual:'Saat tombol jalankan ditekan',schedule:'Sesuai jadwal (belum aktif)',preview:'Coba rencana saja',live:'Gunakan AI terhubung',knowledge:'Baca brief atau pengetahuan',textLength:'Hitung karakter dan kata',equals:'Sama dengan',contains:'Mengandung kata',exists:'Sudah terisi',carousel:'Beberapa slide (carousel)',single:'Satu gambar','Input dari node sebelumnya':'Bahan dari langkah sebelumnya'}
+export function DataViewer({items}:{items:DataItem[]}) {
+  const [view,setView]=useState<'json'|'table'>('table')
+  const [copied,setCopied]=useState(false)
+  const [copyError,setCopyError]=useState('')
+  return <div className="wf-data">
+    <div className="wf-data-toolbar"><span>{items.length} hasil</span><div><button type="button" aria-pressed={view==='table'} onClick={()=>setView('table')}>Ringkasan</button><button type="button" aria-pressed={view==='json'} onClick={()=>setView('json')}>Data teknis</button><button type="button" aria-label="Salin data JSON" onClick={async()=>{try{await navigator.clipboard.writeText(JSON.stringify(items,null,2));setCopied(true);setCopyError('')}catch{setCopyError('Pilih teks di Data teknis lalu salin secara manual.')}}}>{copied?<Check size={14}/>:<Copy size={14}/>}</button></div></div>
+    {copyError&&<p role="status">{copyError}</p>}
+    {!items.length?<p className="wf-muted wf-no-data">Belum ada hasil. Klik Uji langkah atau Jalankan alur untuk mencobanya.</p>:view==='json'?<pre tabIndex={0}>{JSON.stringify(items,null,2)}</pre>:<div className="wf-readable-results">{items.slice(0,20).map((item,index)=><article key={index}>{items.length>1&&<h4>Hasil {index+1}</h4>}<dl>{Object.entries(item.json).sort(([key])=>key==='output'?-1:0).map(([key,value])=><div key={key}><dt>{dataLabel(key)}</dt><dd>{key==='sources'&&Array.isArray(value)?<ul className="wf-source-list">{value.map((source,sourceIndex)=><li key={sourceIndex}><a href={String(source.url)} target="_blank" rel="noopener noreferrer">{String(source.title||source.url)}</a><span>{String(source.snippet||'')}</span>{source.content&&<details><summary>Isi sumber</summary><p>{String(source.content)}</p></details>}{source.readError&&<small>{String(source.readError)}</small>}</li>)}</ul>:value&&typeof value==='object'?<details><summary>Lihat rincian</summary><pre>{JSON.stringify(value,null,2)}</pre></details>:typeof value==='boolean'?(value?'Ya':'Tidak'):String(value??'—')}</dd></div>)}</dl></article>)}{items.length>20&&<p className="wf-muted">Menampilkan 20 hasil pertama. Seluruh hasil tersedia di Data teknis.</p>}</div>}
+  </div>
 }
 
-const POPULAR_AI_MODELS = [
-  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (Visual & Fast)' },
-  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (Creative Copy & Hook)' },
-  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (High Reasoning)' },
-  { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (Deep Logic & Radar)' },
-  { id: 'deepseek-v4-flash', name: 'DeepSeek v4 Flash (Speed & Scrape)' },
-  { id: 'gpt-5.6-luna', name: 'GPT 5.6 Luna (General Multi-Task)' },
-  { id: 'qwen2.5-14b', name: 'Qwen 2.5 14B (Fast Open Weights)' },
-]
-
-export function NodeSettingsPanel({ node, onUpdate, onDelete, onClose }: NodePanelProps) {
-  if (!node) return null
-
-  const data = node.data || {}
-
-  const handleChange = (key: string, value: any) => {
-    onUpdate(node.id, {
-      ...data,
-      [key]: value,
-    })
-  }
-
-  const isAiPrimary = node.type === 'aiGenerator' || node.type === 'aiAgent'
-  const isAiEnabled = isAiPrimary || Boolean(data.aiEnabled)
-
-  return (
-    <Card className="absolute top-4 right-4 z-20 w-84 max-h-[calc(100vh-6rem)] overflow-y-auto border-border/80 bg-card/95 shadow-2xl backdrop-blur-md">
-      <CardHeader className="sticky top-0 z-10 flex flex-row items-center justify-between border-b border-border/50 bg-card/95 py-3 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          <Sliders className="h-4 w-4 text-primary" />
-          <CardTitle className="text-sm font-semibold">Node Settings</CardTitle>
-        </div>
-        <button
-          onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </CardHeader>
-
-      <CardContent className="space-y-4 pt-4 text-xs">
-        {/* Label Node */}
-        <div className="space-y-1">
-          <label className="font-medium text-foreground">Nama Node</label>
-          <Input
-            value={data.label || ''}
-            onChange={(e) => handleChange('label', e.target.value)}
-            className="h-8 text-xs"
-          />
-        </div>
-
-        {/* AI Model Section (n8n Style) */}
-        <div className="space-y-2.5 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 font-semibold text-purple-600 dark:text-purple-400">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>AI Engine & Model</span>
-            </div>
-            {!isAiPrimary && (
-              <input
-                type="checkbox"
-                id="ai-toggle"
-                checked={isAiEnabled}
-                onChange={(e) => handleChange('aiEnabled', e.target.checked)}
-                className="rounded border-input text-primary"
-              />
-            )}
-          </div>
-
-          {isAiEnabled && (
-            <div className="space-y-2.5 pt-1">
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Pilih Model AI</label>
-                <select
-                  value={data.aiModel || data.model || 'gemini-3.7-flash-high'}
-                  onChange={(e) => {
-                    handleChange('aiModel', e.target.value)
-                    handleChange('model', e.target.value)
-                  }}
-                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-                >
-                  {POPULAR_AI_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                  <option value="custom">-- Custom Model 9Router --</option>
-                </select>
-              </div>
-
-              {(data.aiModel === 'custom' || (!POPULAR_AI_MODELS.some(m => m.id === (data.aiModel || data.model)))) && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Custom Model Identifier</label>
-                  <Input
-                    value={data.aiModel || data.model || ''}
-                    onChange={(e) => {
-                      handleChange('aiModel', e.target.value)
-                      handleChange('model', e.target.value)
-                    }}
-                    placeholder="cth: claude-sonnet-5-5 atau customendpoint/..."
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">
-                  Prompt Khusus Node Ini
-                </label>
-                <textarea
-                  value={data.aiPrompt || ''}
-                  onChange={(e) => handleChange('aiPrompt', e.target.value)}
-                  placeholder="cth: Analisis data tren Roblox di atas dan ekstrak 1 hook kontroversial tanpa spoiler..."
-                  rows={3}
-                  className="w-full rounded-md border border-input bg-background p-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Trigger Node Settings */}
-        {node.type === 'trigger' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <Clock className="h-3.5 w-3.5 text-amber-500" />
-              <span>Jadwal Trigger</span>
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Label Interval</label>
-              <Input
-                value={data.interval || ''}
-                onChange={(e) => handleChange('interval', e.target.value)}
-                placeholder="cth: Setiap Hari (10:00 WIB)"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Cron Expression</label>
-              <Input
-                value={data.cron || ''}
-                onChange={(e) => handleChange('cron', e.target.value)}
-                placeholder="0 10 * * *"
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Radar Node Settings */}
-        {node.type === 'radar' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <Radar className="h-3.5 w-3.5 text-sky-500" />
-              <span>Parameter Radar</span>
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Target Games (Pisahkan koma)</label>
-              <Input
-                value={Array.isArray(data.targetGames) ? data.targetGames.join(', ') : ''}
-                onChange={(e) =>
-                  handleChange(
-                    'targetGames',
-                    e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
-                  )
-                }
-                placeholder="Blox Fruits, Fisch, GAG2"
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Pilar Konten Utama</label>
-              <select
-                value={data.strategy || 'pilar_edukasi_pemula'}
-                onChange={(e) => handleChange('strategy', e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-              >
-                <option value="pilar_edukasi_pemula">Edukasi Pemula (40%)</option>
-                <option value="pilar_trik_mekanik">Trik & Mekanik Rahasia (35%)</option>
-                <option value="pilar_hype_viral">Hype & Viral Update (25%)</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* AI Agent Node Settings */}
-        {node.type === 'aiAgent' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <Bot className="h-3.5 w-3.5 text-indigo-500" />
-              <span>Konfigurasi Autonomous Agent</span>
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Peran / Role Agent</label>
-              <Input
-                value={data.role || ''}
-                onChange={(e) => handleChange('role', e.target.value)}
-                placeholder="cth: Copywriter TikTok, Riset Market, Data Cleaner"
-                className="h-8 text-xs"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* AI Visual Gen Settings */}
-        {node.type === 'aiGenerator' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Format Rasio</label>
-              <select
-                value={data.aspectRatio || '4:5 (1080x1350)'}
-                onChange={(e) => handleChange('aspectRatio', e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-              >
-                <option value="4:5 (1080x1350)">Feed Portrait (4:5)</option>
-                <option value="1:1 (1080x1080)">Square (1:1)</option>
-                <option value="9:16 (1080x1920)">Story / Reel (9:16)</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                id="qc-toggle"
-                checked={Boolean(data.qualityControl)}
-                onChange={(e) => handleChange('qualityControl', e.target.checked)}
-                className="rounded border-input text-primary"
-              />
-              <label htmlFor="qc-toggle" className="text-xs text-foreground">
-                Aktifkan Quality Control Visual (Auto-Reject Bad Output)
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* Code / Script Node Settings */}
-        {node.type === 'code' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <Code className="h-3.5 w-3.5 text-cyan-500" />
-              <span>Script Python / Shell</span>
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Path / Nama Script</label>
-              <Input
-                value={data.scriptName || ''}
-                onChange={(e) => handleChange('scriptName', e.target.value)}
-                placeholder="cth: main_auto_pipeline.py"
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Publisher Settings */}
-        {node.type === 'publisher' && (
-          <div className="space-y-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <Send className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Pengaturan Publikasi</span>
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Akun Target</label>
-              <Input
-                value={data.targetAccount || '@bluudzstore'}
-                onChange={(e) => handleChange('targetAccount', e.target.value)}
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-medium text-foreground">Format Post</label>
-              <select
-                value={data.format || 'carousel'}
-                onChange={(e) => handleChange('format', e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-              >
-                <option value="carousel">Multi-Slide Carousel</option>
-                <option value="single">Single Feed Post</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                id="approval-toggle"
-                checked={Boolean(data.requireApproval)}
-                onChange={(e) => handleChange('requireApproval', e.target.checked)}
-                className="rounded border-input text-primary"
-              />
-              <label htmlFor="approval-toggle" className="text-xs text-foreground">
-                Tahan untuk Review (Manual Approval sebelum Publish)
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* Delete Action */}
-        <div className="pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onDelete(node.id)}
-            className="w-full justify-center gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Hapus Node Ini
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
+interface NodePanelProps {
+  node:StudioNode
+  nodes:StudioNode[]
+  edges:Edge[]
+  busy:boolean
+  onUpdate:(id:string,data:StudioNode['data'])=>void
+  onDelete:(id:string)=>void
+  onClose:()=>void
+  onExecute:(id:string)=>void
+  onSelect:(id:string)=>void
+  onAddResource:(type:string,id:string)=>void
+}
+export function NodeSettingsPanel({node,nodes,edges,busy,onUpdate,onDelete,onClose,onExecute,onSelect,onAddResource}:NodePanelProps) {
+  const [tab,setTab]=useState('parameters')
+  const [advanced,setAdvanced]=useState(false)
+  const [modelIds,setModelIds]=useState<string[]>([])
+  useEffect(()=>{
+    if(!['aiAgent','aiGenerator','chatModel'].includes(node.type||''))return
+    let cancelled=false
+    const imageNode=node.type==='aiGenerator'
+    fetch(imageNode?'/api/ai/image-models':'/api/ai/status',{credentials:'same-origin'}).then(r=>r.ok?r.json():{}).then((data:{availableModels?:string[];models?:string[]})=>{if(!cancelled)setModelIds((imageNode?data.models:data.availableModels)||[])}).catch(()=>{})
+    return()=>{cancelled=true}
+  },[node.type])
+  const data=node.data
+  const isModelNode=node.type==='chatModel'
+  const resources=agentResources(node.id,nodes,edges)
+  const result=data.result
+  const upstream=new Set<string>()
+  const collectUpstream=(id:string)=>{if(upstream.has(id))return;upstream.add(id);edges.filter(edge=>edge.target===id).forEach(edge=>collectUpstream(edge.source))}
+  collectUpstream(node.id)
+  const availableKeys=[...new Set([...(result?.input?.[0]?Object.keys(result.input[0].json):[]),...nodes.filter(item=>upstream.has(item.id)&&item.id!==node.id).flatMap(item=>{
+    if(item.type==='chatTrigger')return ['chatInput','sessionId']
+    if(item.type==='aiAgent')return ['output']
+    try{return Object.keys(JSON.parse(String(item.data.sampleData||item.data.fields||'{}')))}catch{return []}
+  })])]
+  const str=(key:string)=>typeof data[key]==='string'?data[key] as string:''
+  const update=(key:string,value:unknown)=>onUpdate(node.id,{...data,[key]:value})
+  const field=(key:string,label:string,placeholder='',multiline=false)=><label className="wf-field" key={key}><span>{label}</span>{multiline?<textarea rows={key==='fields'||key==='sampleData'?5:3} value={str(key)} disabled={busy} placeholder={placeholder} onChange={e=>update(key,e.target.value)}/>:<input value={str(key)} disabled={busy} placeholder={placeholder} onChange={e=>update(key,e.target.value)}/>}</label>
+  const choice=(key:string,label:string,options:string[])=><label className="wf-field"><span>{label}</span><select disabled={busy} value={str(key)||options[0]} onChange={e=>update(key,e.target.value)}>{options.map(option=><option key={option} value={option}>{optionNames[option]||option}</option>)}</select></label>
+  const checkbox=(key:string,label:string,checked=Boolean(data[key]))=><label className="wf-check"><input type="checkbox" disabled={busy} checked={checked} onChange={e=>update(key,e.target.checked)}/>{label}</label>
+  return <aside aria-label="Detail node" className={'wf-node-dialog '+(isModelNode?'wf-model-dialog':'')} onKeyDown={e=>{if(e.key==='Escape'&&!busy){e.stopPropagation();onClose()}}}>
+    <header className="wf-dialog-heading"><div className="wf-dialog-title"><h2>{isModelNode?'Model AI':String(data.label)}</h2><p>{isModelNode?'Pilih model yang akan digunakan oleh AI Agent.':nodeHelp[node.type||'']||'Atur langkah ini sesuai tujuan workflow Anda.'}</p></div><div className="wf-dialog-heading-actions">{!isModelNode&&<button disabled={busy||isSubNode(node.type)} onClick={()=>{setTab('results');onExecute(node.id)}}><Play size={15}/>{busy?'Menguji…':'Uji langkah'}</button>}</div><button className="wf-dialog-close" disabled={busy} aria-label="Tutup detail node" onClick={onClose}><X size={18}/></button></header>
+    {!isModelNode&&<nav className="wf-detail-tabs" aria-label="Bagian detail node">{[['parameters','Pengaturan'],['results','Hasil uji']].map(([id,label])=><button key={id} aria-pressed={tab===id} onClick={()=>setTab(id)}>{label}</button>)}</nav>}
+    <div className="wf-node-columns">
+      {isModelNode?<section className="wf-parameters wf-model-settings is-current"><label className="wf-field"><span>Pilih model AI</span>{modelIds.length>0?<select autoFocus disabled={busy} value={str('model')} onChange={event=>update('model',event.target.value)}><option value="">Pilih model…</option>{str('model')&&!modelIds.includes(str('model'))&&<option value={str('model')}>{formatModelLabel(str('model'))}</option>}{modelIds.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select>:<input autoFocus list="wf-chat-models" disabled={busy} value={str('model')} placeholder="Masukkan ID model AI" onChange={event=>update('model',event.target.value)}/>}</label>{modelIds.length===0&&<p className="wf-inline-note">Daftar model belum tersedia. Anda dapat memasukkan ID model secara manual.</p>}</section>:<>
+      <section className={'wf-parameters '+(tab==='parameters'?'is-current':'')}>
+        {field('label','Nama langkah')}
+        {node.type==='chatTrigger'&&<>{field('chatInput','Pesan untuk mencoba','Bantu saya membuat konten',true)}<p className="wf-inline-note">Untuk bercakap-cakap, klik Uji chat di toolbar lalu kirim pesan.</p>{advanced&&field('sessionId','ID sesi contoh','test-session')}</>}
+        {node.type==='chatModel'&&<><label className="wf-field"><span>Model teks 9router</span>{modelIds.length>0?<select disabled={busy} value={str('model')} onChange={event=>update('model',event.target.value)}><option value="">Pilih model teks…</option>{str('model')&&!modelIds.includes(str('model'))&&<option value={str('model')}>{formatModelLabel(str('model'))}</option>}{modelIds.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select>:<><input list="wf-chat-models" disabled={busy} value={str('model')} placeholder="Pilih model yang mendukung tool calling" onChange={event=>update('model',event.target.value)}/><datalist id="wf-chat-models">{modelIds.map(id=><option key={id} value={id} label={formatModelLabel(id)}>{formatModelLabel(id)}</option>)}</datalist></>}</label>{advanced&&choice('temperature','Variasi jawaban (temperature)',['0.7','0','0.2','1'])}<p className="wf-inline-note">Model harus mendukung tool calling. Kredensial memakai koneksi 9router dashboard. Sub-node ini dijalankan melalui AI Agent.</p></>}
+        {node.type==='memory'&&<>{choice('windowSize','Berapa percakapan terakhir yang diingat?',['5','10','20','1'])}<p className="wf-inline-note">Percakapan dalam sesi yang sama akan diingat. Klik Sesi baru di Uji chat untuk memulai dari awal.</p>{advanced&&field('sessionKey','Kunci sesi','{{ $json.sessionId }}')}</>}
+        {node.type==='tool'&&<>{choice('toolType','Kemampuan yang diberikan',['knowledge','textLength'])}{field('description','Kapan Tools digunakan?','Gunakan brief atau hitung panjang teks saat diperlukan',true)}{str('toolType')==='knowledge'&&field('content','Isi brief / pengetahuan','Isi produk, audiens, gaya bahasa, batasan dan CTA.',true)}<p className="wf-inline-note">AI akan memilih kapan perlu memakai Tools saat mengerjakan tugas.</p></>}
+        {node.type==='aiAgent'&&<>{str('executionMode')!=='live'&&<p className="wf-inline-note">Langkah lama ini masih pratinjau. <button disabled={busy} onClick={()=>update('executionMode','live')}>Aktifkan AI terhubung</button></p>}{advanced&&choice('executionMode','Cara menjalankan langkah ini',['preview','live'])}{field('systemMessage','Aturan untuk AI','Peran, tujuan dan batasan agent',true)}{advanced&&choice('maxIterations','Batas putaran kerja AI',['3','1','2','4','5'])}<div className="wf-resource-list"><h4>Yang dipakai AI untuk bekerja</h4>{[['chatModel','Model AI (wajib)',resources.model],['memory','Memory',resources.memory],['tool','Tools (opsional)',resources.tools[0]]].map(([type,label,resource])=><div key={String(type)}><span>{String(label)}</span>{resource&&typeof resource==='object'?<button disabled={busy} onClick={()=>onSelect(resource.id)}>{String(resource.data.label)}</button>:<button disabled={busy} onClick={()=>onAddResource(String(type),node.id)}>+ Tambah</button>}</div>)}{resources.tools.slice(1).map(tool=><button key={tool.id} disabled={busy} onClick={()=>onSelect(tool.id)}>{String(tool.data.label)}</button>)}</div><p className="wf-inline-note">Mode Gunakan AI terhubung memakai kuota 9router. Pilih satu Model AI. Tambahkan Memory dan Tools bila dibutuhkan.</p></>}
+        {node.type==='trigger'&&<>
+          {advanced&&choice('triggerMode','Kapan alur dimulai?',['manual','schedule'])}
+          {str('triggerMode')==='schedule'&&<>{field('interval','Rencana jadwal','Setiap hari 10:00 WIB')}{advanced&&field('cron','Cron','0 10 * * *')}<p className="wf-inline-note">Jadwal hanya konfigurasi. Scheduler otomatis belum terhubung; pengujian tetap dijalankan manual.</p></>}
+          <h3>Bahan awal workflow</h3><SimpleDataEditor value={str('sampleData')||'{}'} disabled={busy} onChange={value=>update('sampleData',value)}/>
+          <details className="wf-advanced"><summary>Edit data teknis</summary>{field('sampleData','Data JSON','{"topic":"Ide konten"}',true)}</details>
+        </>}
+        {node.type==='set'&&<><h3>Informasi yang ditambahkan</h3><SimpleDataEditor value={str('fields')||'{}'} disabled={busy} onChange={value=>update('fields',value)}/>{checkbox('keepInput','Tetap bawa informasi dari langkah sebelumnya',data.keepInput!==false)}<details className="wf-advanced"><summary>Edit data teknis</summary>{field('fields','Data JSON','{"title":"{{ $json.topic }}"}',true)}</details></>}
+        {node.type==='if'&&<><label className="wf-field"><span>Informasi yang diperiksa</span><select disabled={busy} value={str('field')} onChange={event=>update('field',event.target.value)}>{[...new Set([str('field'),...availableKeys])].filter(Boolean).map(key=><option key={key} value={key}>{dataLabel(key)}</option>)}</select></label>{choice('operator','Syaratnya',['equals','contains','exists'])}{str('operator')!=='exists'&&(str('field')==='approved'?<label className="wf-field"><span>Nilai yang diharapkan</span><select disabled={busy} value={str('value')} onChange={event=>update('value',event.target.value)}><option value="true">Ya / Sudah disetujui</option><option value="false">Belum / Tidak</option></select></label>:field('value','Nilai yang diharapkan','Contoh: siap'))}<p className="wf-muted">Jika syarat terpenuhi, alur mengikuti cabang Ya. Jika tidak, alur mengikuti cabang Tidak.</p>{advanced&&field('field','Nama field / path teknis','approved')}</>}
+        {['aiAgent','aiGenerator'].includes(node.type||'')&&<>
+          {(node.type==='aiGenerator'||advanced&&str('executionMode')!=='live')&&<label className="wf-field"><span>{node.type==='aiGenerator'?'Model gambar':'Model teks (pratinjau lama)'}</span><input list="wf-model-ids" disabled={busy} value={str('aiModel')||str('model')} onChange={e=>onUpdate(node.id,{...data,aiModel:e.target.value,model:e.target.value})} placeholder="Pilih dari katalog atau ketik ID model"/><datalist id="wf-model-ids">{modelIds.map(id=><option key={id} value={id} label={formatModelLabel(id)}>{formatModelLabel(id)}</option>)}</datalist></label>}
+          {node.type==='aiAgent'&&advanced&&field('role','Peran agent','Analyst')}
+          <label className="wf-field"><span>Apa yang harus dikerjakan AI?</span><textarea rows={5} value={advanced?str('aiPrompt'):friendlyPrompt(str('aiPrompt'))} disabled={busy} placeholder="Contoh: Buat rencana carousel Instagram berdasarkan [Topik]" onChange={event=>update('aiPrompt',advanced?event.target.value:technicalPrompt(event.target.value,availableKeys))}/></label>
+          {!advanced&&availableKeys.length>0&&<div className="wf-data-tokens"><span>Tambahkan bahan dari langkah sebelumnya:</span>{availableKeys.slice(0,10).map(key=><button type="button" key={key} disabled={busy} onClick={()=>update('aiPrompt',str('aiPrompt')+` {{ $json.${key} }}`)}>{dataLabel(key)}</button>)}<p>Teks dalam [kurung] diisi otomatis saat alur dijalankan.</p></div>}
+          {node.type==='aiGenerator'&&<>{choice('aspectRatio','Rasio visual',['4:5 (1080x1350)','1:1 (1080x1080)','9:16 (1080x1920)'])}{checkbox('qualityControl','Minta quality control (konfigurasi)')}</>}
+          {(node.type==='aiGenerator'||str('executionMode')!=='live')&&<p className="wf-inline-note">Mode pratinjau hanya menampilkan konfigurasi dan prompt.</p>}
+        </>}
+        {node.type==='publisher'&&<>{field('targetAccount','Akun target','@namaakun')}{choice('format','Format post',['carousel','single'])}{checkbox('requireApproval','Memerlukan persetujuan')}{checkbox('autoStoryRepost','Repost ke story (konfigurasi)')}<p className="wf-inline-note">Kredensial Instagram belum terhubung. Pengujian menghasilkan status not_published.</p></>}
+        {node.type==='code'&&<>{field('scriptName','File skrip yang disiapkan','main.py')}<p className="wf-inline-note">Runner script belum terhubung. File Python atau shell tidak dijalankan.</p></>}
+        <details className="wf-advanced" open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)}><summary>Pengaturan lanjutan (opsional)</summary><p className="wf-muted">Saat dibuka, nama field, ekspresi, dan opsi teknis akan ditampilkan di form ini.</p>{checkbox('disabled','Lewati langkah ini')}{['set','aiAgent','aiGenerator'].includes(node.type||'')&&<p className="wf-expression-help">Ekspresi teknis: <code>{'{{ $json.namaField }}'}</code>.</p>}<button disabled={busy} className="wf-danger" onClick={()=>onDelete(node.id)}><Trash2 size={14}/>Hapus langkah</button></details>
+      </section>
+      <section className={'wf-io '+(tab==='results'?'is-current':'')}><h3>Hasil langkah ini</h3><p className="wf-muted">{result?({success:'Berhasil',simulated:'Pratinjau',error:'Perlu diperbaiki',skipped:'Dilewati',pinned:'Memakai hasil tersimpan'}[result.status])+' · '+result.durationMs+' ms':isSubNode(node.type)?'Bagian ini digunakan oleh AI Agent. Buka AI Agent untuk melihat hasilnya.':'Klik Uji langkah untuk melihat hasilnya di sini.'}</p>{result?.error&&<p role="alert" className="wf-error">{result.error}</p>}{result?.message&&<p className="wf-inline-note">{result.message}</p>}{!isSubNode(node.type)&&<DataViewer items={result?.output||[]}/>}
+        {advanced&&node.type!=='if'&&!isSubNode(node.type)&&<button disabled={busy||(!result?.output.length&&data.pinnedOutput==null)} className="wf-pin-button" onClick={()=>update('pinnedOutput',data.pinnedOutput!=null?null:result?.output)}><Pin size={14}/>{data.pinnedOutput!=null?'Lepas pin data':'Pin output untuk pengujian'}</button>}
+        {data.pinnedOutput!=null&&<p className="wf-muted">Pengujian berikutnya memakai data pin, bukan menghitung ulang node ini.</p>}
+        {!!result?.input.length&&<details className="wf-advanced"><summary>Bahan yang diterima dari langkah sebelumnya</summary><DataViewer items={result.input}/></details>}
+       </section>
+      </>}
+    </div>
+  </aside>
 }

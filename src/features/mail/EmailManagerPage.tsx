@@ -160,8 +160,7 @@ export function EmailManagerPage() {
             onSetLoadingInbox={mail.setLoadingInbox}
             onAddAccount={openAddAccount}
           />
-          <p className="em-rail-note">Kredensial tidak pernah ditampilkan otomatis. Buka lewat tombol Kredensial dan tutup kembali setelah selesai.</p>
-        </aside>
+         </aside>
 
         <div className="em-sheet">
           <div className="em-sheet-tools">

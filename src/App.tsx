@@ -9,7 +9,6 @@ import { SecurityPage } from '@/features/settings/SecurityPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { InvoicePage } from '@/features/invoices/InvoicePage'
 import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
-import { PromptStudioPage } from '@/features/prompt-studio/PromptStudioPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
 import { AuthPage } from '@/features/auth/AuthPage'
@@ -108,9 +107,9 @@ function DashboardContent() {
       case 'invoice':
         return <InvoicePage />
       case 'ai-generator':
-        return <AiGeneratorPage />
+        return <AiGeneratorPage key="ai-generator" />
       case 'prompt-studio':
-        return <PromptStudioPage />
+        return <AiGeneratorPage key="prompt-studio" initialMode="prompt_studio" />
       case 'automation':
         return <WorkflowStudioPage />
       case 'email-manager':
@@ -125,10 +124,10 @@ function DashboardContent() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className={`flex bg-background text-foreground ${activeTab === 'automation' ? 'h-dvh overflow-hidden' : 'min-h-screen'}`}>
       {/* Sidebar */}
       <Sidebar
-        activeTab={activeTab}
+        activeTab={activeTab === 'prompt-studio' ? 'ai-generator' : activeTab}
         setActiveTab={setActiveTab}
         collapsed={sidebarCollapsed}
         mobileOpen={mobileOpen}
@@ -136,7 +135,7 @@ function DashboardContent() {
       />
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
         <Header
           activeTab={activeTab}
           sidebarCollapsed={sidebarCollapsed}
@@ -145,7 +144,7 @@ function DashboardContent() {
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        <main className={`flex-1 min-w-0 animate-in fade-in duration-200 ${activeTab === 'automation' ? 'p-0 w-full' : 'p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto'}`}>
+        <main className={`flex-1 min-w-0 animate-in fade-in duration-200 ${activeTab === 'automation' ? 'p-0 w-full min-h-0 flex flex-col overflow-hidden' : ['ai-generator', 'prompt-studio', 'email-manager', 'invoice', 'invoices-list'].includes(activeTab) ? 'p-4 sm:p-6 lg:p-8 w-full' : 'p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto'}`}>
           {dataError && (
             <div role="alert" className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {dataError}

@@ -2,316 +2,131 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
+import { executeGraphAsync, validateGraph } from '../../shared/workflow-engine.js'
+import { decodeWorkflowRun } from '../workflow-history.js'
+import { createWorkflowRuntime } from '../workflow-runtime.js'
+import { isAiConnection } from '../../shared/workflow-connections.js'
 
 const router = Router()
+const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
+const parse = value => JSON.parse(value || '[]')
 
-// Default preset nodes for Auto-Post IG Bluudzstore
-const DEFAULT_IG_NODES = [
-  {
-    id: 'trigger-1',
-    type: 'trigger',
-    position: { x: 80, y: 150 },
-    data: {
-      label: 'Schedule Trigger',
-      cron: '0 10 * * *',
-      interval: 'Setiap Hari (10:00 WIB)',
-      enabled: true,
-    },
-  },
-  {
-    id: 'radar-1',
-    type: 'radar',
-    position: { x: 380, y: 150 },
-    data: {
-      label: 'Roblox Trend Radar',
-      targetGames: ['Blox Fruits', 'Fisch', 'Grow a Garden 2'],
-      strategy: 'pilar_edukasi_pemula',
-      autoScrape: true,
-    },
-  },
-  {
-    id: 'ai-gen-1',
-    type: 'aiGenerator',
-    position: { x: 680, y: 150 },
-    data: {
-      label: '9Router Visual & Caption AI',
-      model: 'gemini-3.7-flash-high',
-      aspectRatio: '4:5 (1080x1350)',
-      textMode: 'in_scene_3d',
-      qualityControl: true,
-    },
-  },
-  {
-    id: 'publisher-1',
-    type: 'publisher',
-    position: { x: 980, y: 150 },
-    data: {
-      label: 'Instagram Publisher',
-      targetAccount: '@bluudzstore',
-      format: 'carousel',
-      autoStoryRepost: true,
-      requireApproval: false,
-    },
-  },
-]
-
-const DEFAULT_IG_EDGES = [
-  { id: 'e1-2', source: 'trigger-1', target: 'radar-1', animated: true },
-  { id: 'e2-3', source: 'radar-1', target: 'ai-gen-1', animated: true },
-  { id: 'e3-4', source: 'ai-gen-1', target: 'publisher-1', animated: true },
-]
-
-// GET /api/workflows - Get user workflows
-router.get('/', requireUser, (req, res) => {
-  let list = db.prepare(`
-    select id, name, description, is_active, created_at, updated_at
-    from workflows where user_id = ?
-    order by updated_at desc
-  `).all(req.user.id)
-
-  // Seed default workflow if empty
-  if (list.length === 0) {
-    const id = randomUUID()
-    db.prepare(`
-      insert into workflows (id, user_id, name, description, nodes, edges, is_active)
-      values (?, ?, ?, ?, ?, ?, 1)
-    `).run(
-      id,
-      req.user.id,
-      'Pipeline Auto-Post IG @bluudzstore',
-      'Pipeline otomatis riset tren Roblox, generate visual 3D, copywriting, dan auto-publish ke Instagram.',
-      JSON.stringify(DEFAULT_IG_NODES),
-      JSON.stringify(DEFAULT_IG_EDGES)
-    )
-    list = db.prepare(`
-      select id, name, description, is_active, created_at, updated_at
-      from workflows where user_id = ?
-      order by updated_at desc
-    `).all(req.user.id)
+function templateGraph(template) {
+  const trigger = { id:'trigger-1', type:'trigger', position:{x:80,y:180}, data:{label:'Manual Trigger', triggerMode:'manual', sampleData:'{"topic":"Ide konten", "approved":true}'} }
+  if(template === 'blank') return {nodes:[],edges:[]}
+  if(template === 'chat-agent')return {
+    nodes:[
+      {id:'chat-1',type:'chatTrigger',position:{x:80,y:120},data:{label:'When chat message received',chatInput:'Bantu saya merencanakan carousel Instagram',sessionId:'test-session'}},
+      {id:'agent-1',type:'aiAgent',position:{x:430,y:120},data:{label:'AI Agent',executionMode:'live',aiPrompt:'{{ $json.chatInput }}',systemMessage:'Anda membantu menyusun rencana konten Instagram. Gunakan brief brand jika relevan. Tanyakan informasi yang belum tersedia. Jangan mengarang fakta atau mengaku membuat gambar dan memposting.',maxIterations:'3'}},
+      {id:'model-1',type:'chatModel',position:{x:230,y:380},data:{label:'9router Chat Model',model:'',temperature:'0.7'}},
+      {id:'memory-1',type:'memory',position:{x:460,y:380},data:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'}},
+      {id:'tool-1',type:'tool',position:{x:690,y:380},data:{label:'Tools',toolType:'knowledge',description:'Baca brief brand yang disediakan pengguna sebelum merencanakan konten.',content:'Brief brand belum diisi. Tanyakan produk, audiens, tujuan, dan CTA kepada pengguna.'}},
+    ],
+    edges:[{id:'chat-agent',source:'chat-1',target:'agent-1',sourceHandle:'out',targetHandle:'prompt'},...['model','memory','tool'].map((type,index)=>({id:type+'-agent',source:type+'-1',target:'agent-1',sourceHandle:['ai_languageModel','ai_memory','ai_tool'][index],targetHandle:['ai_languageModel','ai_memory','ai_tool'][index]}))],
   }
+  let steps
+  if(template === 'ig-autopost') {
+    trigger.data.sampleData = JSON.stringify({topic:'Ide carousel produk',product:'Nama produk',audience:'Calon pelanggan',objective:'Edukasi lalu mendorong percakapan',cta:'Kirim DM untuk informasi lebih lanjut',slideCount:3,factStatus:'needs_review',approved:false})
+    steps = [
+      {type:'set',data:{label:'Penentuan Topik',fields:'{"topic":"{{ $json.topic }}","product":"{{ $json.product }}","audience":"{{ $json.audience }}","objective":"{{ $json.objective }}","cta":"{{ $json.cta }}","slideCount":3,"contentStatus":"draft","factStatus":"{{ $json.factStatus }}"}',keepInput:true}},
+      {type:'aiAgent',data:{label:'Validasi Fakta',role:'Fact Checker',aiModel:'',aiPrompt:'Validasi fakta untuk konten Instagram tentang {{ $json.topic }} dan {{ $json.product }}. Target audiens: {{ $json.audience }}. Identifikasi setiap klaim, kebutuhan sumber, tanggal sumber, tingkat keyakinan, dan risiko klaim berlebihan. Tandai klaim yang harus ditinjau manusia sebelum dipublikasikan. Keluarkan hasil terstruktur dengan status factStatus: verified, needs_review, atau rejected.'}},
+      {type:'aiAgent',data:{label:'Strategi Marketing 3 Slide',role:'Content Strategist',aiModel:'',aiPrompt:'Rancang strategi marketing carousel Instagram 3 slide untuk {{ $json.topic }} tentang {{ $json.product }}. Target audiens: {{ $json.audience }}. Tujuan: {{ $json.objective }}. CTA: {{ $json.cta }}. Tetapkan Slide 1 sebagai hook, Slide 2 sebagai value atau proof, dan Slide 3 sebagai CTA. Jelaskan pesan utama, urutan narasi, angle, dan alasan strategi. Jangan membuat klaim yang belum tervalidasi.'}},
+      {type:'aiAgent',data:{label:'Copywriting',role:'Instagram Copywriter',aiModel:'',aiPrompt:'Tulis copy carousel Instagram 3 slide untuk {{ $json.topic }} tentang {{ $json.product }}. Target audiens: {{ $json.audience }}. CTA: {{ $json.cta }}. Hasilkan judul dan body singkat untuk setiap slide, caption Instagram, CTA, hashtag yang relevan, alt text, dan disclaimer bila diperlukan. Gunakan bahasa yang jelas, ringkas, dan sesuai konteks fakta yang sudah divalidasi.'}},
+      {type:'aiGenerator',data:{label:'Peracikan Prompt Gambar per Slide',aiModel:'',aiPrompt:'Racik prompt gambar untuk carousel Instagram 3 slide tentang {{ $json.topic }} dan {{ $json.product }}. Buat satu prompt visual per slide dengan alur hook, value/proof, dan CTA. Pertahankan produk, karakter, palet warna, pencahayaan, dan gaya visual yang konsisten. Gunakan rasio 4:5 (1080x1350), sisakan area aman untuk teks, dan tambahkan negative prompt untuk watermark, logo acak, teks rusak, serta elemen yang tidak relevan. Keluarkan hasil terstruktur per slide.','aspectRatio':'4:5 (1080x1350)'}},
+      {type:'aiAgent',data:{label:'Quality Check',role:'Content QA',aiModel:'',aiPrompt:'Periksa draft carousel Instagram 3 slide tentang {{ $json.topic }}. Validasi konsistensi fakta, kesesuaian strategi dengan tujuan {{ $json.objective }}, keterbacaan copy, kelengkapan CTA {{ $json.cta }}, kesinambungan antar-slide, rasio 4:5, keamanan area teks, dan potensi klaim berisiko. Keluarkan checklist lulus/gagal, daftar perbaikan, dan status qualityStatus: passed atau needs_revision.'}},
+      {type:'if',data:{label:'Persetujuan Manual',field:'approved',operator:'equals',value:'true'}},
+      {type:'publisher',data:{label:'Instagram Publisher',targetAccount:'',format:'carousel',requireApproval:true}},
+    ]
+  }
+  else if(template === 'ai-researcher') steps = [
+    {type:'aiAgent',data:{label:'Research Agent',role:'Analyst',aiModel:'',aiPrompt:'Analisis {{ $json.topic }}'}},
+    {type:'aiAgent',data:{label:'Copywriter',role:'Writer',aiModel:'',aiPrompt:'Susun naskah untuk {{ $json.topic }}'}},
+  ]
+  else steps = [
+    {type:'set',data:{label:'Edit Fields',fields:'{"headline":"Konten: {{ $json.topic }}"}',keepInput:true}},
+    {type:'if',data:{label:'Perlu persetujuan?',field:'approved',operator:'equals',value:'true'}},
+    {type:'set',data:{label:'Siap ditinjau',fields:'{"reviewStatus":"ready"}',keepInput:true}},
+  ]
+  const nodes = [trigger,...steps.map((step,i)=>({id:step.type+'-'+(i+1),position:{x:380+i*300,y:180},...step}))]
+  const edges = nodes.slice(1).map((node,i)=>({id:'edge-'+i,source:nodes[i].id,target:node.id,...(nodes[i].type==='if'?{sourceHandle:'true'}:{})}))
+  return {nodes,edges}
+}
 
-  res.json({ workflows: list })
+router.get('/', requireUser, (req,res)=>{
+  const workflows=db.prepare('select id,name,description,is_active,created_at,updated_at from workflows where user_id = ? order by updated_at desc').all(req.user.id)
+   res.json({workflows,capabilities:{simulation:true,scheduler:false,externalIntegrations:false}})
 })
-
-// GET /api/workflows/:id - Get specific workflow with nodes & edges
-router.get('/:id', requireUser, (req, res) => {
-  const row = db.prepare(`
-    select * from workflows where id = ? and user_id = ?
-  `).get(req.params.id, req.user.id)
-
-  if (!row) {
-    return res.status(404).json({ error: 'Workflow tidak ditemukan.' })
-  }
-
-  res.json({
-    workflow: {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      nodes: JSON.parse(row.nodes || '[]'),
-      edges: JSON.parse(row.edges || '[]'),
-      isActive: Boolean(row.is_active),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    },
+router.get('/:id',requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  res.json({workflow:{id:row.id,name:row.name,description:row.description,nodes:parse(row.nodes),edges:parse(row.edges),isActive:Boolean(row.is_active),createdAt:row.created_at,updatedAt:row.updated_at}})
+})
+router.post('/',requireSameOrigin,requireUser,(req,res)=>{
+  const name=typeof req.body?.name==='string'?req.body.name.trim():''
+  if(!name || name.length>160)return res.status(400).json({error:'Nama workflow wajib diisi, maksimal 160 karakter.'})
+  if(!['blank','starter','ig-autopost','ai-researcher','chat-agent'].includes(req.body?.template))return res.status(400).json({error:'Template tidak dikenal.'})
+  const description=typeof req.body?.description==='string'?req.body.description.slice(0,2000):''
+  const id=randomUUID(),{nodes,edges}=templateGraph(req.body.template)
+  db.prepare('insert into workflows (id,user_id,name,description,nodes,edges,is_active) values (?,?,?,?,?,?,0)').run(id,req.user.id,name,description,JSON.stringify(nodes),JSON.stringify(edges))
+  res.status(201).json({id,name,description,isActive:false})
+})
+router.put('/:id',requireSameOrigin,requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  if(req.body?.isActive)return res.status(400).json({error:'Jadwal otomatis belum tersedia. Workflow hanya dapat diuji secara manual.'})
+  const name=req.body?.name===undefined?row.name:String(req.body.name).trim()
+  if(!name || name.length>160)return res.status(400).json({error:'Nama workflow wajib diisi, maksimal 160 karakter.'})
+  const nodes=req.body?.nodes??parse(row.nodes),edges=req.body?.edges??parse(row.edges)
+  const errors=validateGraph(nodes,edges)
+  if(errors.length)return res.status(400).json({error:errors.join(' ')})
+  const savedNodes=nodes.map(node=>{
+    const {status:_status,lastOutput:_lastOutput,onTestNode:_onTestNode,result:_result,running:_running,...data}=node.data
+    return {id:node.id,type:node.type,position:node.position,data}
   })
+  const description=req.body?.description===undefined?row.description:String(req.body.description).slice(0,2000)
+  db.prepare("update workflows set name=?,description=?,nodes=?,edges=?,is_active=0,updated_at=datetime('now') where id=? and user_id=?").run(name,description,JSON.stringify(savedNodes),JSON.stringify(edges),row.id,req.user.id)
+  res.json({success:true,message:'Workflow tersimpan sebagai draft.'})
 })
-
-// POST /api/workflows - Create new workflow
-router.post('/', requireSameOrigin, requireUser, (req, res) => {
-  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : 'Workflow Baru'
-  const description = typeof req.body?.description === 'string' ? req.body.description.trim() : ''
-  const template = req.body?.template
-  const id = randomUUID()
-
-  let initialNodes = []
-  let initialEdges = []
-
-  if (template === 'ig-autopost') {
-    initialNodes = DEFAULT_IG_NODES
-    initialEdges = DEFAULT_IG_EDGES
-  } else if (template === 'ai-researcher') {
-    initialNodes = [
-      {
-        id: 'trigger-1',
-        type: 'trigger',
-        position: { x: 80, y: 150 },
-        data: { label: 'Daily Trigger', interval: 'Setiap Hari 08:00', cron: '0 8 * * *' },
-      },
-      {
-        id: 'agent-1',
-        type: 'aiAgent',
-        position: { x: 380, y: 150 },
-        data: {
-          label: 'Market Research Agent',
-          role: 'Analyst',
-          aiModel: 'deepseek-reasoner',
-          aiPrompt: 'Cari topik trending game online dan buat ringkasan eksekutif.',
-        },
-      },
-      {
-        id: 'agent-2',
-        type: 'aiAgent',
-        position: { x: 680, y: 150 },
-        data: {
-          label: 'Copywriter & Format Agent',
-          role: 'Writer',
-          aiModel: 'claude-sonnet-5-5',
-          aiPrompt: 'Ubah ringkasan menjadi naskah konten menarik untuk audience muda.',
-        },
-      },
-      {
-        id: 'pub-1',
-        type: 'publisher',
-        position: { x: 980, y: 150 },
-        data: { label: 'Instagram Publisher', targetAccount: '@bluudzstore', format: 'carousel' },
-      },
-    ]
-    initialEdges = [
-      { id: 'e1-2', source: 'trigger-1', target: 'agent-1', animated: true },
-      { id: 'e2-3', source: 'agent-1', target: 'agent-2', animated: true },
-      { id: 'e3-4', source: 'agent-2', target: 'pub-1', animated: true },
-    ]
-  }
-
-  db.prepare(`
-    insert into workflows (id, user_id, name, description, nodes, edges, is_active)
-    values (?, ?, ?, ?, ?, ?, 1)
-  `).run(id, req.user.id, name, description, JSON.stringify(initialNodes), JSON.stringify(initialEdges))
-
-  res.status(201).json({ id, name, description, isActive: true })
-})
-
-// PUT /api/workflows/:id - Save workflow nodes, edges, and settings
-router.put('/:id', requireSameOrigin, requireUser, (req, res) => {
-  const { name, description, nodes, edges, isActive } = req.body
-  const existing = db.prepare('select id from workflows where id = ? and user_id = ?').get(req.params.id, req.user.id)
-  if (!existing) {
-    return res.status(404).json({ error: 'Workflow tidak ditemukan.' })
-  }
-
-  db.prepare(`
-    update workflows
-    set name = coalesce(?, name),
-        description = coalesce(?, description),
-        nodes = coalesce(?, nodes),
-        edges = coalesce(?, edges),
-        is_active = coalesce(?, is_active),
-        updated_at = datetime('now')
-    where id = ? and user_id = ?
-  `).run(
-    name !== undefined ? String(name).trim() : null,
-    description !== undefined ? String(description).trim() : null,
-    nodes !== undefined ? JSON.stringify(nodes) : null,
-    edges !== undefined ? JSON.stringify(edges) : null,
-    isActive !== undefined ? (isActive ? 1 : 0) : null,
-    req.params.id,
-    req.user.id
-  )
-
-  res.json({ success: true, message: 'Workflow berhasil disimpan.' })
-})
-
-// DELETE /api/workflows/:id - Delete workflow
-router.delete('/:id', requireSameOrigin, requireUser, (req, res) => {
-  db.prepare('delete from workflows where id = ? and user_id = ?').run(req.params.id, req.user.id)
+router.delete('/:id',requireSameOrigin,requireUser,(req,res)=>{
+  if(!findWorkflow(req.params.id,req.user.id))return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  db.prepare('delete from workflows where id=? and user_id=?').run(req.params.id,req.user.id)
   res.status(204).end()
 })
-
-// POST /api/workflows/:id/execute - Dry-run / execute pipeline
-router.post('/:id/execute', requireSameOrigin, requireUser, async (req, res) => {
-  const workflow = db.prepare('select * from workflows where id = ? and user_id = ?').get(req.params.id, req.user.id)
-  if (!workflow) {
-    return res.status(404).json({ error: 'Workflow tidak ditemukan.' })
-  }
-
-  const nodes = JSON.parse(workflow.nodes || '[]')
-  const runId = randomUUID()
-  const logs = []
-
-  const addLog = (step, message, status = 'info') => {
-    logs.push({
-      time: new Date().toLocaleTimeString('id-ID'),
-      step,
-      message,
-      status,
-    })
-  }
-
-  addLog('Trigger', `Memulai eksekusi pipeline "${workflow.name}"`, 'success')
-
-  for (const node of nodes) {
-    const label = node.data?.label || node.type
-    const aiModel = node.data?.aiModel || node.data?.model
-
-    if (node.type === 'trigger') {
-      addLog(label, `Trigger aktif: ${node.data?.interval || 'Manual'} [Cron: ${node.data?.cron || '0 10 * * *'}]`, 'success')
-    } else if (node.type === 'radar') {
-      const games = node.data?.targetGames?.join(', ') || 'Roblox Games'
-      if (node.data?.aiEnabled && aiModel) {
-        addLog(label, `[Model: ${aiModel}] Menganalisis forum & sentimen komunitas...`, 'info')
-      }
-      addLog(label, `Memindai tren: ${games}`, 'info')
-      addLog(label, 'Topik terpilih: [Fisch Meta Update] - Destiny Rod & Celestial Mutation', 'success')
-    } else if (node.type === 'aiAgent') {
-      addLog(label, `[Agent Role: ${node.data?.role || 'Autonomous Analyst'}]`, 'info')
-      addLog(label, `[Model: ${aiModel || 'claude-sonnet-5-5'}] Menjalankan instruksi prompt...`, 'info')
-      if (node.data?.aiPrompt) {
-        addLog(label, `Task: "${node.data.aiPrompt.slice(0, 60)}..."`, 'success')
-      }
-      addLog(label, 'Agent berhasil menyelesaikan penalaran & menghasilkan output terstruktur.', 'success')
-    } else if (node.type === 'aiGenerator') {
-      addLog(label, `Menghubungi 9Router AI (${aiModel || 'gemini-3.7-flash-high'}) untuk visual & copy...`, 'info')
-      addLog(label, `Format Visual: ${node.data?.aspectRatio || '4:5 (1080x1350)'}`, 'success')
-      addLog(label, 'Copywriting & caption ter-generate: Hook + Pain Point + CTA bio', 'success')
-      if (node.data?.qualityControl) {
-        addLog(label, 'Quality Control: Skor QC 9.4/10. Visual bebas watermark dan teks terbaca jelas.', 'success')
-      }
-    } else if (node.type === 'code') {
-      addLog(label, `Mengeksekusi Python script: ${node.data?.scriptName || 'main_auto_pipeline.py'}`, 'info')
-      addLog(label, 'Script selesai dieksekusi dengan kode keluar 0 (OK).', 'success')
-    } else if (node.type === 'publisher') {
-      const account = node.data?.targetAccount || '@bluudzstore'
-      if (node.data?.requireApproval) {
-        addLog(label, `Post ditahan di antrean approval untuk ${account}. Menunggu konfirmasi admin.`, 'warning')
-      } else {
-        addLog(label, `Publish ${node.data?.format || 'carousel'} ke ${account} sukses!`, 'success')
-      }
-    } else {
-      addLog(label, `Menjalankan node tipe ${node.type}`, 'info')
+async function run(req,res,partial=false,chat=false){
+  const workflow=findWorkflow(req.params.id,req.user.id)
+  if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  if(partial && typeof req.body?.nodeId!=='string')return res.status(400).json({error:'Pilih node untuk Execute step.'})
+  try{
+    let nodes=parse(workflow.nodes)
+    let edges=parse(workflow.edges)
+    if(chat){
+      if(typeof req.body?.message!=='string'||!req.body.message.trim()||req.body.message.length>16000)return res.status(400).json({error:'Pesan chat wajib diisi, maksimal 16.000 karakter.'})
+      if(typeof req.body?.sessionId!=='string'||!req.body.sessionId||req.body.sessionId.length>200)return res.status(400).json({error:'Session ID chat tidak valid.'})
+      if(nodes.filter(node=>node.type==='chatTrigger'&&!node.data.disabled).length!==1)return res.status(400).json({error:'Uji chat membutuhkan tepat satu Chat Trigger aktif.'})
+      nodes=nodes.map(node=>node.type==='chatTrigger'?{...node,data:{...node.data,chatInput:req.body.message,sessionId:req.body.sessionId}}:node)
+      const scope=new Set()
+      const visit=id=>{if(scope.has(id))return;scope.add(id);edges.filter(edge=>edge.source===id&&!isAiConnection(edge)).forEach(edge=>visit(edge.target))}
+      visit(nodes.find(node=>node.type==='chatTrigger'&&!node.data.disabled).id)
+      edges.filter(edge=>scope.has(edge.target)&&isAiConnection(edge)).forEach(edge=>scope.add(edge.source))
+      nodes=nodes.filter(node=>scope.has(node.id));edges=edges.filter(edge=>scope.has(edge.source)&&scope.has(edge.target))
     }
+    const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id))
+    const runId=randomUUID()
+    db.prepare("insert into workflow_runs (id,workflow_id,user_id,status,trigger_type,logs,result,completed_at) values (?,?,?,?,?,?,?,datetime('now'))").run(runId,workflow.id,req.user.id,result.status,chat?'chat':partial?'partial':'manual',JSON.stringify(result.logs),JSON.stringify(result))
+    res.json({runId,...result,...(partial?{nodeId:req.body.nodeId,output:result.nodeResults[req.body.nodeId]?.output}:{})})
+  }catch(error){res.status(400).json({error:error.message})}
+}
+router.post('/:id/execute',requireSameOrigin,requireUser,(req,res)=>run(req,res))
+router.post('/:id/test-node',requireSameOrigin,requireUser,(req,res)=>run(req,res,true))
+router.post('/:id/chat',requireSameOrigin,requireUser,(req,res)=>run(req,res,false,true))
+router.get('/:id/runs',requireUser,(req,res)=>{
+  try {
+    if(!findWorkflow(req.params.id,req.user.id))return res.status(404).json({error:'Workflow tidak ditemukan.'})
+    const rows=db.prepare('select id,status,trigger_type,logs,result,started_at,completed_at from workflow_runs where workflow_id=? and user_id=? order by started_at desc,rowid desc limit 20').all(req.params.id,req.user.id)
+    res.json({runs:rows.map(decodeWorkflowRun)})
+  } catch(error) {
+    console.error('Workflow runs error:',error)
+    res.status(500).json({error:'Riwayat pengujian gagal dimuat. Periksa log backend workflow.'})
   }
-
-  addLog('Selesai', 'Pipeline berhasil dijalankan seluruhnya.', 'success')
-
-  db.prepare(`
-    insert into workflow_runs (id, workflow_id, user_id, status, trigger_type, logs, result)
-    values (?, ?, ?, 'completed', 'manual', ?, 'Success')
-  `).run(runId, workflow.id, req.user.id, JSON.stringify(logs))
-
-  res.json({
-    runId,
-    status: 'completed',
-    logs,
-  })
 })
-
-// GET /api/workflows/:id/runs - Get run history
-router.get('/:id/runs', requireUser, (req, res) => {
-  const runs = db.prepare(`
-    select id, status, trigger_type, logs, result, started_at, completed_at
-    from workflow_runs
-    where workflow_id = ? and user_id = ?
-    order by started_at desc
-    limit 20
-  `).all(req.params.id, req.user.id)
-
-  res.json({
-    runs: runs.map((r) => ({
-      ...r,
-      logs: JSON.parse(r.logs || '[]'),
-    })),
-  })
-})
-
 export default router

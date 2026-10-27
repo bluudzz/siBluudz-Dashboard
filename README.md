@@ -11,8 +11,12 @@ Starter template dashboard modern, cepat, dan responsif yang terinspirasi oleh *
 - 📱 **Fully Responsive**: Sidebar desktop yang dapat dilipat (*collapsible*) dan drawer menu untuk perangkat mobile/tablet.
 - ⚡ **Command Palette (`Ctrl + K` / `⌘K`)**: Quick navigation & pencarian instan ke seluruh halaman dan fitur.
 - 📊 **Visual Charts & KPI Cards**: Komponen visual interaktif untuk analitik metrik dan data performa.
-- 🧩 **Modular Clean Architecture**: Struktur folder terisolasi, siap diintegrasikan dengan REST API, Supabase, Firebase, atau Prisma.
-- ⚡ **Super Fast DX**: Ditenagai oleh Vite + React 19 + TypeScript.
+- ⚡ **Auto Workflow (Automation Studio)**: Visual automation drag & drop berbasis node graph (ala n8n) dengan AI Agent, conditional branching, model execution via 9router, serta pengujian per-langkah.
+- 🤖 **AI Generator**: Generator teks & prompt terintegrasi dengan 12+ tools, model switcher 9router, ganti produk di foto, dan history sinkronisasi.
+- 🧾 **Invoice Workspace & Builder**: Pengelolaan tagihan, penawaran PDF, cetak dokumen, dan editor builder terintegrasi.
+- 📬 **Email Manager**: Multi-account mailbox reader dengan dukungan OAuth2 (Microsoft Graph, Gmail) & IMAP TLS serta enkripsi kredensial AES-256-GCM.
+- 🧩 **Modular Clean Architecture**: Struktur folder terisolasi, backend Express + SQLite lokal, dan REST API internal.
+- ⚡ **Super Fast DX**: Ditenagai oleh Vite + React 19 + TypeScript + Tailwind CSS v4.
 
 ---
 
@@ -21,18 +25,20 @@ Starter template dashboard modern, cepat, dan responsif yang terinspirasi oleh *
 ```text
 src/
 ├── components/
-│   ├── layout/
-│   │   ├── Header.tsx         # Topbar (pencarian, tema, notifikasi, profil)
-│   │   ├── Sidebar.tsx        # Navigasi samping (collapsible & mobile-ready)
-│   │   ├── CommandDialog.tsx  # Modal pencarian cepat (Ctrl + K)
-│   │   └── navData.ts         # Konfigurasi menu navigasi terpusat
-│   └── ui/                    # Komponen atomik (Button, Card, Badge, Avatar, Input)
-├── context/
-│   └── ThemeContext.tsx       # State manajemen tema (Light / Dark / System)
-├── pages/                     # Halaman modular (Overview, Analytics, Customers, dll.)
-├── types/                     # Definisi TypeScript
-├── App.tsx                    # Layout utama & router
-└── index.css                  # Konfigurasi Tailwind CSS v4 & theme variables
+│   ├── layout/        # Header, Sidebar, CommandDialog, Navigation
+│   └── ui/            # Komponen dasar (Button, Card, Input, Modal)
+├── context/           # ThemeContext & global context
+├── features/          # Modul workspace terisolasi
+│   ├── ai-generator/  # AI prompt generator, tool catalog, image models
+│   ├── automation/    # Workflow Studio (Node canvas, node settings, agent runner)
+│   ├── invoices/      # Invoice listing, printing & workspace
+│   ├── mail/          # Email manager (IMAP/OAuth2 hooks & views)
+│   └── prompt-studio/ # Template prompt & testing
+├── pages/             # Halaman umum (Overview, Favorites, Settings, Security)
+├── types/             # TypeScript schema & definitions
+└── App.tsx            # Root application & routing
+server/                # Express backend + SQLite (Auth, Automation, Mail, AI API)
+shared/                # Workflow engine & connection models
 ```
 
 ---
@@ -48,7 +54,30 @@ npm install
 ```bash
 npm run dev
 ```
+Perintah ini akan menjalankan server API backend di port `3001` dan frontend Vite di port `5173`.
 Buka browser di: [http://localhost:5173/](http://localhost:5173/)
+
+### 3. Build & Test
+```bash
+# Jalankan test suite
+npm test
+
+# Build production
+npm run build
+```
+
+---
+
+## 🤖 Auto Workflow Studio
+
+- **Visual Automation Canvas**: Pembuat alur kerja node visual berbasis React Flow (`@xyflow/react`).
+- **AI Agent Node**: Menjalankan instruksi AI dengan pilihan model dinamis (integrasi 9router / custom OpenAI-compatible endpoints), tools khusus, dan memori sesi percakapan.
+- **Node Catalog**:
+  - `Mulai dari Chat (chatTrigger)` & `Jalankan Manual (trigger)`
+  - `AI Agent` (otonom & multi-tool)
+  - `Atur Data (set)` & `Periksa Kondisi (if)`
+  - Sub-node: `Model AI`, `Ingatan percakapan`, `Alat bantu AI`
+- **Eksekusi & Uji Langkah**: Pengujian langsung per-node (*Test Step*) atau eksekusi alur penuh dengan riwayat log status, durasi, dan output data.
 
 ## AI Generator workspace
 
@@ -98,18 +127,12 @@ The local SQLite file is private app data; include it in a secure backup and do 
 
 This is a private local development setup until deployed on a machine with a stable public address. Static-only hosting such as a frontend-only Vercel or Netlify deployment does not run this SQLite API or host the database file.
 
-### 3. Build untuk Produksi
-```bash
-npm run build
-```
-Hasil build akan berada di folder `dist/` dan siap dideploy.
-
 ---
 
 ## 🚀 Cara Menambah Halaman Baru
 
-1. Buat file baru di dalam `src/pages/` (contoh: `MyCustomPage.tsx`).
-2. Buka [src/components/layout/navData.ts](src/components/layout/navData.ts) lalu tambahkan item baru dengan id unik.
+1. Buat fitur atau halaman baru di dalam `src/features/` atau `src/pages/`.
+2. Daftarkan menu pada [src/components/layout/navData.ts](src/components/layout/navData.ts).
 3. Buka [src/App.tsx](src/App.tsx) lalu tambahkan `case` di fungsi `renderContent()`.
 
 ---

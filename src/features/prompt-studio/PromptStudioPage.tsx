@@ -4,7 +4,7 @@ import { buildArchitectPrompt, buildExecutorPrompt, initialBrief } from './promp
 import type { DesignBrief } from './prompt-builder'
 import './prompt-studio.css'
 
-export function PromptStudioPage() {
+export function PromptStudioPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [brief, setBrief] = useState<DesignBrief>(initialBrief)
   const [plan, setPlan] = useState('')
   const [stage, setStage] = useState<'architect' | 'executor'>('architect')
@@ -35,10 +35,10 @@ export function PromptStudioPage() {
   }
   return (
     <div className="prompt-studio">
-      <header className="ps-heading">
+      {!embedded && <header className="ps-heading">
         <div><h1>Prompt Studio</h1><p>Desain diputuskan AI pintar. Implementasi dikerjakan AI hemat.</p></div>
         <span className="ps-local">Tanpa kuota API</span>
-      </header>
+      </header>}
       <ol className="ps-flow" aria-label="Alur kerja">
         <li><strong>Tulis keinginan</strong><span>Tujuan dan konteks proyek</span></li>
         <li><strong>Rancang bersama AI pintar</strong><span>Salin prompt, dapatkan spesifikasi</span></li>

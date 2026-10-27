@@ -29,8 +29,10 @@
 .em-rail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 4px 16px; }
 .em-rail-heading h2 { font-size: 14px; font-weight: 600; }
 .em-rail-heading span { color: var(--em-muted); font-size: 12px; }
-.em-rail-group { margin-bottom: 20px; }
-.em-rail-group h3 { margin: 0 8px 6px; color: var(--em-muted); font-size: 12px; font-weight: 400; }
+.em-rail-group { margin-top: 20px; }
+.em-rail-group h3 { display: flex; align-items: center; gap: 10px; margin: 0 8px 10px; color: var(--em-muted); font-size: 12px; font-weight: 600; font-style: italic; line-height: 20px; }
+.em-rail-group h3::after { content: ''; flex: 1; height: 1px; background: var(--em-control); opacity: .6; }
+.em-rail-group + .em-rail-group { margin-top: 28px; }
 .em-rail-group > button { display: flex; width: 100%; align-items: center; gap: 8px; justify-content: space-between; padding: 9px 8px; border-radius: 6px; color: var(--em-muted); text-align: left; }
 .em-rail-group > button:hover, .em-rail-group > button.is-selected { background: var(--em-line); color: var(--em-ink); }
 .em-rail-group > button.is-selected { font-weight: 600; }

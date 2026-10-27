@@ -2,6 +2,9 @@ import * as React from 'react'
 import { ArrowUpRight, Check, ChevronDown, Copy, Download, History, ImagePlus, RefreshCw, Search, Send, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useUser } from '@/context/UserContext'
+import { PromptStudioPage } from '@/features/prompt-studio/PromptStudioPage'
+import { generatorTools, toolGroups, composeToolPrompt } from './tool-catalog'
+import type { GeneratorMode } from './tool-catalog'
 import './ai-generator.css'
 
 interface ModelCatalogEntry {
@@ -37,45 +40,6 @@ export interface ReframedData {
   cognitive_reframing: string
   prefill_prompt: string
 }
-
-type GeneratorMode =
-  | 'prompt_reframer'
-  | 'product_swap'
-  | 'prompt_builder'
-  | 'image_prompt'
-  | 'video_prompt'
-  | 'prompt_checker'
-  | 'prompt_optimizer'
-  | 'humanizer'
-  | 'website_prompt'
-  | 'invoice_items'
-  | 'proposal_structure'
-  | 'follow_up_message'
-
-const generatorTools: { mode: GeneratorMode; title: string; description: string; tag?: string }[] = [
-  {
-    mode: 'prompt_reframer',
-    title: 'Prompt Reframer (Agent)',
-    description: '4 arsitektur prompt teknis otomatis khusus untuk Autonomous Hermes Agent.',
-    tag: 'Hermes Engine',
-  },
-  {
-    mode: 'product_swap',
-    title: 'Ganti Produk di Foto',
-    description: 'Unggah foto referensi + foto produk Anda, AI mengganti produknya.',
-    tag: 'Image Edit',
-  },
-  { mode: 'prompt_builder', title: 'Prompt Generator', description: 'Ubah ide menjadi prompt terstruktur untuk AI.' },
-  { mode: 'image_prompt', title: 'Image Prompt', description: 'Rancang prompt visual untuk generator gambar.' },
-  { mode: 'video_prompt', title: 'Video Prompt', description: 'Tulis arahan adegan dan gerakan kamera.' },
-  { mode: 'prompt_checker', title: 'Prompt Checker', description: 'Evaluasi kualitas dan temukan bagian yang kurang.' },
-  { mode: 'prompt_optimizer', title: 'Prompt Optimizer', description: 'Perjelas dan tingkatkan prompt yang sudah ada.' },
-  { mode: 'humanizer', title: 'AI Humanizer', description: 'Buat teks lebih natural tanpa mengubah makna.' },
-  { mode: 'website_prompt', title: 'Website / Coding Prompt', description: 'Susun spesifikasi untuk AI coding assistant.' },
-  { mode: 'invoice_items', title: 'Item Invoice', description: 'Rinci jasa menjadi item dan estimasi biaya.' },
-  { mode: 'proposal_structure', title: 'Proposal Kerja', description: 'Susun outline proposal dan scope pekerjaan.' },
-  { mode: 'follow_up_message', title: 'Follow-up Klien', description: 'Buat pesan WhatsApp atau email profesional.' },
-]
 
 const OWNER_LABELS: Record<string, string> = {
   ag: 'Antigravity',
@@ -117,13 +81,15 @@ const FALLBACK_NINEROUTER_MODELS = [
   'muse-spark',
 ]
 
-export function AiGeneratorPage() {
+export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMode?: GeneratorMode } = {}) {
   const { profile } = useUser()
   const [aiStatus, setAiStatus] = React.useState<AiStatus | null>(null)
   const [statusLoading, setStatusLoading] = React.useState(true)
   const [statusError, setStatusError] = React.useState('')
 
-  const [mode, setMode] = React.useState<GeneratorMode>('prompt_builder')
+  const [mode, setMode] = React.useState<GeneratorMode>(initialMode)
+  const [contextByMode, setContextByMode] = React.useState<Record<string, string>>({})
+  const [studioVisited, setStudioVisited] = React.useState(initialMode === 'prompt_studio')
   const [inputsByMode, setInputsByMode] = React.useState<Record<string, string>>({})
   const [outputsByMode, setOutputsByMode] = React.useState<Record<string, string>>({})
   const [reframedByMode, setReframedByMode] = React.useState<Record<string, ReframedData | null>>({})
@@ -185,6 +151,8 @@ export function AiGeneratorPage() {
   const selectTool = (nextMode: GeneratorMode) => {
     if (generating) return
     setMode(nextMode)
+    if (nextMode === 'prompt_studio') setStudioVisited(true)
+    setIsModelDropdownOpen(false)
     setGenerationError('')
     setCopiedKey(null)
   }
@@ -302,6 +270,7 @@ export function AiGeneratorPage() {
   }, [fetchStatus])
 
   const handleGenerate = async () => {
+    if (mode === 'prompt_studio') return
     if (generating || statusLoading || isQuotaDepleted || !aiStatus?.configured) return
     if (mode === 'product_swap') {
       if (!isQuotaDepleted && aiStatus?.configured) await handleImageEdit()
@@ -332,7 +301,7 @@ export function AiGeneratorPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: promptInput,
+          prompt: composeToolPrompt(promptInput, contextByMode[mode] || '', activeTool.contextLabel),
           type: mode,
           model: activeModelToUse,
           context: contextPayload,
@@ -473,11 +442,7 @@ export function AiGeneratorPage() {
   const currentActiveModel = selectedModel || aiStatus?.model || 'gpt-4o-mini'
 
   const activeTool = generatorTools.find((tool) => tool.mode === mode)!
-  const toolGroups = [
-    { title: 'Prompt & konten', modes: ['prompt_builder', 'prompt_optimizer', 'prompt_checker', 'humanizer', 'prompt_reframer'] },
-    { title: 'Visual & development', modes: ['product_swap', 'image_prompt', 'video_prompt', 'website_prompt'] },
-    { title: 'Bisnis & klien', modes: ['invoice_items', 'proposal_structure', 'follow_up_message'] },
-  ]
+  const isLocalTool = mode === 'prompt_studio'
   const examples: Partial<Record<GeneratorMode, string>> = {
     prompt_builder: 'Buat prompt untuk merancang identitas visual toko kopi lokal. Sertakan konteks, tugas, batasan, dan format hasil.',
     prompt_optimizer: 'Perbaiki prompt ini agar tujuan, konteks, dan format hasilnya jelas: buat konten Instagram untuk bisnis kopi.',
@@ -503,6 +468,18 @@ export function AiGeneratorPage() {
     }
   }
 
+  const restoreHistory = (item: { type: string; prompt: string; result: string }) => {
+    const target = generatorTools.find(tool => tool.mode === item.type)?.mode
+    if (!target || target === 'prompt_studio' || generating) return
+    selectTool(target)
+    setInputsByMode(prev => ({ ...prev, [target]: item.prompt }))
+    // Stored prompts already include optional context from the original request.
+    setContextByMode(prev => ({ ...prev, [target]: '' }))
+    setOutputsByMode(prev => ({ ...prev, [target]: item.result }))
+    setReframedByMode(prev => ({ ...prev, [target]: null }))
+    setIsHistoryOpen(false)
+  }
+
   return (
     <div className="ai-workspace">
       <header className="ai-page-header">
@@ -513,7 +490,7 @@ export function AiGeneratorPage() {
         </div>
       </header>
 
-      <div className="ai-connection-bar" role="status">
+      {!isLocalTool && <><div className="ai-connection-bar" role="status">
         <span className="ai-connection"><span className={`ai-status-dot ${aiStatus?.configured ? 'is-connected' : ''}`} />{statusLoading ? 'Memeriksa koneksi…' : statusError ? 'Status tidak tersedia' : aiStatus?.configured ? '9router siap digunakan' : '9router belum dikonfigurasi'}</span>
         <span>{aiStatus ? `${aiStatus.role === 'admin' ? 'Admin' : aiStatus.tier === 'pro' ? 'Pro' : 'Free'} · ${aiStatus.usageToday} digunakan hari ini` : 'Pemakaian —'}</span>
         <span className="ai-quota">{aiStatus ? aiStatus.isUnlimited ? 'Tanpa batas harian' : `${aiStatus.remaining} dari ${aiStatus.dailyLimit} permintaan tersisa` : 'Kuota —'}{aiStatus && !aiStatus.isUnlimited && <progress aria-label="Pemakaian kuota harian" value={usagePercent} max={100} />}</span>
@@ -521,10 +498,12 @@ export function AiGeneratorPage() {
       {statusError && <div className="ai-notice" role="alert">{statusError} <button onClick={fetchStatus}>Coba lagi</button></div>}
       {aiStatus && !aiStatus.configured && <div className="ai-notice" role="alert">{profile.role === 'admin' ? 'Atur API Key 9router di Pengaturan untuk mulai membuat konten.' : 'Hubungi administrator untuk mengaktifkan koneksi AI.'}</div>}
       {isQuotaDepleted && <div className="ai-notice" role="alert">Kuota harian habis. Coba kembali setelah kuota direset atau hubungi administrator.</div>}
+      </>}
 
       <div className="ai-studio">
         <aside className="ai-tool-nav" aria-label="Pilihan tool AI">
           <div className="ai-nav-heading"><h2>Tool AI</h2><span>{generatorTools.length} tersedia</span></div>
+          <div className="ai-mobile-tools"><label htmlFor="ai-tool-select">Pilihan tool</label><select id="ai-tool-select" value={mode} disabled={generating} onChange={e => selectTool(e.target.value as GeneratorMode)}>{toolGroups.map(group => <optgroup key={group.title} label={group.title}>{group.modes.map(toolMode => { const tool = generatorTools.find(item => item.mode === toolMode)!; return <option key={toolMode} value={toolMode}>{tool.title}</option> })}</optgroup>)}</select></div>
           <label className="ai-search"><Search size={15} /><input aria-label="Cari tool AI" placeholder="Cari tool…" value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} /></label>
           <div className="ai-tool-groups">
             {toolGroups.map((group) => {
@@ -537,10 +516,11 @@ export function AiGeneratorPage() {
         </aside>
 
         <div className="ai-work-sheet">
-          <div className="ai-tool-heading"><div><h2>{activeTool.title}</h2><p>{activeTool.description}</p></div><span className="ai-muted">{mode === 'product_swap' ? 'Editor gambar' : 'Editor teks'}</span></div>
-          <div className="ai-editor-grid">
+          <div className="ai-tool-heading"><div><h2>{activeTool.title}</h2><p>{activeTool.description}</p></div><span className="ai-muted">{isLocalTool ? 'Lokal · tanpa kuota API' : mode === 'product_swap' ? 'AI · editor gambar' : 'AI · editor teks'}</span></div>
+          {studioVisited && <div hidden={!isLocalTool} className="ai-prompt-studio"><PromptStudioPage embedded /></div>}
+          <div className="ai-editor-grid" hidden={isLocalTool}>
             <section className="ai-compose" aria-labelledby="ai-instruction-title">
-              <div className="ai-section-heading"><h3 id="ai-instruction-title">Instruksi</h3><button className="ai-text-button" disabled={generating || !promptInput} onClick={() => { setPromptInput(''); setGenerationError('') }}>Kosongkan</button></div>
+              <div className="ai-section-heading"><h3 id="ai-instruction-title">{mode === 'product_swap' ? 'Foto sumber' : 'Bahan & arahan'}</h3><button className="ai-text-button" disabled={generating || (!promptInput && !contextByMode[mode])} onClick={() => { setPromptInput(''); setContextByMode(prev => ({ ...prev, [mode]: '' })); setGenerationError('') }}>Kosongkan</button></div>
               {mode !== 'product_swap' ? <div className="ai-model-picker" ref={dropdownRef}>
                 <label id="ai-model-label">Model AI</label>
                 <button className="ai-model-trigger" aria-labelledby="ai-model-label ai-model-value" aria-expanded={isModelDropdownOpen} aria-controls="ai-model-options" disabled={generating} onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}><span id="ai-model-value">{currentActiveModel}</span><ChevronDown size={16} /></button>
@@ -550,22 +530,23 @@ export function AiGeneratorPage() {
                   <div className="ai-model-list">{filteredNineRouterModels.map((name) => <button key={name} aria-pressed={currentActiveModel === name} onClick={() => { setSelectedModel(name); try { localStorage.setItem('sibluudz_ai_model', name) } catch { /* Storage can be unavailable in private sessions. */ } setIsModelDropdownOpen(false) }}><span>{name}</span>{currentActiveModel === name && <Check size={15} />}</button>)}{!filteredNineRouterModels.length && <p className="ai-muted">Model tidak ditemukan.</p>}</div>
                 </div>}
               </div> : <div className="ai-image-inputs">{([{ label: 'Foto referensi', value: sceneImage, setter: setSceneImage }, { label: 'Foto produk', value: productImage, setter: setProductImage }]).map(({ label, value, setter }) => <div className="ai-upload" key={label}><label><span>{label}</span>{value ? <img src={value} alt={label} /> : <span className="ai-upload-placeholder"><ImagePlus size={24} />Pilih gambar</span>}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={generating} onChange={(e) => { pickImage(e.target.files?.[0], setter); e.target.value = '' }} /></label>{value && <button aria-label={`Hapus ${label.toLowerCase()}`} disabled={generating} onClick={() => setter('')}><X size={14} /></button>}</div>)}<p className="ai-muted">PNG, JPG, WEBP · maksimal 6 MB per gambar.</p></div>}
-              <label className="ai-prompt-label" htmlFor="ai-prompt">{mode === 'product_swap' ? 'Arahan tambahan (opsional)' : 'Apa yang ingin dibuat?'}</label>
-              <textarea id="ai-prompt" ref={textareaRef} value={promptInput} onChange={(e) => setPromptInput(e.target.value)} onKeyDown={handleKeyDown} disabled={generating} placeholder={mode === 'product_swap' ? 'Jelaskan posisi produk, pencahayaan, atau detail yang ingin dipertahankan…' : 'Tulis tujuan, konteks, detail penting, dan format hasil yang diinginkan…'} />
-              {examples[mode] && <button className="ai-example" disabled={generating} onClick={() => { setPromptInput(examples[mode]!); textareaRef.current?.focus() }}><span>Gunakan contoh instruksi<ArrowUpRight size={14} /></span><span>{examples[mode]}</span></button>}
-              <div className="ai-compose-footer"><span className="ai-muted">{promptInput.length.toLocaleString('id-ID')} karakter · Ctrl / ⌘ + Enter</span><Button data-testid="generate" onClick={handleGenerate} disabled={!ready}>{generating ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}{generating ? 'Memproses…' : mode === 'product_swap' ? 'Ganti produk' : 'Buat hasil'}</Button></div>
+              <label className="ai-prompt-label" htmlFor="ai-prompt">{activeTool.inputLabel}</label>
+              <textarea id="ai-prompt" ref={textareaRef} value={promptInput} onChange={(e) => setPromptInput(e.target.value)} onKeyDown={handleKeyDown} disabled={generating} placeholder={activeTool.placeholder} />
+              {activeTool.contextLabel && <div className="ai-context-field"><label htmlFor="ai-context">{activeTool.contextLabel} <span>(opsional)</span></label><textarea id="ai-context" rows={2} maxLength={8000} value={contextByMode[mode] || ''} onChange={e => setContextByMode(prev => ({ ...prev, [mode]: e.target.value }))} disabled={generating} placeholder={activeTool.contextPlaceholder} /></div>}
+              {examples[mode] && <details className="ai-example-details" key={mode}><summary>Lihat contoh instruksi</summary><button className="ai-example" disabled={generating} onClick={() => { setPromptInput(examples[mode]!); textareaRef.current?.focus() }}><span>Gunakan contoh ini<ArrowUpRight size={14} /></span><span>{examples[mode]}</span></button></details>}
+              <div className="ai-compose-footer"><span className="ai-muted">{(promptInput.length + (contextByMode[mode]?.length || 0)).toLocaleString('id-ID')} karakter · Ctrl / ⌘ + Enter</span><Button data-testid="generate" onClick={handleGenerate} disabled={!ready}>{generating ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}{generating ? 'Memproses…' : activeTool.action}</Button></div>
               {!generating && !ready && <p className="ai-disabled-reason">{statusLoading ? 'Menunggu status koneksi.' : !aiStatus?.configured ? 'Koneksi AI belum siap.' : isQuotaDepleted ? 'Kuota harian sudah habis.' : mode === 'product_swap' ? 'Unggah kedua gambar untuk melanjutkan.' : 'Isi instruksi untuk mulai membuat hasil.'}</p>}
               {generationError && <div className="ai-notice" role="alert">{generationError}</div>}
             </section>
 
             <section className="ai-results" aria-labelledby="ai-results-title" aria-busy={generating}>
-              <div className="ai-section-heading"><h3 id="ai-results-title">Hasil</h3>{resultText && <button className="ai-text-button" onClick={() => copyText('result', resultText)}>{copiedKey === 'result' ? <Check size={14} /> : <Copy size={14} />}{copiedKey === 'result' ? 'Disalin' : 'Salin hasil'}</button>}</div>
+              <div className="ai-section-heading"><h3 id="ai-results-title">{activeTool.resultTitle}</h3>{resultText && <button className="ai-text-button" onClick={() => copyText('result', resultText)}>{copiedKey === 'result' ? <Check size={14} /> : <Copy size={14} />}{copiedKey === 'result' ? 'Disalin' : 'Salin hasil'}</button>}</div>
               {generating ? <div className="ai-result-loading" role="status"><RefreshCw size={20} className="animate-spin" /><h4>AI sedang mengolah instruksi</h4><p>Hasil akan muncul di sini. Waktu proses bergantung pada model yang dipilih.</p></div>
                 : mode === 'product_swap' ? imageResult ? <div className="ai-image-result"><img src={imageResult} alt="Hasil penggantian produk" /><a href={imageResult} download="produk-ai.png"><Download size={16} />Unduh gambar</a><a href={imageResult} target="_blank" rel="noreferrer">Buka ukuran penuh<ArrowUpRight size={14} /></a></div> : <div className="ai-empty-result"><div className="ai-empty-heading"><h4>Foto produk, dalam suasana baru.</h4><p>Unggah foto referensi dan produk. Hasil penggantian akan muncul di sini.</p></div><dl><div><dt>Referensi</dt><dd>Menentukan latar dan komposisi.</dd></div><div><dt>Produk</dt><dd>Objek yang akan ditempatkan.</dd></div><div><dt>Arahan</dt><dd>Detail posisi dan tampilan akhir.</dd></div></dl></div>
                 : resultText ? <>
                   {reframedData && <div className="ai-result-tabs"><button aria-pressed={viewMode === 'architectural'} onClick={() => setViewMode('architectural')}>Terstruktur</button><button aria-pressed={viewMode === 'raw'} onClick={() => setViewMode('raw')}>Teks asli</button></div>}
                   {reframedData && viewMode === 'architectural' ? <div className="ai-structured-result">{[{ title: 'Crescendo Chain', text: reframedData.crescendo?.join('\n\n') || '' }, { title: 'Policy Puppetry', text: reframedData.policy_puppetry }, { title: 'Cognitive Reframing', text: reframedData.cognitive_reframing }, { title: 'Completion & Prefill', text: reframedData.prefill_prompt }].map((item) => <details key={item.title} open><summary>{item.title}</summary><p>{item.text}</p><button className="ai-text-button" onClick={() => copyText(item.title, item.text)}>{copiedKey === item.title ? <Check size={14} /> : <Copy size={14} />}Salin bagian</button></details>)}</div> : <><label className="ai-muted" htmlFor="ai-result">Bisa diedit sebelum disalin.</label><textarea id="ai-result" className="ai-result-text" value={resultText} onChange={(e) => setGeneratedOutput(e.target.value)} spellCheck={false} /></>}
-                </> : <div className="ai-empty-result"><div className="ai-empty-heading"><span className="ai-result-mark" aria-hidden="true">Aa</span><h4>Ide masuk. Hasil siap dipakai.</h4><p>Pilih tool, tulis instruksi, lalu buat hasil. Ruang ini tetap terbuka untuk membaca dan menyunting.</p></div><dl><div><dt>Lebih terarah</dt><dd>Sebutkan tujuan dan audiens.</dd></div><div><dt>Lebih relevan</dt><dd>Tambahkan konteks pekerjaan.</dd></div><div><dt>Siap digunakan</dt><dd>Tentukan format hasil akhir.</dd></div></dl></div>}
+                </> : <div className="ai-empty-result"><div className="ai-empty-heading"><h4>{activeTool.resultTitle}</h4><p>Lengkapi bahan di panel input, lalu pilih “{activeTool.action}”. Hasil dapat kamu baca, edit, dan salin di sini.</p></div><ul className="ai-result-checklist">{activeTool.checklist.map(item => <li key={item}>{item}</li>)}</ul></div>}
               <p className="ai-result-note">Periksa kembali fakta, angka, dan detail sebelum menggunakan hasil AI.</p>
             </section>
           </div>
@@ -576,7 +557,7 @@ export function AiGeneratorPage() {
         <div className="ai-section-heading"><div><h2 id="ai-history-title">Riwayat generasi</h2><p className="ai-muted">{historyList.length} hasil tersimpan</p></div><button className="ai-icon-button" aria-label="Tutup riwayat" onClick={() => setIsHistoryOpen(false)}><X size={18} /></button></div>
         {historyError && <div className="ai-notice" role="alert">{historyError} <button onClick={fetchHistory}>Coba lagi</button></div>}
         {historyList.length > 0 && <button className="ai-text-button" onClick={handleClearHistory}><Trash2 size={14} />Hapus semua riwayat</button>}
-        <div className="ai-history-list">{historyLoading ? <p role="status">Memuat riwayat…</p> : !historyList.length ? <p className="ai-muted">Belum ada riwayat. Hasil generasi akan tersimpan di sini.</p> : historyList.map((item) => <article key={item.id}><div className="ai-history-meta"><span>{generatorTools.find((tool) => tool.mode === item.type)?.title || item.type}</span><span>{item.createdAt}</span></div><h3>{item.prompt}</h3><p>{item.result}</p><div className="ai-history-actions"><span title={item.model}>{item.model}</span><button className="ai-text-button" data-testid="restore-history" disabled={generating} onClick={() => { const target = generatorTools.find((tool) => tool.mode === item.type)?.mode; if (!target) return; selectTool(target); setInputsByMode((prev) => ({ ...prev, [target]: item.prompt })); setOutputsByMode((prev) => ({ ...prev, [target]: item.result })); setReframedByMode((prev) => ({ ...prev, [target]: null })); setIsHistoryOpen(false) }}>Gunakan kembali<ArrowUpRight size={14} /></button><button className="ai-icon-button" aria-label="Hapus riwayat ini" onClick={(e) => handleDeleteHistory(item.id, e)}><Trash2 size={15} /></button></div></article>)}</div>
+        <div className="ai-history-list">{historyLoading ? <p role="status">Memuat riwayat…</p> : !historyList.length ? <p className="ai-muted">Belum ada riwayat. Hasil generasi akan tersimpan di sini.</p> : historyList.map((item) => <article key={item.id}><div className="ai-history-meta"><span>{generatorTools.find((tool) => tool.mode === item.type)?.title || item.type}</span><span>{item.createdAt}</span></div><h3>{item.prompt}</h3><p>{item.result}</p><div className="ai-history-actions"><span title={item.model}>{item.model}</span><button className="ai-text-button" data-testid="restore-history" disabled={generating} onClick={() => restoreHistory(item)}>Gunakan kembali<ArrowUpRight size={14} /></button><button className="ai-icon-button" aria-label="Hapus riwayat ini" onClick={(e) => handleDeleteHistory(item.id, e)}><Trash2 size={15} /></button></div></article>)}</div>
       </dialog>
     </div>
   )
