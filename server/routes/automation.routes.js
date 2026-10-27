@@ -7,6 +7,7 @@ import { decodeWorkflowRun } from '../workflow-history.js'
 import { createWorkflowRuntime } from '../workflow-runtime.js'
 import { isAiConnection } from '../../shared/workflow-connections.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
+import { proposeWorkflowChange } from '../workflow-assistant.js'
 
 const router = Router()
 const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
@@ -161,6 +162,17 @@ async function run(req,res,partial=false,chat=false){
    }
    finally{active.running=false;setTimeout(()=>{if(activeRuns.get(activeKey)===active)activeRuns.delete(activeKey)},2500)}
 }
+router.post('/:id/assistant',requireSameOrigin,requireUser,async(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const graph=req.body?.nodes!==undefined||req.body?.edges!==undefined
+    ?sanitizeGraph(req.body?.nodes,req.body?.edges)
+    :normalizedWorkflow(row)
+  try{
+    const result=await proposeWorkflowChange({user:req.user,instruction:req.body?.instruction,nodes:graph.nodes,edges:graph.edges,history:req.body?.history,model:req.body?.model})
+    res.json(result)
+  }catch(error){res.status(422).json({error:error instanceof Error?error.message:'Asisten workflow gagal membuat usulan.'})}
+})
 router.post('/:id/execute',requireSameOrigin,requireUser,(req,res)=>run(req,res))
 router.post('/:id/test-node',requireSameOrigin,requireUser,(req,res)=>run(req,res,true))
 router.post('/:id/chat',requireSameOrigin,requireUser,(req,res)=>run(req,res,false,true))
