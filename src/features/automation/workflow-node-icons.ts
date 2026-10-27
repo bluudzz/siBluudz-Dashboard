@@ -1,7 +1,8 @@
-import { Bot, Brain, Braces, Camera, Clock, GitBranch, Globe, Images, List, MessageCircle, Search, Send, Settings, ShieldCheck, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, Brain, Braces, Camera, Clock, GitBranch, Globe, Images, List, MessageCircle, Search, Send, Settings, ShieldCheck, SquarePen, Wrench, type LucideIcon } from 'lucide-react'
 
 export const workflowNodeIcons:Record<string,LucideIcon> = {
   trigger:Clock,
+  promptTrigger:SquarePen,
   chatTrigger:MessageCircle,
   set:Braces,
   splitOut:List,

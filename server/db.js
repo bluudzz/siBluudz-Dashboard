@@ -88,6 +88,39 @@ db.exec(`
     updated_at text not null default (datetime('now'))
   );
   create index if not exists workflows_user_idx on workflows(user_id, updated_at desc);
+  create table if not exists workflow_media (
+    token text primary key,
+    user_id text not null references users(id) on delete cascade,
+    filename text not null,
+    mime_type text not null,
+    created_at text not null default (datetime('now'))
+  );
+  create index if not exists workflow_media_user_idx on workflow_media(user_id, created_at desc);
+  create table if not exists instagram_accounts (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    label text not null,
+    ig_user_id text not null,
+    username text not null default '',
+    auth_mode text not null,
+    encrypted_token text not null,
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now'))
+  );
+  create index if not exists instagram_accounts_user_idx on instagram_accounts(user_id, created_at desc);
+  create table if not exists instagram_publications (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    workflow_id text not null references workflows(id) on delete cascade,
+    node_id text not null,
+    content_hash text not null,
+    account_id text not null references instagram_accounts(id) on delete cascade,
+    status text not null,
+    media_id text not null default '',
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now')),
+    unique(user_id,workflow_id,node_id,content_hash)
+  );
   create table if not exists workflow_runs (
     id text primary key,
     workflow_id text not null references workflows(id) on delete cascade,

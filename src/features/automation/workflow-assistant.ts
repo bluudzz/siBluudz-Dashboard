@@ -3,6 +3,7 @@ import type { StudioNode } from './workflow-model'
 
 const editable:Record<string,string[]>={
   trigger:['label','triggerMode','sampleData','cron','interval'],
+  promptTrigger:['label','prompt','promptMode','model'],
   chatTrigger:['label','chatInput','sessionId'],
   chatModel:['label','temperature'],
   memory:['label','sessionKey','windowSize'],
@@ -12,7 +13,7 @@ const editable:Record<string,string[]>={
   aiAgent:['label','role','aiPrompt','systemMessage','maxIterations'],
 }
 const booleans=new Set(['keepInput'])
-const choices:Record<string,string[]>={temperature:['0','0.2','0.7','1'],windowSize:['1','5','10','20'],toolType:['knowledge','textLength'],maxIterations:['1','2','3','4','5'],triggerMode:['manual','schedule'],operator:['equals','contains','exists']}
+const choices:Record<string,string[]>={temperature:['0','0.2','0.7','1'],windowSize:['1','5','10','20'],toolType:['knowledge','textLength'],maxIterations:['1','2','3','4','5'],triggerMode:['manual','schedule'],promptMode:['normal','ai'],operator:['equals','contains','exists']}
 const secret=/password|secret|token|api.?key|credential|authorization|cookie/i
 function safe(value:unknown,depth=0):unknown {
   if(depth>3)return '[data disingkat]'

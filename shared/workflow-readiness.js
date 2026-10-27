@@ -22,7 +22,7 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
   if (targetNodeId) ancestors(targetNodeId)
   else nodes.filter(node => !isSubNode(node.type)).forEach(node => scope.add(node.id))
   const triggers = nodes.filter(node => scope.has(node.id) && isTrigger(node.type) && !node.data.disabled)
-  if (!triggers.length) add('error', 'trigger', targetNodeId ? 'Hubungkan langkah ini ke trigger yang aktif.' : 'Tambahkan Manual Trigger atau Chat Trigger yang aktif.')
+  if (!triggers.length) add('error', 'trigger', targetNodeId ? 'Hubungkan langkah ini ke trigger yang aktif.' : 'Tambahkan Prompt Trigger, Manual Trigger, atau Chat Trigger yang aktif.')
   const reachable = new Set()
   const visit = id => {
     if (reachable.has(id)) return
@@ -45,6 +45,12 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
       } catch { add('error', 'data', `${label}: perbaiki bahan atau informasi yang diisi. Data teknis harus berupa JSON yang valid sesuai format node.`, node.id) }
       if (node.type === 'trigger' && data.triggerMode === 'schedule') add('warning', 'schedule', `${label} hanya bisa dijalankan manual; jadwal otomatis belum aktif.`, node.id)
     }
+    if (node.type === 'promptTrigger') {
+      if (!String(data.prompt||'').trim() || String(data.prompt||'').length>16000) add('error','prompt-trigger-text',`${label}: tulis prompt, maksimal 16.000 karakter.`,node.id)
+      const mode=String(data.promptMode||'normal')
+      if (!['normal','ai'].includes(mode)) add('error','prompt-trigger-mode',`${label}: pilih mode Normal atau AI.`,node.id)
+      if (mode==='ai'&&!String(data.model||'').trim()) add('warning','prompt-trigger-model',`${label}: memakai model utama 9router dari pengaturan AI.`,node.id)
+    }
     if (node.type === 'aiAgent') {
       if (data.executionMode !== 'live') { add('warning', 'preview', `${label} masih pratinjau dan tidak memanggil model AI.`, node.id); continue }
       const resources = agentResources(node.id, nodes, edges)
@@ -63,6 +69,23 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
     if (node.type === 'searchContent') {
       if (String(data.query || '').length > 200) add('error', 'search-query', `${label}: topik pencarian maksimal 200 karakter.`, node.id)
       if (!Number.isInteger(Number(data.limit || 5)) || Number(data.limit || 5) < 1 || Number(data.limit || 5) > 10) add('error', 'search-limit', `${label}: pilih 1 sampai 10 sumber.`, node.id)
+    }
+    if (node.type === 'imageGenerate') {
+      if (!String(data.model||'').trim()) add('error','image-model',`${label}: pilih model gambar 9router.`,node.id)
+      if (String(data.prompt||'').length > 4000) add('error','image-prompt',`${label}: prompt gambar maksimal 4.000 karakter.`,node.id)
+      if (!String(data.prompt||'').trim()) add('warning','image-input',`${label}: prompt akan dibaca dari data "prompt" pada langkah sebelumnya.`,node.id)
+    }
+    if (node.type === 'instagram') {
+      const operation=String(data.operation||'publish')
+      if (!['publish','list','inspect'].includes(operation)) add('error','instagram-operation',`${label}: pilih operasi Instagram yang didukung.`,node.id)
+      if (!String(data.accountId||'').trim()) add('error','instagram-account',`${label}: hubungkan dan pilih akun Instagram.`,node.id)
+      if (operation==='publish') {
+        const previous=new Set()
+        const collect=id=>{if(previous.has(id))return;previous.add(id);dataEdges.filter(edge=>edge.target===id).forEach(edge=>collect(edge.source))}
+        collect(node.id)
+        if (!nodes.some(candidate=>previous.has(candidate.id)&&candidate.type==='approval'&&!candidate.data.disabled&&candidate.data.pinnedOutput==null)) add('error','instagram-approval',`${label}: hubungkan Persetujuan Manual yang aktif sebelum publikasi.`,node.id)
+        if (String(data.caption||'').length>2200) add('error','instagram-caption',`${label}: caption maksimal 2.200 karakter.`,node.id)
+      }
     }
     if (node.type === 'httpRequest') {
       const raw = String(data.url || '').trim()

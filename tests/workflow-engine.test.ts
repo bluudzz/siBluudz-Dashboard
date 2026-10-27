@@ -53,6 +53,44 @@ test('async graph reports one active node at a time',async()=>{
   assert.equal(result.status,'completed')
   assert.deepEqual(events,['start:start','complete:start','start:next','complete:next'])
 })
+test('Prompt Trigger normal passes the prompt without calling AI',()=>{
+  const source=node('prompt','promptTrigger',{prompt:'Buat konsep carousel rasio 4:5',promptMode:'normal'})
+  const next=node('next','set',{fields:'{"received":"{{ $json.prompt }}"}'})
+  const result=executeGraph([source,next],[edge('prompt','next')])
+  assert.equal(result.status,'completed')
+  assert.equal(result.nodeResults.prompt.output[0].json.prompt,'Buat konsep carousel rasio 4:5')
+  assert.equal(result.nodeResults.next.output[0].json.received,'Buat konsep carousel rasio 4:5')
+  assert.equal(result.mode,'simulation')
+})
+test('Prompt Trigger AI forwards the model answer and keeps the original request',async()=>{
+  const source=node('prompt','promptTrigger',{prompt:'Buat ide konten',promptMode:'ai',model:'test-model'})
+  const next=node('next','set',{fields:'{"received":"{{ $json.prompt }}"}'})
+  let calls=0
+  const result=await executeGraphAsync([source,next],[edge('prompt','next')],undefined,async context=>{
+    calls++
+    assert.equal(context.kind,'promptTrigger')
+    return [{json:{prompt:'Tiga slide edukasi',output:'Tiga slide edukasi',originalPrompt:'Buat ide konten'}}]
+  })
+  assert.equal(calls,1)
+  assert.equal(result.mode,'live')
+  assert.equal(result.nodeResults.next.output[0].json.received,'Tiga slide edukasi')
+  assert.equal(result.nodeResults.prompt.output[0].json.originalPrompt,'Buat ide konten')
+})
+test('Instagram publication waits for a completed manual approval',async()=>{
+  const start=node('start','trigger',{sampleData:JSON.stringify({imageUrl:'https://example.com/photo.jpg'})})
+  const approval=node('review','approval')
+  const publish=node('publish','instagram',{operation:'publish',accountId:'account'})
+  let calls=0
+  const links=[edge('start','review'),edge('review','publish')]
+  const waiting=await executeGraphAsync([start,approval,publish],links,undefined,async()=>{calls++;return []})
+  assert.equal(waiting.nodeResults.review.status,'waiting')
+  assert.equal(waiting.nodeResults.publish.status,'skipped')
+  assert.equal(calls,0)
+  const approved=node('review','approval',{approvedItems:[{json:{imageUrl:'https://example.com/photo.jpg'}}]})
+  const completed=await executeGraphAsync([start,approved,publish],links,undefined,async()=>{calls++;return [{json:{instagramStatus:'published'}}]})
+  assert.equal(completed.nodeResults.publish.status,'success')
+  assert.equal(calls,1)
+})
 test('empty branches and disconnected nodes stay skipped',()=>{
   const result=executeGraph([trigger,node('if','if',{field:'topic',value:'missing'}),node('yes','set'),node('orphan','set')],[edge('start','if'),edge('if','yes','true')])
   assert.equal(result.nodeResults.yes.status,'skipped')

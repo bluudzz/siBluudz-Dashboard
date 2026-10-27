@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 
-export const dataLabels:Record<string,string>={topic:'Topik',product:'Produk',audience:'Audiens',objective:'Tujuan',cta:'Ajakan tindakan',slideCount:'Jumlah slide',approved:'Sudah disetujui',factStatus:'Status fakta',contentStatus:'Status konten',qualityStatus:'Status kualitas',chatInput:'Pesan pengguna',sessionId:'Sesi percakapan',output:'Jawaban AI',headline:'Judul utama',title:'Judul',reviewStatus:'Status peninjauan',researchQuery:'Kata kunci pencarian',sources:'Sumber ditemukan',sourceCount:'Jumlah sumber',toolSteps:'Alat yang dipakai'}
+export const dataLabels:Record<string,string>={topic:'Topik',product:'Produk',audience:'Audiens',objective:'Tujuan',cta:'Ajakan tindakan',slideCount:'Jumlah slide',approved:'Sudah disetujui',factStatus:'Status fakta',contentStatus:'Status konten',qualityStatus:'Status kualitas',chatInput:'Pesan pengguna',sessionId:'Sesi percakapan',prompt:'Prompt untuk langkah berikutnya',originalPrompt:'Perintah awal',output:'Jawaban AI',headline:'Judul utama',title:'Judul',reviewStatus:'Status peninjauan',researchQuery:'Kata kunci pencarian',sources:'Sumber ditemukan',sourceCount:'Jumlah sumber',toolSteps:'Alat yang dipakai'}
 export const dataLabel=(key:string)=>dataLabels[key]||key.replace(/([a-z])([A-Z])/g,'$1 $2').replaceAll('_',' ')
 export function friendlyPrompt(value:string) { return value.replace(/\{\{\s*\$json\.([\w.-]+)\s*\}\}/g,(_,key)=>`[${dataLabel(key)}]`) }
 export function technicalPrompt(value:string,keys:string[]) {

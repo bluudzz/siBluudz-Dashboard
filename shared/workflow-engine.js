@@ -1,5 +1,5 @@
 import { aiPorts, isSubNode, isTrigger, isAiConnection, agentResources } from './workflow-connections.js'
-export const WORKFLOW_NODE_TYPES = new Set(['trigger', 'chatTrigger', 'chatModel', 'memory', 'tool', 'set', 'splitOut', 'if', 'aiAgent', 'approval', 'searchContent', 'httpRequest'])
+export const WORKFLOW_NODE_TYPES = new Set(['trigger', 'chatTrigger', 'promptTrigger', 'chatModel', 'memory', 'tool', 'set', 'splitOut', 'if', 'aiAgent', 'approval', 'searchContent', 'httpRequest', 'imageGenerate', 'instagram'])
 const TYPES = WORKFLOW_NODE_TYPES
 const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const own = (value, key) => object(value) && Object.hasOwn(value, key)
@@ -140,6 +140,22 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
       else if (data.pinnedOutput !== undefined && data.pinnedOutput !== null) { result.output = parseItems(data.pinnedOutput); result.status = 'pinned'; result.message = 'Menggunakan data pin untuk pengujian.'; if(node.type === 'if') throw new Error('Pin pada IF belum didukung. Pin data pada node sebelum IF.') }
       else if (node.type === 'trigger') result.output = parseItems(data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
       else if (node.type === 'chatTrigger') result.output = [{json:{chatInput:String(data.chatInput||''),sessionId:String(data.sessionId||'test-session')}}]
+      else if (node.type === 'promptTrigger') {
+        const prompt=String(data.prompt||'').trim()
+        if(!prompt||prompt.length>16000)throw new Error('Tulis prompt pemicu, maksimal 16.000 karakter.')
+        const mode=String(data.promptMode||'normal')
+        if(mode==='normal') {
+          result.output=[{json:{prompt,originalPrompt:prompt}}]
+          result.message='Prompt diteruskan tanpa memanggil AI.'
+        } else if(mode==='ai') {
+          if(!live)throw new Error('Mode AI Prompt Trigger hanya dapat dijalankan melalui backend.')
+          const response=yield {kind:'promptTrigger',node,input:[]}
+          if(response.error)throw new Error(response.error)
+          result.output=response.output
+          result.message='AI menyelesaikan prompt dan mengirim hasilnya ke langkah berikutnya.'
+          usedLive=true
+        } else throw new Error('Mode Prompt Trigger tidak didukung.')
+      }
       else if (node.type === 'approval') {
         if (data.approvedItems != null) { result.output = parseItems(data.approvedItems); if (!result.output.length) throw new Error('Hasil persetujuan kosong. Cabut persetujuan lalu uji ulang.'); result.message = 'Meneruskan versi konten yang sudah Anda setujui.' }
         else { result.status = 'waiting'; result.message = 'Tinjau bahan masuk, lalu setujui hasilnya pada node ini dan jalankan ulang.'; awaitingApproval = true; blockDescendants(id) }
@@ -151,6 +167,21 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         result.output = response.output
         usedLive = true
         result.message = node.type === 'searchContent' ? 'Sumber berita berhasil diambil; periksa tanggal dan fakta sebelum dipakai.' : 'Respons halaman/API berhasil diambil.'
+      }
+      else if (node.type === 'imageGenerate' || node.type === 'instagram') {
+        if (!live) throw new Error('Langkah ini hanya dapat diuji lewat backend.')
+        if (node.type === 'instagram' && (data.operation || 'publish') === 'publish') {
+          const parents = new Set()
+          const collect = current => { if (parents.has(current)) return; parents.add(current); edges.filter(edge => edge.target === current).forEach(edge => collect(edge.source)) }
+          collect(node.id)
+          const approved = nodes.some(candidate => candidate.type === 'approval' && parents.has(candidate.id) && nodeResults[candidate.id]?.status === 'success' && nodeResults[candidate.id].output.length > 0)
+          if (!approved) throw new Error('Publikasi memerlukan hasil Persetujuan Manual yang benar-benar sudah dijalankan.')
+        }
+        const response = yield {kind:node.type,node,input}
+        if (response.error) throw new Error(response.error)
+        result.output = response.output
+        usedLive = true
+        result.message = node.type === 'imageGenerate' ? 'Gambar dibuat dengan model 9router; periksa hasil sebelum publikasi.' : 'Operasi Instagram selesai; lihat ID dan status post pada hasil.'
       }
       else if (node.type === 'set') {
         const fields = typeof data.fields === 'string' ? JSON.parse(data.fields || '{}') : data.fields || {}
