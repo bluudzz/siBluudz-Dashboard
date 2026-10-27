@@ -25,14 +25,15 @@ function parseImageResponse(data) {
 // Model Muse (sdwebui/*) memakai /images/generations standar dan tidak terdaftar di /models.
 export const CHAT_IMAGE_MODEL = /^ag\/gemini-[\w.-]*image/i
 
-async function requestImage(config,model,prompt,fetchImpl) {
+async function requestImage(config,model,prompt,fetchImpl,signal) {
   const base = config.baseUrl.replace(/\/chat\/completions\/?$/,'').replace(/\/+$/,'')
   const isChatImage = CHAT_IMAGE_MODEL.test(model)
   const endpoint = isChatImage ? `${base}/chat/completions` : `${base}/images/generations`
   const body = isChatImage
     ? {model,messages:[{role:'user',content:`Buat satu gambar untuk posting Instagram. Hasilkan gambar saja. ${prompt}`}],stream:false}
     : {model,prompt,response_format:'b64_json',output_format:'jpeg',n:1}
-  const response = await fetchImpl(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.apiKey}`},body:JSON.stringify(body),signal:AbortSignal.timeout(90_000)})
+  const requestSignal=signal?AbortSignal.any([signal,AbortSignal.timeout(90_000)]):AbortSignal.timeout(90_000)
+  const response = await fetchImpl(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.apiKey}`},body:JSON.stringify(body),signal:requestSignal})
   const text = await response.text()
   let data
   try { data = JSON.parse(text) } catch { throw new Error(`Respons model gambar bukan JSON (${response.status}).`) }
@@ -40,7 +41,7 @@ async function requestImage(config,model,prompt,fetchImpl) {
   return parseImageResponse(data)
 }
 
-export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage=storeWorkflowImage}={}) {
+export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage=storeWorkflowImage,signal}={}) {
   const config=getNineRouterConfig()
   if (!config.apiKey) throw new Error('Hubungkan API Key 9router sebelum membuat gambar.')
   const model=String(node.data.model||getSetting('ninerouter_image_model','')).trim()
@@ -54,7 +55,8 @@ export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage
     if (user.role!=='admin'&&count>=limit) throw new Error('Kuota AI harian habis. Periksa pengaturan akun Anda.')
     const prompt=String(resolveValue(node.data.prompt||'{{ $json.prompt }}',item.json)).trim()
     if (!prompt||prompt.length>MAX_PROMPT) throw new Error('Prompt gambar wajib diisi, maksimal 4.000 karakter.')
-    const image=await requestImage(config,model,prompt,fetchImpl)
+    if(signal?.aborted)throw signal.reason instanceof Error?signal.reason:new Error('Pengujian dihentikan pengguna.')
+    const image=await requestImage(config,model,prompt,fetchImpl,signal)
     let stored
     if (image.encoded) stored=await storeImage(user.id,image.encoded)
     else {

@@ -1,5 +1,5 @@
 import { aiPorts, isSubNode, isTrigger, isAiConnection, agentResources } from './workflow-connections.js'
-export const WORKFLOW_NODE_TYPES = new Set(['trigger', 'chatTrigger', 'promptTrigger', 'chatModel', 'memory', 'tool', 'set', 'splitOut', 'if', 'aiAgent', 'approval', 'searchContent', 'httpRequest', 'imageGenerate', 'instagram'])
+export const WORKFLOW_NODE_TYPES = new Set(['trigger', 'chatTrigger', 'promptTrigger', 'chatModel', 'memory', 'tool', 'set', 'splitOut', 'if', 'aiAgent', 'approval', 'searchContent', 'httpRequest', 'googleDrive', 'imageGenerate', 'instagram'])
 const TYPES = WORKFLOW_NODE_TYPES
 const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const own = (value, key) => object(value) && Object.hasOwn(value, key)
@@ -160,13 +160,13 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         if (data.approvedItems != null) { result.output = parseItems(data.approvedItems); if (!result.output.length) throw new Error('Hasil persetujuan kosong. Cabut persetujuan lalu uji ulang.'); result.message = 'Meneruskan versi konten yang sudah Anda setujui.' }
         else { result.status = 'waiting'; result.message = 'Tinjau bahan masuk, lalu setujui hasilnya pada node ini dan jalankan ulang.'; awaitingApproval = true; blockDescendants(id) }
       }
-      else if (node.type === 'searchContent' || node.type === 'httpRequest') {
+      else if (node.type === 'searchContent' || node.type === 'httpRequest' || node.type === 'googleDrive') {
         if (!live) throw new Error('Langkah internet hanya dapat diuji lewat backend.')
-        const response = yield {kind:'external',node,input}
+        const response = yield {kind:node.type==='googleDrive'?'googleDrive':'external',node,input}
         if (response.error) throw new Error(response.error)
         result.output = response.output
         usedLive = true
-        result.message = node.type === 'searchContent' ? 'Sumber berita berhasil diambil; periksa tanggal dan fakta sebelum dipakai.' : 'Respons halaman/API berhasil diambil.'
+        result.message = node.type === 'searchContent' ? 'Sumber berita berhasil diambil; periksa tanggal dan fakta sebelum dipakai.' : node.type==='googleDrive'?'File Google Drive berhasil dibaca.':'Respons halaman/API berhasil diambil.'
       }
       else if (node.type === 'imageGenerate' || node.type === 'instagram') {
         if (!live) throw new Error('Langkah ini hanya dapat diuji lewat backend.')
@@ -241,14 +241,19 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
 export function executeGraph(nodes,edges,targetNodeId) {
   return graphSteps(nodes,edges,targetNodeId).next().value
 }
-export async function executeGraphAsync(nodes,edges,targetNodeId,runAgent,onProgress=()=>{}) {
+export async function executeGraphAsync(nodes,edges,targetNodeId,runAgent,onProgress=()=>{},signal) {
   const steps=graphSteps(nodes,edges,targetNodeId,true,onProgress)
   let step=steps.next()
   while(!step.done){
     let response
-    try { response={output:await runAgent(step.value)} }
+    if(signal?.aborted)response={error:'Pengujian dihentikan pengguna.'}
+    else try { response={output:await runAgent(step.value)} }
     catch(error) { response={error:error.message} }
     step=steps.next(response)
+    if(signal?.aborted){
+      while(!step.done)step=steps.next({error:'Pengujian dihentikan pengguna.'})
+      return {...step.value,status:'cancelled'}
+    }
   }
   return step.value
 }

@@ -45,6 +45,20 @@ test('agent runs only connected tools and stores a bounded session history after
   assert.equal(saved.session,'session-a')
   assert.equal(saved.messages.length,2)
 })
+test('agent can call the five-page research tool and receives sourced results',async()=>{
+  let modelCalls=0
+  let searched=''
+  const resources={model:nodes[2],memory:undefined,tools:[node('research','tool',{toolType:'webResearch',description:'Riset web'})]}
+  const output=await runWorkflowAgent({node:nodes[1],input:[{json:{chatInput:'Cari fakta Fisch'}}],resources,researchWeb:async(query:string)=>{searched=query;return {readCount:1,pages:[{url:'https://example.com/fisch',status:'read',content:'Fakta sumber'}]}},createModel:()=>createTestModel(async(request:any)=>{
+    modelCalls++
+    if(modelCalls===1)return {choices:[{message:{tool_calls:[{id:'research-1',type:'function',function:{name:'workflow_tool_0',arguments:'{"query":"Fisch Roblox"}'}}]}}]}
+    assert.match(String(request.messages.at(-1).content),/https:\/\/example.com\/fisch/)
+    return {choices:[{message:{content:'Fakta dari sumber: https://example.com/fisch'}}]}
+  })})
+  assert.equal(searched,'Fisch Roblox')
+  assert.equal(output[0].json.toolSteps.length,1)
+  assert.equal(modelCalls,2)
+})
 test('SDK agent can answer without tools and rejects unknown tool calls',async()=>{
   const resources=agentResources('agent',nodes,edges)
   const output=await runWorkflowAgent({node:nodes[1],input:[{json:{chatInput:'Halo'}}],resources:{...resources,memory:undefined,tools:[]},createModel:()=>createTestModel(async()=>({choices:[{message:{role:'assistant',content:'Hai'}}]}))})

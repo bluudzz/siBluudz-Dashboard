@@ -53,6 +53,16 @@ test('async graph reports one active node at a time',async()=>{
   assert.equal(result.status,'completed')
   assert.deepEqual(events,['start:start','complete:start','start:next','complete:next'])
 })
+test('async graph stops before continuing when its signal is aborted',async()=>{
+  const controller=new AbortController()
+  const source=node('prompt','promptTrigger',{prompt:'Tunggu',promptMode:'ai',model:'test-model'})
+  const next=node('next','set',{fields:'{"continued":true}'})
+  const execution=executeGraphAsync([source,next],[edge('prompt','next')],undefined,async()=>{
+    controller.abort(Object.assign(new Error('Pengujian dihentikan pengguna.'),{code:'WORKFLOW_STOPPED'}))
+    return [{json:{output:'late'}}]
+  },()=>{},controller.signal)
+  assert.equal((await execution).status,'cancelled')
+})
 test('Prompt Trigger normal passes the prompt without calling AI',()=>{
   const source=node('prompt','promptTrigger',{prompt:'Buat konsep carousel rasio 4:5',promptMode:'normal'})
   const next=node('next','set',{fields:'{"received":"{{ $json.prompt }}"}'})

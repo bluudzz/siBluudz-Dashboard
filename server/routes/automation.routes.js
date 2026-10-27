@@ -36,6 +36,19 @@ function templateGraph(template) {
     ],
     edges:[{id:'chat-agent',source:'chat-1',target:'agent-1',sourceHandle:'out',targetHandle:'prompt'},...['model','memory','tool'].map((type,index)=>({id:type+'-agent',source:type+'-1',target:'agent-1',sourceHandle:['ai_languageModel','ai_memory','ai_tool'][index],targetHandle:['ai_languageModel','ai_memory','ai_tool'][index]}))],
   }
+  if(template === 'ig-research')return {
+    nodes:[
+      {id:'topic-1',type:'promptTrigger',position:{x:80,y:140},data:{label:'Topik riset',prompt:'Cari fakta terbaru tentang Fisch Roblox untuk konten Instagram @bluudzstore',promptMode:'normal'}},
+      {id:'research-1',type:'aiAgent',position:{x:450,y:140},data:{label:'Riset konten AI',executionMode:'live',aiPrompt:'Teliti topik ini: {{ $json.prompt }}. Cari sumber web, baca halaman yang tersedia, tulis fakta dengan URL dan tanggal sumber, lalu pisahkan hal yang belum terverifikasi. Pertahankan nama game, gear, lokasi, dan slang gamer dalam bahasa aslinya.',systemMessage:'Anda peneliti konten Roblox untuk @bluudzstore. Gunakan alat pencarian. Jangan mengarang angka, patch, stat, atau mekanik. Jika halaman sumber gagal dibaca, tandai belum terverifikasi.',maxIterations:'3'}},
+      {id:'model-1',type:'chatModel',position:{x:350,y:390},data:{label:'Model AI · 9router',model:'',temperature:'0.2'}},
+      {id:'web-tool-1',type:'tool',position:{x:690,y:390},data:{label:'Cari web · 5 halaman',toolType:'webResearch'}},
+    ],
+    edges:[
+      {id:'topic-research',source:'topic-1',target:'research-1',sourceHandle:'out',targetHandle:'prompt'},
+      {id:'model-research',source:'model-1',target:'research-1',sourceHandle:'ai_languageModel',targetHandle:'ai_languageModel'},
+      {id:'web-research',source:'web-tool-1',target:'research-1',sourceHandle:'ai_tool',targetHandle:'ai_tool'},
+    ],
+  }
   let steps
   if(template === 'ig-autopost') {
     trigger.data.sampleData = JSON.stringify({topic:'Ide carousel produk',product:'Nama produk',audience:'Calon pelanggan',objective:'Edukasi lalu mendorong percakapan',cta:'Kirim DM untuk informasi lebih lanjut',slideCount:3,factStatus:'needs_review'})
@@ -76,7 +89,7 @@ router.get('/:id',requireUser,(req,res)=>{
 router.post('/',requireSameOrigin,requireUser,(req,res)=>{
   const name=typeof req.body?.name==='string'?req.body.name.trim():''
   if(!name || name.length>160)return res.status(400).json({error:'Nama workflow wajib diisi, maksimal 160 karakter.'})
-  if(!['blank','starter','ig-autopost','ai-researcher','chat-agent'].includes(req.body?.template))return res.status(400).json({error:'Template tidak dikenal.'})
+  if(!['blank','starter','ig-autopost','ai-researcher','chat-agent','ig-research'].includes(req.body?.template))return res.status(400).json({error:'Template tidak dikenal.'})
   const description=typeof req.body?.description==='string'?req.body.description.slice(0,2000):''
   const id=randomUUID(),{nodes,edges}=templateGraph(req.body.template)
   db.prepare('insert into workflows (id,user_id,name,description,nodes,edges,is_active) values (?,?,?,?,?,?,0)').run(id,req.user.id,name,description,JSON.stringify(nodes),JSON.stringify(edges))
@@ -111,7 +124,8 @@ async function run(req,res,partial=false,chat=false){
   if(partial && typeof req.body?.nodeId!=='string')return res.status(400).json({error:'Pilih node untuk Execute step.'})
   const activeKey=req.user.id+':'+workflow.id
   if(activeRuns.get(activeKey)?.running)return res.status(409).json({error:'Workflow ini sedang berjalan. Tunggu hasilnya sebelum menjalankan lagi.'})
-  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],running:true}
+  const controller=new AbortController()
+  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],running:true,controller}
   activeRuns.set(activeKey,active)
   try{
      const normalized=normalizedWorkflow(workflow)
@@ -130,22 +144,36 @@ async function run(req,res,partial=false,chat=false){
     }
      const readiness=inspectWorkflow(nodes,edges,partial?req.body.nodeId:undefined).filter(issue=>issue.severity==='error')
      if(readiness.length)return res.status(422).json({error:readiness.map(issue=>issue.message).join(' '),issues:readiness})
-     const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id),progress=>{
+     const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id,controller.signal),progress=>{
        active.phase=progress.phase
        active.currentNodeId=progress.phase==='start'?progress.nodeId:''
        active.currentNodeLabel=progress.label||''
        if(progress.phase==='complete')active.completed.push({nodeId:progress.nodeId,status:progress.status})
-     })
-     active.phase='complete';active.currentNodeId='';active.currentNodeLabel='';active.status=result.status
+     },controller.signal)
+     active.phase=result.status==='cancelled'?'stopped':'complete';active.currentNodeId='';active.currentNodeLabel='';active.status=result.status
     const runId=randomUUID()
     db.prepare("insert into workflow_runs (id,workflow_id,user_id,status,trigger_type,logs,result,completed_at) values (?,?,?,?,?,?,?,datetime('now'))").run(runId,workflow.id,req.user.id,result.status,chat?'chat':partial?'partial':'manual',JSON.stringify(result.logs),JSON.stringify(result))
     res.json({runId,...result,...(partial?{nodeId:req.body.nodeId,output:result.nodeResults[req.body.nodeId]?.output}:{})})
-   }catch(error){active.phase='error';active.currentNodeId='';active.currentNodeLabel='';active.status='error';res.status(400).json({error:error.message})}
+   }catch(error){
+     const stopped=error?.code==='WORKFLOW_STOPPED'||controller.signal.aborted
+     active.phase=stopped?'stopped':'error';active.currentNodeId='';active.currentNodeLabel='';active.status=stopped?'cancelled':'error'
+     res.status(stopped?409:400).json({error:stopped?'Pengujian dihentikan.':error.message,...(stopped?{code:'WORKFLOW_STOPPED'}:{})})
+   }
    finally{active.running=false;setTimeout(()=>{if(activeRuns.get(activeKey)===active)activeRuns.delete(activeKey)},2500)}
 }
 router.post('/:id/execute',requireSameOrigin,requireUser,(req,res)=>run(req,res))
 router.post('/:id/test-node',requireSameOrigin,requireUser,(req,res)=>run(req,res,true))
 router.post('/:id/chat',requireSameOrigin,requireUser,(req,res)=>run(req,res,false,true))
+router.post('/:id/stop',requireSameOrigin,requireUser,(req,res)=>{
+  const workflow=findWorkflow(req.params.id,req.user.id)
+  if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const active=activeRuns.get(req.user.id+':'+workflow.id)
+  if(!active?.running)return res.status(409).json({error:'Tidak ada pengujian yang sedang berjalan.',code:'WORKFLOW_NOT_RUNNING'})
+  active.phase='stopping'
+  const reason=Object.assign(new Error('Pengujian dihentikan pengguna.'),{code:'WORKFLOW_STOPPED'})
+  active.controller.abort(reason)
+  res.json({stopping:true,message:'Pengujian sedang dihentikan.'})
+})
 router.get('/:id/active',requireUser,(req,res)=>{
   const workflow=findWorkflow(req.params.id,req.user.id)
   if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})

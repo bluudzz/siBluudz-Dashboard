@@ -96,6 +96,16 @@ db.exec(`
     created_at text not null default (datetime('now'))
   );
   create index if not exists workflow_media_user_idx on workflow_media(user_id, created_at desc);
+  create table if not exists google_drive_accounts (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    email text not null,
+    encrypted_refresh_token text not null,
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now')),
+    unique(user_id,email)
+  );
+  create index if not exists google_drive_accounts_user_idx on google_drive_accounts(user_id);
   create table if not exists instagram_accounts (
     id text primary key,
     user_id text not null references users(id) on delete cascade,

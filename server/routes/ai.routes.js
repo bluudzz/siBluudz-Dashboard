@@ -95,15 +95,18 @@ export function getImageModelName() {
 }
 
 // Model image harus mendukung multi-gambar. Provider `gemini` langsung hanya membaca gambar pertama.
+const DEFAULT_IMAGE_MODEL = 'sdwebui/flux-1-dev'
+
 async function resolveImageModel(requested) {
   if (requested) return requested
   const configured = getImageModelName()
   if (configured) return configured
   try {
     const models = await fetchNineRouterImageModels()
+    if (models.includes(DEFAULT_IMAGE_MODEL)) return DEFAULT_IMAGE_MODEL
     if (models.length > 0) return models[0]
   } catch {}
-  return 'ag/gemini-3.1-flash-image'
+  return DEFAULT_IMAGE_MODEL
 }
 
 function toDataUri(b64) {

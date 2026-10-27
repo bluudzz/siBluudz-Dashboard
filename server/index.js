@@ -13,6 +13,7 @@ import adminRoutes from './routes/admin.routes.js'
 import automationRoutes from './routes/automation.routes.js'
 import { workflowMediaRouter } from './workflow-media.js'
 import instagramRoutes from './routes/instagram.routes.js'
+import { googleDriveRouter } from './workflow-drive.js'
 
 const app = express()
 const port = Number(process.env.API_PORT || 3001)
@@ -32,6 +33,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/workflows', automationRoutes)
 app.use('/api/workflow-media', workflowMediaRouter)
 app.use('/api/instagram', instagramRoutes)
+app.use('/api/google-drive', googleDriveRouter)
 
 // Error handler
 app.use('/api', (error, _req, res, _next) => {

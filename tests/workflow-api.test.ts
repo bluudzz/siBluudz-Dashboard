@@ -52,4 +52,12 @@ test('workflow API checks readiness before AI calls and rejects simultaneous run
   assert.equal(calls,1)
   assert.equal((await request(path+'/chat','POST',{message:'Next',sessionId:'next'})).status,200)
   assert.equal(calls,2)
+  const running=request(path+'/chat','POST',{message:'Stop this run',sessionId:'stop'})
+  await new Promise(resolve=>setTimeout(resolve,25))
+  const stopped=await request(path+'/stop','POST',{})
+  assert.equal(stopped.status,200)
+  const stoppedRun=await running
+  assert.equal(stoppedRun.status,200)
+  assert.equal((await stoppedRun.json()).status,'cancelled')
+  assert.equal((await request(path+'/stop','POST',{})).status,409)
 })

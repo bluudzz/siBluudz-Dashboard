@@ -3,9 +3,11 @@ import { db, getNineRouterConfig } from './db.js'
 import { runWorkflowAgent } from '../shared/workflow-agent.js'
 import OpenAI from 'openai'
 import { OpenAIChatCompletionsModel } from '@openai/agents'
+import { researchWeb } from './workflow-research.js'
 
-export function createAgentRuntime(user,workflowId) {
-  return context=>runWorkflowAgent({...context,
+export function createAgentRuntime(user,workflowId,signal) {
+  return context=>runWorkflowAgent({...context,signal,
+    researchWeb,
     createModel:modelName=>{
       const config=getNineRouterConfig()
       if(!config.apiKey)throw new Error('Hubungkan 9router di pengaturan AI sebelum menjalankan agent.')

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { db, getNineRouterConfig } from './db.js'
 
-export async function runPromptTrigger({node},user,{fetchImpl=fetch}={}) {
+export async function runPromptTrigger({node},user,{fetchImpl=fetch,signal}={}) {
   const originalPrompt=String(node.data.prompt||'').trim()
   if(!originalPrompt||originalPrompt.length>16000)throw new Error('Tulis prompt pemicu, maksimal 16.000 karakter.')
   const config=getNineRouterConfig()
@@ -17,7 +17,7 @@ export async function runPromptTrigger({node},user,{fetchImpl=fetch}={}) {
     method:'POST',
     headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.apiKey}`},
     body:JSON.stringify({model,messages:[{role:'user',content:originalPrompt}],stream:false}),
-    signal:AbortSignal.timeout(90_000),
+    signal:signal?AbortSignal.any([signal,AbortSignal.timeout(90_000)]):AbortSignal.timeout(90_000),
   })
   const raw=await response.text()
   let body

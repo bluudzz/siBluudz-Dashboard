@@ -1,4 +1,4 @@
-import { Bot, Brain, Braces, Camera, Clock, GitBranch, Globe, Images, List, MessageCircle, Search, Send, Settings, ShieldCheck, SquarePen, Wrench, type LucideIcon } from 'lucide-react'
+import { Bot, Brain, Braces, Camera, Clock, GitBranch, Globe, HardDrive, Images, List, MessageCircle, Search, Send, Settings, ShieldCheck, SquarePen, Wrench, type LucideIcon } from 'lucide-react'
 
 export const workflowNodeIcons:Record<string,LucideIcon> = {
   trigger:Clock,
@@ -8,6 +8,7 @@ export const workflowNodeIcons:Record<string,LucideIcon> = {
   splitOut:List,
   searchContent:Search,
   httpRequest:Globe,
+  googleDrive:HardDrive,
   if:GitBranch,
   approval:ShieldCheck,
   aiAgent:Bot,

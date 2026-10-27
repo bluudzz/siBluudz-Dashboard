@@ -10,6 +10,8 @@ const previewUrl=(json:Record<string,unknown>)=>{
 }
 
 function ResultValue({name,value}:{name:string;value:unknown}) {
+  if(name==='driveFiles'&&Array.isArray(value))return <ul className="wf-source-list">{value.map((file,index)=>{const item=file&&typeof file==='object'?file as Record<string,unknown>:{};const href=typeof item.downloadUrl==='string'&&item.downloadUrl.startsWith('/api/google-drive/download/')?item.downloadUrl:'';return <li key={index}><strong>{String(item.name||'File '+(index+1))}</strong><span>ID: {String(item.id||'—')}</span>{href&&<a href={href}>Unduh file</a>}</li>})}</ul>
+  if(name==='driveDownloadUrl'&&typeof value==='string'&&value.startsWith('/api/google-drive/download/'))return <a href={value}>Unduh file</a>
   if(name==='sources'&&Array.isArray(value))return <ul className="wf-source-list">{value.map((source,index)=>{
     const item=source&&typeof source==='object'?source as Record<string,unknown>:{}
     const href=typeof item.url==='string'&&item.url.startsWith('https://')?item.url:''

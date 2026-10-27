@@ -17,6 +17,7 @@ export const catalog = [
   {type:'approval',title:'Persetujuan Manual',group:'Logika',description:'Hentikan cabang alur sampai Anda meninjau dan menyetujui konten yang masuk.',data:{label:'Persetujuan Manual',approvedItems:null}},
   {type:'searchContent',title:'Cari Informasi',group:'Data',description:'Cari berita dan referensi topik dari Google News dengan tautan sumber.',data:{label:'Cari Informasi',query:'',limit:'5'}},
   {type:'httpRequest',title:'Ambil Halaman/API',group:'Data',description:'Ambil data dari URL HTTPS publik dengan metode GET.',data:{label:'Ambil Halaman/API',url:''}},
+  {type:'googleDrive',title:'Google Drive',group:'Data',description:'Pilih gambar dari link berbagi, secara acak atau berdasarkan nama.',data:{label:'Google Drive',accountId:'',operation:'shared',sharedLink:'',selectionMode:'random',nameFilter:'',search:'',fileId:''}},
   {type:'imageGenerate',title:'Generate Gambar',group:'AI',description:'Buat satu gambar per ide atau slide dengan model gambar 9router.',data:{label:'Generate Gambar',model:'',prompt:''}},
   {type:'instagram',title:'Post to Instagram',group:'Publikasi',description:'Terbitkan gambar/carousel/reel/story, baca komentar, atau lihat statistik akun profesional.',data:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''}},
   {type:'aiAgent',title:'AI Agent',group:'AI',description:'Meminta AI mengolah data dan menyelesaikan tugas sesuai instruksi Anda.',data:{label:'AI Agent',executionMode:'live',aiPrompt:'',systemMessage:'',maxIterations:'3'}},
@@ -28,6 +29,17 @@ export const availableCatalog = catalog.filter(item => !['chatModel','memory','t
 export function formatModelLabel(id?: string): string {
   if (!id) return ''
   const clean = id.replace(/^(customendpoint\/)?9Router[^/]*\//i, '')
+  const imageQuality: Record<string, string> = {
+    'sdwebui/flux-1-dev': 'Flux 1 Dev · terbaik',
+    'sdwebui/flux-1-schnell': 'Flux 1 Schnell · cepat',
+    'sdwebui/sd3.5-large': 'SD 3.5 Large',
+    'sdwebui/sd3.5': 'SD 3.5',
+    'sdwebui/sdxl-base-1.0': 'SDXL Base 1.0',
+    'sdwebui/realistic-vision': 'Realistic Vision',
+    'sdwebui/sd15': 'SD 1.5 · lama',
+  }
+  const known = imageQuality[clean]
+  if (known) return `[MUSE] ${known}`
   const prefixes: [RegExp, string][] = [
     [/^ag\//i, '[AG] '],
     [/^cx\//i, '[CX] '],
@@ -68,6 +80,9 @@ export async function workflowRequest<T>(path:string,init?:RequestInit):Promise<
   catch{throw new Error('Tidak dapat terhubung ke server workflow. Periksa koneksi dan layanan backend.')}
   if(response.status===204)return undefined as T
   const data=await response.json().catch(()=>({}))
-  if(!response.ok)throw new Error(data.error||(response.status>=502&&response.status<=504?`Server workflow tidak merespons (${response.status}). Periksa layanan backend di VPS.`:`Permintaan workflow gagal (${response.status}).`))
+  if(!response.ok){
+    const error=Object.assign(new Error(data.error||(response.status>=502&&response.status<=504?`Server workflow tidak merespons (${response.status}). Periksa layanan backend di VPS.`:`Permintaan workflow gagal (${response.status}).`)),{code:data.code||'',status:response.status})
+    throw error
+  }
   return data as T
 }

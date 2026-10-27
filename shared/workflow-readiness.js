@@ -1,5 +1,6 @@
 import { validateGraph } from './workflow-engine.js'
 import { agentResources, isAiConnection, isSubNode, isTrigger } from './workflow-connections.js'
+import { parseGoogleDriveLink } from './google-drive-link.js'
 
 const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 
@@ -57,7 +58,7 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
       if (!resources.model || resources.model.data.disabled) add('error', 'model', `${label}: hubungkan Model AI yang aktif.`, node.id)
       else if (!String(resources.model.data.model || '').trim()) add('error', 'model-selection', `Pilih model 9router untuk ${label}.`, resources.model.id)
       for (const tool of resources.tools.filter(tool => !tool.data.disabled)) {
-        if (!['knowledge', 'textLength'].includes(tool.data.toolType)) add('error', 'tool', `${String(tool.data.label || 'Tools')}: pilih kemampuan yang didukung pada pengaturan Tools.`, tool.id)
+        if (!['knowledge', 'textLength','webResearch'].includes(tool.data.toolType)) add('error', 'tool', `${String(tool.data.label || 'Tools')}: pilih kemampuan yang didukung pada pengaturan Tools.`, tool.id)
         else if (tool.data.toolType === 'knowledge' && !String(tool.data.content || '').trim()) add('warning', 'brief', `${String(tool.data.label || 'Tools')}: brief masih kosong. Isi agar AI memiliki bahan tambahan.`, tool.id)
       }
     }
@@ -69,6 +70,18 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
     if (node.type === 'searchContent') {
       if (String(data.query || '').length > 200) add('error', 'search-query', `${label}: topik pencarian maksimal 200 karakter.`, node.id)
       if (!Number.isInteger(Number(data.limit || 5)) || Number(data.limit || 5) < 1 || Number(data.limit || 5) > 10) add('error', 'search-limit', `${label}: pilih 1 sampai 10 sumber.`, node.id)
+    }
+    if(node.type==='googleDrive'){
+      if(!String(data.accountId||'').trim())add('error','drive-account',`${label}: hubungkan dan pilih akun Google Drive.`,node.id)
+      if(!['shared','list','view','download'].includes(String(data.operation||'shared')))add('error','drive-operation',`${label}: pilih tindakan Google Drive yang didukung.`,node.id)
+      if(String(data.search||'').length>100)add('error','drive-search',`${label}: nama file maksimal 100 karakter.`,node.id)
+      if(String(data.operation||'shared')==='shared'){
+        const link=String(data.sharedLink||'').trim()
+        if(!link)add('error','drive-link',`${label}: tempel link berbagi file atau folder Google Drive.`,node.id)
+        else if(!link.includes('{{'))try{parseGoogleDriveLink(link)}catch(error){add('error','drive-link',`${label}: ${error.message}`,node.id)}
+        if(!['random','name'].includes(String(data.selectionMode||'random')))add('error','drive-selection',`${label}: pilih gambar acak atau berdasarkan nama.`,node.id)
+        if(data.selectionMode==='name'&&!String(data.nameFilter||'').trim())add('error','drive-name',`${label}: isi nama gambar yang dicari.`,node.id)
+      }
     }
     if (node.type === 'imageGenerate') {
       if (!String(data.model||'').trim()) add('error','image-model',`${label}: pilih model gambar 9router.`,node.id)
