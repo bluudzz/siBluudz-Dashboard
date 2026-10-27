@@ -7,7 +7,8 @@ Editor siBluudz memakai kanvas dengan alur data dan koneksi pendukung AI seperti
 - CRUD workflow per pengguna, template, nama draft, penyimpanan sebelum pengujian, konfirmasi saat berpindah draft yang belum disimpan.
 - Tambah node melalui katalog, drag/connect, validasi siklus dan koneksi, hapus node/koneksi, duplikasi node, undo/redo (30 perubahan).
 - Manual Trigger menerima objek JSON atau array `[{"json":{...}}]`.
-- Edit Fields memetakan objek JSON ke tiap item; IF memisahkan item ke output `true` dan `false`.
+- Edit Fields memetakan objek JSON ke tiap item; IF memisahkan item ke output `true` dan `false`. **Persetujuan Manual** menahan cabang setelahnya sampai versi hasil yang masuk disetujui.
+- **Cari Informasi** membaca hasil Google News RSS berdasarkan topik dan menyertakan judul, tautan, tanggal, serta sumber. **Ambil Halaman/API** membaca respons teks atau JSON dari URL HTTPS publik menggunakan GET. Keduanya aktif hanya saat workflow diuji; data hasilnya tersimpan di riwayat.
 - Ekspresi terbatas `{{ $json.field }}` / `{{ $json.nested.field }}`; nilai ekspresi penuh mempertahankan tipe. Placeholder lama `{field}` tetap diterima. JavaScript arbitrer tidak dievaluasi.
 - Execute step menjalankan node tujuan beserta ancestor yang dibutuhkan. Node terputus dan cabang tanpa data dilewati. Error menghentikan langkah berikutnya.
 - Nonaktifkan node untuk meneruskan input. Pin output untuk menggunakan data pengujian tetap (IF tidak dapat dipin).
@@ -19,9 +20,19 @@ Editor siBluudz memakai kanvas dengan alur data dan koneksi pendukung AI seperti
 ## Memulai carousel Instagram 3 slide
 
 1. Buka **Cara pakai** lalu pilih **Buat template Instagram**, atau pilih template Instagram saat membuat workflow baru.
-2. Pada Manual Trigger, ganti data contoh `topic`, `product`, `audience`, `objective`, `cta`, dan pastikan `slideCount` bernilai `3`. Nilai `factStatus` dimulai dari `needs_review` dan `approved` dimulai dari `false`.
-3. Ikuti node sesuai urutan: **Penentuan Topik** → **Validasi Fakta** → **Strategi Marketing 3 Slide** → **Copywriting** → **Peracikan Prompt Gambar per Slide** → **Quality Check**.
-4. Tinjau hasil Input/Output setiap node. Struktur carousel yang disarankan adalah Slide 1 sebagai hook, Slide 2 sebagai value/proof, dan Slide 3 sebagai CTA. Setelah review manual, ubah `approved` menjadi `true` untuk menguji cabang menuju Publisher. Ini tetap tidak memublikasikan konten.
+2. Pada Manual Trigger, ganti data contoh `topic`, `product`, `audience`, `objective`, `cta`, dan pastikan `slideCount` bernilai `3`. Nilai `factStatus` dimulai dari `needs_review`.
+3. Ikuti node sesuai urutan: **Cari Referensi Konten** → **Penentuan Topik** → **Validasi Fakta** → **Strategi Marketing 3 Slide** → **Copywriting** → **Quality Check** → **Persetujuan Manual**. Pencarian internet aktif saat diuji. Agent pada template ini masih pratinjau sampai diaktifkan dan dihubungkan dengan Model AI.
+4. Jalankan alur sekali. Node Persetujuan Manual berhenti dan menyimpan bahan masuk dalam riwayat. Buka node tersebut, tinjau hasilnya, klik **Setujui hasil ini**, lalu jalankan ulang. Cabang sesudahnya memakai salinan hasil yang disetujui. Anda bisa mencabut persetujuan untuk meninjau konten baru. Workflow ini belum membuat gambar atau memublikasikan konten.
+
+Persetujuan yang dipilih akan tersimpan bersama draft setelah Anda klik **Simpan** atau **Jalankan alur**. Bila editor dimuat ulang sebelum disetujui, node dapat mengambil bahan terakhir yang menunggu dari riwayat pengujian. Ini adalah gerbang pengujian manual dengan menjalankan ulang dari awal, belum sistem jeda dan lanjut otomatis yang tahan restart.
+
+Topik pencarian dikirim ke Google News. Node Ambil Halaman/API meminta URL yang diisi pengguna atau berasal dari data workflow. Akses dibatasi ke HTTPS publik pada port 443, metode GET, IPv4 publik, tanpa kredensial di URL atau parameter kunci akses umum, tanpa redirect, dengan timeout 10 detik dan respons maksimal 256 KB. Maksimal 10 item input per node internet. Hasil mesin pencari belum otomatis menjadi fakta terverifikasi; tinjau sumber sebelum publikasi. Node Persetujuan Manual sendiri tidak mengirim data ke layanan luar.
+
+## Pemeriksaan sebelum pengujian
+
+Klik **Periksa alur** untuk melihat konfigurasi yang perlu dilengkapi. Klik pesan masalah untuk membuka node terkait. Pemeriksaan mencakup trigger aktif, Model AI yang belum terhubung atau belum dipilih, format bahan awal, Edit Fields, serta pengaturan Tools dan kondisi. Mode pratinjau, node yang terputus, jadwal yang belum aktif, dan penggunaan data pin ditampilkan sebagai catatan.
+
+Pemeriksaan yang sama dijalankan pada backend sebelum eksekusi. Draft yang belum lengkap tetap boleh disimpan. **Uji langkah** hanya memeriksa node tujuan dan jalur sebelumnya; node sesudahnya boleh belum selesai. Workflow yang sedang berjalan menolak permintaan eksekusi kedua agar satu tugas tidak memanggil AI dua kali dari tab berbeda. Perlindungan ini berlaku pada satu proses backend; beberapa replika backend membutuhkan kunci bersama di database atau antrean.
 
 Node ditambahkan melalui satu katalog **Tambah node**. **Siapkan informasi** mengolah data lewat form dan **Buat keputusan** menjadi gerbang persetujuan. Model teks, Memory, dan Tools untuk AI Agent tetap menjadi sumber daya internal AI Agent, bukan langkah utama. Fitur visual, publikasi Instagram, dan script lanjutan tidak ditawarkan pada katalog baru.
 

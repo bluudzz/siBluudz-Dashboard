@@ -11,8 +11,16 @@ export async function runWorkflowAgent({node,input,resources,createModel,loadMem
   if(toolNodes.length>10)throw new Error('AI Agent memakai maksimal 10 alat bantu.')
   const output=[]
   for(const item of input){
-    const prompt=String(resolveValue(node.data.aiPrompt||'{{ $json.chatInput }}',item.json))
-    if(prompt.length>16000)throw new Error('Prompt AI Agent maksimal 16.000 karakter.')
+     const configuredPrompt=String(node.data.aiPrompt||'{{ $json.chatInput }}').trim()
+     let prompt
+     try { prompt=String(resolveValue(configuredPrompt,item.json)) }
+     catch(error) {
+       if(configuredPrompt==='{{ $json.chatInput }}'&&!Object.hasOwn(item.json,'chatInput')) prompt=`Bantu saya mengolah data workflow berikut:\n${JSON.stringify(item.json)}`
+       else throw error
+     }
+     if(prompt.length>16000)throw new Error('Prompt AI Agent maksimal 16.000 karakter.')
+     const splitOutCount=Number(node.data.splitOutCount)
+     const splitOutInstruction=Number.isInteger(splitOutCount)&&splitOutCount>=1?`\n\nAturan wajib dari node Split Out berikutnya: hasilkan tepat ${splitOutCount} prompt. Balas hanya dengan JSON valid berbentuk {"prompts":[{"slide":1,"prompt":"..."}]} tanpa markdown atau penjelasan tambahan. Jumlah elemen prompts harus tepat ${splitOutCount}.`:''
     const memory=resources.memory&&!resources.memory.data.disabled?resources.memory:undefined
     const session=memory?String(resolveValue(memory.data.sessionKey||'{{ $json.sessionId }}',input[0].json)):''
     if(memory&&(!session||session.length>200))throw new Error('Session key Memory wajib diisi, maksimal 200 karakter.')
@@ -40,7 +48,7 @@ export async function runWorkflowAgent({node,input,resources,createModel,loadMem
     })
     const agent=new Agent({
       name:String(node.data.label||'Workflow Agent').slice(0,100),
-      instructions:String(node.data.systemMessage||'Bantu pengguna dalam Bahasa Indonesia. Gunakan alat bantu bila diperlukan. Jangan mengaku menelusuri web atau mempublikasikan konten tanpa alat yang mendukungnya.'),
+       instructions:String(node.data.systemMessage||'Bantu pengguna dalam Bahasa Indonesia. Gunakan alat bantu bila diperlukan. Jangan mengaku menelusuri web atau mempublikasikan konten tanpa alat yang mendukungnya.')+splitOutInstruction,
       model:createModel(model),
       modelSettings:{temperature:Math.min(2,Math.max(0,Number(resources.model.data.temperature)||0)),maxTokens:2000,parallelToolCalls:false,retry:{maxRetries:0}},
       tools,

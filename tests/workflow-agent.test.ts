@@ -51,6 +51,23 @@ test('SDK agent can answer without tools and rejects unknown tool calls',async()
   assert.equal(output[0].json.output,'Hai')
   await assert.rejects(()=>runWorkflowAgent({node:nodes[1],input:[{json:{chatInput:'Halo'}}],resources:{...resources,memory:undefined},createModel:()=>createTestModel(async()=>({choices:[{message:{role:'assistant',tool_calls:[{id:'bad',type:'function',function:{name:'unconnected_tool',arguments:'{}'}}]}}]}))}))
 })
+test('manual input can run legacy chat prompt without chatInput field',async()=>{
+  const legacyNode=node('manual-agent','aiAgent',{executionMode:'live',aiPrompt:'{{ $json.chatInput }}'})
+  const output=await runWorkflowAgent({node:legacyNode,input:[{json:{topic:'Kopi susu',approved:true}}],resources:{model:nodes[2],memory:undefined,tools:[]},createModel:()=>createTestModel(async(request:any)=>{
+    assert.match(String(request.messages.at(-1).content),/Kopi susu/)
+    return {choices:[{message:{role:'assistant',content:'Data berhasil diproses'}}]}
+  })})
+  assert.equal(output[0].json.output,'Data berhasil diproses')
+})
+test('agent receives the requested Split Out count automatically',async()=>{
+  let sawInstruction=false
+  const splitAgent=node('split-agent','aiAgent',{executionMode:'live',aiPrompt:'Buat prompt gambar',splitOutCount:2})
+  await runWorkflowAgent({node:splitAgent,input:[{json:{topic:'Kopi'}}],resources:{model:nodes[2],memory:undefined,tools:[]},createModel:()=>createTestModel(async(request:any)=>{
+    sawInstruction=request.messages.some((message:any)=>String(message.content).includes('tepat 2 prompt'))
+    return {choices:[{message:{role:'assistant',content:'{"prompts":[{"slide":1,"prompt":"A"},{"slide":2,"prompt":"B"}]}'}}]}
+  })})
+  assert.equal(sawInstruction,true)
+})
 test('provider failure stops downstream nodes and missing model fails before any request',async()=>{
   const result=await executeGraphAsync([...nodes,node('next','set',{})],[...edges,{id:'next',source:'agent',target:'next'}],undefined,async()=>{throw new Error('Provider unavailable')})
   assert.equal(result.nodeResults.agent.status,'error')

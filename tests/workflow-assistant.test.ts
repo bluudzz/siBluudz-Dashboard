@@ -19,7 +19,7 @@ test('formatModelLabel simplifies prefixes to badge format',()=>{
 })
 
 test('every workflow node type accepts a bounded suggestion for its own fields',()=>{
-  const fields:Record<string,string>={trigger:'sampleData',chatTrigger:'chatInput',chatModel:'temperature',memory:'sessionKey',tool:'content',set:'fields',if:'field',aiAgent:'aiPrompt',aiGenerator:'aiPrompt',publisher:'format',code:'scriptName',generic:'label'}
+  const fields:Record<string,string>={trigger:'sampleData',chatTrigger:'chatInput',chatModel:'temperature',memory:'sessionKey',tool:'content',set:'fields',if:'field',aiAgent:'aiPrompt'}
   for(const [type,key] of Object.entries(fields)){
     const value=key==='sampleData'?'{"topic":"Foto"}':key==='fields'?'{"title":"Foto"}':key==='format'?'carousel':key==='temperature'?'0.7':'Foto produk'
     const suggestion=parseAssistantSuggestion(JSON.stringify({summary:'Siap',changes:{[key]:value},nextStep:'Simpan'}),type)

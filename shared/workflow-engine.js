@@ -1,5 +1,6 @@
 import { aiPorts, isSubNode, isTrigger, isAiConnection, agentResources } from './workflow-connections.js'
-const TYPES = new Set(['trigger', 'chatTrigger', 'chatModel', 'memory', 'tool', 'set', 'if', 'aiAgent', 'aiGenerator', 'publisher', 'code', 'generic'])
+export const WORKFLOW_NODE_TYPES = new Set(['trigger', 'chatTrigger', 'chatModel', 'memory', 'tool', 'set', 'splitOut', 'if', 'aiAgent', 'approval', 'searchContent', 'httpRequest'])
+const TYPES = WORKFLOW_NODE_TYPES
 const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const own = (value, key) => object(value) && Object.hasOwn(value, key)
 
@@ -39,6 +40,15 @@ export function validateGraph(nodes, edges, forRun = false) {
     }
     outgoing.get(edge.source).push(edge.target)
     degrees.set(edge.target, degrees.get(edge.target) + 1)
+  }
+  for (const split of nodes.filter(node => node.type === 'splitOut')) {
+    const incoming = edges.filter(edge => edge.target === split.id)
+    const nonAgent = incoming.filter(edge => nodes.find(node => node.id === edge.source)?.type !== 'aiAgent')
+    if (nonAgent.length) errors.push('Node Split Out hanya boleh menerima output langsung dari AI Agent.')
+    if (incoming.length > 1) errors.push('Node Split Out hanya boleh memiliki satu koneksi dari AI Agent.')
+    if (forRun && incoming.length === 0) errors.push('Hubungkan node Split Out langsung setelah AI Agent sebelum menjalankan workflow.')
+    const count = Number(split.data?.splitCount ?? 3)
+    if (!Number.isInteger(count) || count < 1 || count > 20) errors.push('Jumlah output Split Out harus berupa angka bulat antara 1 dan 20.')
   }
   const queue = [...degrees].filter(([, degree]) => degree === 0).map(([id]) => id)
   let count = 0
@@ -80,7 +90,7 @@ function parseItems(value, fallback = []) {
   return parsed
 }
 
-function* graphSteps(nodes, allEdges, targetNodeId, live=false) {
+function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{}) {
   const edges=allEdges.filter(edge=>!isAiConnection(edge))
   const errors = validateGraph(nodes, allEdges, true)
   if (targetNodeId && !nodes.some(n => n.id === targetNodeId)) errors.push('Node tujuan tidak ditemukan.')
@@ -100,6 +110,15 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false) {
   const logs = []
   let failed = false
   let usedLive = false
+  let awaitingApproval = false
+  const blocked = new Set()
+  const blockDescendants = id => {
+    for (const edge of edges.filter(edge => edge.source === id)) {
+      if (blocked.has(edge.target)) continue
+      blocked.add(edge.target)
+      blockDescendants(edge.target)
+    }
+  }
   for (const id of order) {
     if (!allowed.has(id)) continue
     const node = nodes.find(n => n.id === id)
@@ -113,18 +132,43 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false) {
     })
     const result = { nodeId: id, label: data.label || node.type, status: 'success', input, output: [], durationMs: 0 }
     nodeResults[id] = result
+    onProgress({phase:'start',nodeId:id,label:result.label})
     try {
       if (input.length > 1000) throw new Error('Input gabungan melebihi batas 1000 item per node.')
-      if (failed || (!isTrigger(node.type) && input.length === 0)) { result.status = 'skipped'; result.message = failed ? 'Dilewati karena eksekusi sebelumnya gagal.' : 'Tidak ada item masuk pada cabang ini.' }
+      if (failed || blocked.has(id) || (!isTrigger(node.type) && input.length === 0)) { result.status = 'skipped'; result.message = blocked.has(id) ? 'Menunggu persetujuan manual.' : failed ? 'Dilewati karena eksekusi sebelumnya gagal.' : 'Tidak ada item masuk pada cabang ini.' }
       else if (data.disabled) { result.status = 'skipped'; result.output = input; result.message = 'Node dinonaktifkan; input diteruskan.'; if(node.type === 'if') result.branches = {true:input,false:[]} }
       else if (data.pinnedOutput !== undefined && data.pinnedOutput !== null) { result.output = parseItems(data.pinnedOutput); result.status = 'pinned'; result.message = 'Menggunakan data pin untuk pengujian.'; if(node.type === 'if') throw new Error('Pin pada IF belum didukung. Pin data pada node sebelum IF.') }
       else if (node.type === 'trigger') result.output = parseItems(data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
       else if (node.type === 'chatTrigger') result.output = [{json:{chatInput:String(data.chatInput||''),sessionId:String(data.sessionId||'test-session')}}]
+      else if (node.type === 'approval') {
+        if (data.approvedItems != null) { result.output = parseItems(data.approvedItems); if (!result.output.length) throw new Error('Hasil persetujuan kosong. Cabut persetujuan lalu uji ulang.'); result.message = 'Meneruskan versi konten yang sudah Anda setujui.' }
+        else { result.status = 'waiting'; result.message = 'Tinjau bahan masuk, lalu setujui hasilnya pada node ini dan jalankan ulang.'; awaitingApproval = true; blockDescendants(id) }
+      }
+      else if (node.type === 'searchContent' || node.type === 'httpRequest') {
+        if (!live) throw new Error('Langkah internet hanya dapat diuji lewat backend.')
+        const response = yield {kind:'external',node,input}
+        if (response.error) throw new Error(response.error)
+        result.output = response.output
+        usedLive = true
+        result.message = node.type === 'searchContent' ? 'Sumber berita berhasil diambil; periksa tanggal dan fakta sebelum dipakai.' : 'Respons halaman/API berhasil diambil.'
+      }
       else if (node.type === 'set') {
         const fields = typeof data.fields === 'string' ? JSON.parse(data.fields || '{}') : data.fields || {}
         if (!object(fields)) throw new Error('Fields harus berupa objek JSON.')
         result.output = input.map(item => ({ json: { ...(data.keepInput !== false ? item.json : {}), ...resolveValue(fields, item.json) } }))
-      } else if (node.type === 'if') {
+       } else if (node.type === 'splitOut') {
+         const sourceField = 'output'
+         const arrayField = 'prompts'
+         const expectedCount = Number(data.splitCount ?? 3)
+         result.output = input.flatMap(item => {
+           const source = getPath(item.json, sourceField)
+           const parsed = typeof source === 'string' ? JSON.parse(source) : source
+           const values = object(parsed) && Array.isArray(parsed[arrayField]) ? parsed[arrayField] : null
+           if (!values || values.some(value => !object(value))) throw new Error('Hasil AI Agent harus berupa JSON dengan daftar prompts berisi objek.')
+           if (values.length !== expectedCount) throw new Error(`Split Out meminta ${expectedCount} output, tetapi AI Agent menghasilkan ${values.length}. Periksa instruksi AI Agent.`)
+           return values.map((value, index) => ({json:{...value,splitIndex:index+1}}))
+         })
+       } else if (node.type === 'if') {
         const yes = [], no = []
         if (!['equals','contains','exists'].includes(data.operator || 'equals')) throw new Error('Operator IF tidak didukung.')
         for (const item of input) {
@@ -135,36 +179,39 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false) {
           ;(pass ? yes : no).push(item)
         }
         result.branches = { true: yes, false: no }; result.output = [...yes, ...no]
-      } else if(node.type==='aiAgent'&&data.executionMode==='live') {
+       } else if(node.type==='aiAgent'&&data.executionMode==='live') {
         if(!live)throw new Error('AI Agent aktif memerlukan runtime backend. Gunakan endpoint Execute atau Uji chat.')
         const resources=agentResources(node.id,nodes,allEdges)
         if(!resources.model||resources.model.data.disabled)throw new Error('Hubungkan Chat Model yang aktif ke port Chat Model AI Agent.')
         usedLive=true
-        const response=yield {kind:'agent',node,input,resources}
+         const splitTarget=edges.map(edge=>nodes.find(candidate=>candidate.id===edge.target)).find(candidate=>candidate?.type==='splitOut'&&edges.some(edge=>edge.source===node.id&&edge.target===candidate.id))
+         const executionNode=splitTarget?{...node,data:{...node.data,splitOutCount:Number(splitTarget.data.splitCount??3)}}:node
+         const response=yield {kind:'agent',node:executionNode,input,resources}
         if(response.error)throw new Error(response.error)
-        result.output=response.output
-        result.message='AI Agent memanggil model 9router; lihat output dan jejak tool.'
-      } else if (node.type === 'generic') throw new Error('Node lama belum didukung. Ganti dengan node dari katalog.')
-      else {
+         result.output=response.output
+         result.message='AI Agent memanggil model 9router; lihat output dan jejak tool.'
+       }
+       else {
         result.status = 'simulated'
         result.message = 'Pratinjau konfigurasi; tidak ada layanan eksternal yang dipanggil.'
         result.output = input.map(item => ({ json: {
           ...item.json,
-          preview: { type: node.type, model: data.aiModel || data.model || '', prompt: resolveValue(data.aiPrompt || '', item.json), target: data.targetAccount || '', script: data.scriptName || '', status: node.type === 'publisher' ? 'not_published' : node.type === 'code' ? 'not_executed' : 'not_requested' },
+           preview: { type: node.type, model: data.aiModel || data.model || '', prompt: resolveValue(data.aiPrompt || '', item.json), status: 'not_requested' },
         } }))
       }
     } catch (error) { result.status = 'error'; result.error = error.message; result.output = []; failed = true }
     result.durationMs = Date.now() - start
     logs.push({ nodeId:id, step:result.label, status:result.status, time:new Date().toISOString(), message:result.error || result.message || `${result.output.length} item dihasilkan.` })
+    onProgress({phase:'complete',nodeId:id,label:result.label,status:result.status,error:result.error})
   }
-  return { status: failed ? 'error' : 'completed', mode: usedLive?'live':'simulation', nodeResults, nodeOutputs: Object.fromEntries(Object.entries(nodeResults).map(([id,result]) => [id,result.output])), logs }
+  return { status: failed ? 'error' : awaitingApproval ? 'waiting_approval' : 'completed', mode: usedLive?'live':'simulation', nodeResults, nodeOutputs: Object.fromEntries(Object.entries(nodeResults).map(([id,result]) => [id,result.output])), logs }
 }
 
 export function executeGraph(nodes,edges,targetNodeId) {
   return graphSteps(nodes,edges,targetNodeId).next().value
 }
-export async function executeGraphAsync(nodes,edges,targetNodeId,runAgent) {
-  const steps=graphSteps(nodes,edges,targetNodeId,true)
+export async function executeGraphAsync(nodes,edges,targetNodeId,runAgent,onProgress=()=>{}) {
+  const steps=graphSteps(nodes,edges,targetNodeId,true,onProgress)
   let step=steps.next()
   while(!step.done){
     let response

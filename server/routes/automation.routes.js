@@ -2,14 +2,26 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
-import { executeGraphAsync, validateGraph } from '../../shared/workflow-engine.js'
+import { executeGraphAsync, validateGraph, WORKFLOW_NODE_TYPES } from '../../shared/workflow-engine.js'
 import { decodeWorkflowRun } from '../workflow-history.js'
 import { createWorkflowRuntime } from '../workflow-runtime.js'
 import { isAiConnection } from '../../shared/workflow-connections.js'
+import { inspectWorkflow } from '../../shared/workflow-readiness.js'
 
 const router = Router()
 const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
 const parse = value => JSON.parse(value || '[]')
+const activeRuns = new Map()
+function sanitizeGraph(nodes,edges) {
+  const cleanNodes=(Array.isArray(nodes)?nodes:[]).filter(node=>node&&WORKFLOW_NODE_TYPES.has(node.type))
+  const ids=new Set(cleanNodes.map(node=>node.id))
+  const cleanEdges=(Array.isArray(edges)?edges:[]).filter(edge=>edge&&ids.has(edge.source)&&ids.has(edge.target))
+  return {nodes:cleanNodes,edges:cleanEdges}
+}
+function normalizedWorkflow(row) {
+  // Reading or testing must not overwrite stored legacy nodes. Only an explicit save writes a draft.
+  return sanitizeGraph(parse(row.nodes),parse(row.edges))
+}
 
 function templateGraph(template) {
   const trigger = { id:'trigger-1', type:'trigger', position:{x:80,y:180}, data:{label:'Manual Trigger', triggerMode:'manual', sampleData:'{"topic":"Ide konten", "approved":true}'} }
@@ -26,16 +38,15 @@ function templateGraph(template) {
   }
   let steps
   if(template === 'ig-autopost') {
-    trigger.data.sampleData = JSON.stringify({topic:'Ide carousel produk',product:'Nama produk',audience:'Calon pelanggan',objective:'Edukasi lalu mendorong percakapan',cta:'Kirim DM untuk informasi lebih lanjut',slideCount:3,factStatus:'needs_review',approved:false})
+    trigger.data.sampleData = JSON.stringify({topic:'Ide carousel produk',product:'Nama produk',audience:'Calon pelanggan',objective:'Edukasi lalu mendorong percakapan',cta:'Kirim DM untuk informasi lebih lanjut',slideCount:3,factStatus:'needs_review'})
     steps = [
+      {type:'searchContent',data:{label:'Cari Referensi Konten',query:'',limit:'5'}},
       {type:'set',data:{label:'Penentuan Topik',fields:'{"topic":"{{ $json.topic }}","product":"{{ $json.product }}","audience":"{{ $json.audience }}","objective":"{{ $json.objective }}","cta":"{{ $json.cta }}","slideCount":3,"contentStatus":"draft","factStatus":"{{ $json.factStatus }}"}',keepInput:true}},
-      {type:'aiAgent',data:{label:'Validasi Fakta',role:'Fact Checker',aiModel:'',aiPrompt:'Validasi fakta untuk konten Instagram tentang {{ $json.topic }} dan {{ $json.product }}. Target audiens: {{ $json.audience }}. Identifikasi setiap klaim, kebutuhan sumber, tanggal sumber, tingkat keyakinan, dan risiko klaim berlebihan. Tandai klaim yang harus ditinjau manusia sebelum dipublikasikan. Keluarkan hasil terstruktur dengan status factStatus: verified, needs_review, atau rejected.'}},
+      {type:'aiAgent',data:{label:'Validasi Fakta',role:'Fact Checker',aiModel:'',aiPrompt:'Validasi fakta untuk konten Instagram tentang {{ $json.topic }} dan {{ $json.product }}. Target audiens: {{ $json.audience }}. Referensi awal: {{ $json.sources }}. Periksa isi sumber sebelum menganggap klaim terverifikasi; daftar judul berita saja bukan bukti. Identifikasi setiap klaim, kebutuhan sumber, tanggal sumber, tingkat keyakinan, dan risiko klaim berlebihan. Jika sumber kurang, tandai needs_review. Keluarkan status factStatus: verified, needs_review, atau rejected.'}},
       {type:'aiAgent',data:{label:'Strategi Marketing 3 Slide',role:'Content Strategist',aiModel:'',aiPrompt:'Rancang strategi marketing carousel Instagram 3 slide untuk {{ $json.topic }} tentang {{ $json.product }}. Target audiens: {{ $json.audience }}. Tujuan: {{ $json.objective }}. CTA: {{ $json.cta }}. Tetapkan Slide 1 sebagai hook, Slide 2 sebagai value atau proof, dan Slide 3 sebagai CTA. Jelaskan pesan utama, urutan narasi, angle, dan alasan strategi. Jangan membuat klaim yang belum tervalidasi.'}},
       {type:'aiAgent',data:{label:'Copywriting',role:'Instagram Copywriter',aiModel:'',aiPrompt:'Tulis copy carousel Instagram 3 slide untuk {{ $json.topic }} tentang {{ $json.product }}. Target audiens: {{ $json.audience }}. CTA: {{ $json.cta }}. Hasilkan judul dan body singkat untuk setiap slide, caption Instagram, CTA, hashtag yang relevan, alt text, dan disclaimer bila diperlukan. Gunakan bahasa yang jelas, ringkas, dan sesuai konteks fakta yang sudah divalidasi.'}},
-      {type:'aiGenerator',data:{label:'Peracikan Prompt Gambar per Slide',aiModel:'',aiPrompt:'Racik prompt gambar untuk carousel Instagram 3 slide tentang {{ $json.topic }} dan {{ $json.product }}. Buat satu prompt visual per slide dengan alur hook, value/proof, dan CTA. Pertahankan produk, karakter, palet warna, pencahayaan, dan gaya visual yang konsisten. Gunakan rasio 4:5 (1080x1350), sisakan area aman untuk teks, dan tambahkan negative prompt untuk watermark, logo acak, teks rusak, serta elemen yang tidak relevan. Keluarkan hasil terstruktur per slide.','aspectRatio':'4:5 (1080x1350)'}},
       {type:'aiAgent',data:{label:'Quality Check',role:'Content QA',aiModel:'',aiPrompt:'Periksa draft carousel Instagram 3 slide tentang {{ $json.topic }}. Validasi konsistensi fakta, kesesuaian strategi dengan tujuan {{ $json.objective }}, keterbacaan copy, kelengkapan CTA {{ $json.cta }}, kesinambungan antar-slide, rasio 4:5, keamanan area teks, dan potensi klaim berisiko. Keluarkan checklist lulus/gagal, daftar perbaikan, dan status qualityStatus: passed atau needs_revision.'}},
-      {type:'if',data:{label:'Persetujuan Manual',field:'approved',operator:'equals',value:'true'}},
-      {type:'publisher',data:{label:'Instagram Publisher',targetAccount:'',format:'carousel',requireApproval:true}},
+      {type:'approval',data:{label:'Persetujuan Manual',approvedItems:null}},
     ]
   }
   else if(template === 'ai-researcher') steps = [
@@ -54,12 +65,13 @@ function templateGraph(template) {
 
 router.get('/', requireUser, (req,res)=>{
   const workflows=db.prepare('select id,name,description,is_active,created_at,updated_at from workflows where user_id = ? order by updated_at desc').all(req.user.id)
-   res.json({workflows,capabilities:{simulation:true,scheduler:false,externalIntegrations:false}})
+   res.json({workflows,capabilities:{simulation:true,scheduler:false,externalIntegrations:true}})
 })
 router.get('/:id',requireUser,(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)
   if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
-  res.json({workflow:{id:row.id,name:row.name,description:row.description,nodes:parse(row.nodes),edges:parse(row.edges),isActive:Boolean(row.is_active),createdAt:row.created_at,updatedAt:row.updated_at}})
+  const graph=normalizedWorkflow(row)
+  res.json({workflow:{id:row.id,name:row.name,description:row.description,nodes:graph.nodes,edges:graph.edges,isActive:Boolean(row.is_active),createdAt:row.created_at,updatedAt:row.updated_at}})
 })
 router.post('/',requireSameOrigin,requireUser,(req,res)=>{
   const name=typeof req.body?.name==='string'?req.body.name.trim():''
@@ -76,7 +88,8 @@ router.put('/:id',requireSameOrigin,requireUser,(req,res)=>{
   if(req.body?.isActive)return res.status(400).json({error:'Jadwal otomatis belum tersedia. Workflow hanya dapat diuji secara manual.'})
   const name=req.body?.name===undefined?row.name:String(req.body.name).trim()
   if(!name || name.length>160)return res.status(400).json({error:'Nama workflow wajib diisi, maksimal 160 karakter.'})
-  const nodes=req.body?.nodes??parse(row.nodes),edges=req.body?.edges??parse(row.edges)
+  const submitted= sanitizeGraph(req.body?.nodes??parse(row.nodes),req.body?.edges??parse(row.edges))
+  const nodes=submitted.nodes,edges=submitted.edges
   const errors=validateGraph(nodes,edges)
   if(errors.length)return res.status(400).json({error:errors.join(' ')})
   const savedNodes=nodes.map(node=>{
@@ -96,9 +109,14 @@ async function run(req,res,partial=false,chat=false){
   const workflow=findWorkflow(req.params.id,req.user.id)
   if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
   if(partial && typeof req.body?.nodeId!=='string')return res.status(400).json({error:'Pilih node untuk Execute step.'})
+  const activeKey=req.user.id+':'+workflow.id
+  if(activeRuns.get(activeKey)?.running)return res.status(409).json({error:'Workflow ini sedang berjalan. Tunggu hasilnya sebelum menjalankan lagi.'})
+  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],running:true}
+  activeRuns.set(activeKey,active)
   try{
-    let nodes=parse(workflow.nodes)
-    let edges=parse(workflow.edges)
+     const normalized=normalizedWorkflow(workflow)
+     let nodes=normalized.nodes
+     let edges=normalized.edges
     if(chat){
       if(typeof req.body?.message!=='string'||!req.body.message.trim()||req.body.message.length>16000)return res.status(400).json({error:'Pesan chat wajib diisi, maksimal 16.000 karakter.'})
       if(typeof req.body?.sessionId!=='string'||!req.body.sessionId||req.body.sessionId.length>200)return res.status(400).json({error:'Session ID chat tidak valid.'})
@@ -110,15 +128,30 @@ async function run(req,res,partial=false,chat=false){
       edges.filter(edge=>scope.has(edge.target)&&isAiConnection(edge)).forEach(edge=>scope.add(edge.source))
       nodes=nodes.filter(node=>scope.has(node.id));edges=edges.filter(edge=>scope.has(edge.source)&&scope.has(edge.target))
     }
-    const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id))
+     const readiness=inspectWorkflow(nodes,edges,partial?req.body.nodeId:undefined).filter(issue=>issue.severity==='error')
+     if(readiness.length)return res.status(422).json({error:readiness.map(issue=>issue.message).join(' '),issues:readiness})
+     const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id),progress=>{
+       active.phase=progress.phase
+       active.currentNodeId=progress.phase==='start'?progress.nodeId:''
+       active.currentNodeLabel=progress.label||''
+       if(progress.phase==='complete')active.completed.push({nodeId:progress.nodeId,status:progress.status})
+     })
+     active.phase='complete';active.currentNodeId='';active.currentNodeLabel='';active.status=result.status
     const runId=randomUUID()
     db.prepare("insert into workflow_runs (id,workflow_id,user_id,status,trigger_type,logs,result,completed_at) values (?,?,?,?,?,?,?,datetime('now'))").run(runId,workflow.id,req.user.id,result.status,chat?'chat':partial?'partial':'manual',JSON.stringify(result.logs),JSON.stringify(result))
     res.json({runId,...result,...(partial?{nodeId:req.body.nodeId,output:result.nodeResults[req.body.nodeId]?.output}:{})})
-  }catch(error){res.status(400).json({error:error.message})}
+   }catch(error){active.phase='error';active.currentNodeId='';active.currentNodeLabel='';active.status='error';res.status(400).json({error:error.message})}
+   finally{active.running=false;setTimeout(()=>{if(activeRuns.get(activeKey)===active)activeRuns.delete(activeKey)},2500)}
 }
 router.post('/:id/execute',requireSameOrigin,requireUser,(req,res)=>run(req,res))
 router.post('/:id/test-node',requireSameOrigin,requireUser,(req,res)=>run(req,res,true))
 router.post('/:id/chat',requireSameOrigin,requireUser,(req,res)=>run(req,res,false,true))
+router.get('/:id/active',requireUser,(req,res)=>{
+  const workflow=findWorkflow(req.params.id,req.user.id)
+  if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const active=activeRuns.get(req.user.id+':'+workflow.id)
+  res.json({active:active?{nodeId:active.currentNodeId,label:active.currentNodeLabel,phase:active.phase,completed:active.completed}:null})
+})
 router.get('/:id/runs',requireUser,(req,res)=>{
   try {
     if(!findWorkflow(req.params.id,req.user.id))return res.status(404).json({error:'Workflow tidak ditemukan.'})
