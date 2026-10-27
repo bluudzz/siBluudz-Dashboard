@@ -30,4 +30,12 @@ test('image node sends prompt to 9router and exposes a generated image URL',asyn
   const converted=await storeWorkflowImage('image-user',png.toString('base64'))
   assert.equal(converted.mimeType,'image/jpeg')
   assert.match(converted.imageUrl,/\.com\/api\/workflow-media\//)
+
+  const museCalls:any[]=[]
+  const dataUri='data:image/jpeg;base64,'+Buffer.from([0xff,0xd8,0xff,0xd9]).toString('base64')
+  await runImageNode({node:{data:{model:'muse-image/muse-image-1',prompt:'kucing'}},input:[{json:{}}]},
+    {id:'image-user',role:'admin'},
+    {fetchImpl:async(url:string,options:any)=>{museCalls.push({url,options});return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:`![image](${dataUri})`}}]})}}})
+  assert.equal(museCalls[0].url,'https://api.9router.com/v1/chat/completions')
+  assert.equal(JSON.parse(museCalls[0].options.body).model,'muse-image/muse-image-1')
 })

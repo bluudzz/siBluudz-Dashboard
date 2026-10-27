@@ -36,6 +36,8 @@ export function formatModelLabel(id?: string): string {
     [/^river\//i, '[RIVER] '],
     [/^yeta\//i, '[YETA] '],
     [/^oc\//i, '[OC] '],
+    [/^muse-image\//i, '[MUSE] '],
+    [/^muse\//i, '[MUSE] '],
     [/^groq\//i, '[GROQ] '],
     [/^cf\//i, '[CF] '],
     [/^(openrouter|or)\//i, '[OR] '],

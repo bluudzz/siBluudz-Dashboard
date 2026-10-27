@@ -21,11 +21,14 @@ function parseImageResponse(data) {
   throw new Error('Model gambar tidak mengembalikan JPEG, PNG, atau URL gambar yang dapat dipakai.')
 }
 
+// Model yang hanya bisa membuat gambar lewat /chat/completions (multimodal), bukan /images/generations.
+export const CHAT_IMAGE_MODEL = /^(?:ag\/gemini-[\w.-]*image|muse-image\/)/i
+
 async function requestImage(config,model,prompt,fetchImpl) {
   const base = config.baseUrl.replace(/\/chat\/completions\/?$/,'').replace(/\/+$/,'')
-  const isGeminiImage = /^ag\/gemini-[\w.-]*image/i.test(model)
-  const endpoint = isGeminiImage ? `${base}/chat/completions` : `${base}/images/generations`
-  const body = isGeminiImage
+  const isChatImage = CHAT_IMAGE_MODEL.test(model)
+  const endpoint = isChatImage ? `${base}/chat/completions` : `${base}/images/generations`
+  const body = isChatImage
     ? {model,messages:[{role:'user',content:`Buat satu gambar untuk posting Instagram. Hasilkan gambar saja. ${prompt}`}],stream:false}
     : {model,prompt,response_format:'b64_json',output_format:'jpeg',n:1}
   const response = await fetchImpl(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.apiKey}`},body:JSON.stringify(body),signal:AbortSignal.timeout(90_000)})

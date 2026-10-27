@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { db, getSetting, setSetting, getNineRouterConfig } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
+import { CHAT_IMAGE_MODEL } from '../workflow-image.js'
 
 const router = Router()
 
@@ -125,7 +126,26 @@ export async function fetchNineRouterImageModels(customBaseUrl, customApiKey) {
 
   const json = await response.json()
   const list = Array.isArray(json?.data) ? json.data : Array.isArray(json?.models) ? json.models : []
-  return Array.from(new Set(list.map((m) => (typeof m === 'string' ? m : m?.id)).filter(Boolean))).sort()
+  const models = list.map((m) => (typeof m === 'string' ? m : m?.id)).filter(Boolean)
+
+  // Model gambar chat-only (mis. muse-image) punya capabilities.imageOutput=false,
+  // jadi tidak muncul di /models/image. Ambil dari /models.
+  try {
+    const allRes = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+    if (allRes.ok) {
+      const allJson = await allRes.json()
+      const allList = Array.isArray(allJson?.data) ? allJson.data : []
+      for (const entry of allList) {
+        const id = typeof entry === 'string' ? entry : entry?.id
+        if (typeof id === 'string' && CHAT_IMAGE_MODEL.test(id)) models.push(id)
+      }
+    }
+  } catch {}
+
+  return Array.from(new Set(models)).sort()
 }
 
 export async function callNineRouterImageEdit({ sceneImage, productImage, prompt, model }) {
