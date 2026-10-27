@@ -314,6 +314,9 @@
 .wf-instagram-connection > .wf-field { margin:10px 0 6px; }
 .wf-ig-account-tools { display:flex; align-items:center; gap:5px; margin-bottom:12px; }
 .wf-ig-account-tools span { flex:1; min-width:0; overflow-wrap:anywhere; font-size:11px; color:var(--wf-muted); }
+.wf-ig-renewal { display:grid; gap:5px; margin:10px 0; padding:10px; border:1px solid #a86b30; border-radius:7px; background:rgba(168,107,48,.12); font-size:12px; line-height:1.4; }
+.wf-ig-renewal span { color:var(--wf-muted); }
+.wf-ig-renewal button { justify-self:start; margin-top:3px; }
 .workflow-studio .wf-ig-account-tools button { min-height:28px; padding:4px 6px; }
 .wf-ig-connect-form { margin:12px 0; padding:0 12px 12px; border:1px solid var(--wf-line); border-radius:7px; }
 .wf-ig-connect-form > button { width:100%; }

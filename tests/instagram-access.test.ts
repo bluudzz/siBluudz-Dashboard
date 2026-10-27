@@ -66,6 +66,13 @@ test('App token introspection grants scoped publishing and rejects invalid token
     assert.equal(JSON.stringify(access).includes('server-only-app-token'),false)
     const invalid=await inspectInstagramAccess(account,{request:async(_account:any,path:string)=>path==='debug_token'?{data:{is_valid:false}}:{data:[]}})
     assert.equal(invalid.actions.some(action=>action.enabled),false)
+    assert.equal(invalid.tokenValid,false)
+    const expired=await inspectInstagramAccess(account,{request:async(_account:any,path:string)=>{
+      if(path==='debug_token'||path==='me/permissions')throw Error('Unavailable')
+      throw Error('Meta API (400): (#190) Error validating access token')
+    }})
+    assert.equal(expired.tokenValid,false)
+    assert.match(expired.actions.find(action=>action.id==='publish').reason,/Perbarui token/)
   } finally {
     if(key===undefined)delete process.env.SOCIAL_CREDENTIALS_KEY;else process.env.SOCIAL_CREDENTIALS_KEY=key
     if(app===undefined)delete process.env.META_APP_ACCESS_TOKEN;else process.env.META_APP_ACCESS_TOKEN=app

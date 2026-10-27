@@ -9,7 +9,8 @@ const mediaDirectory = path.join(dataDirectory, 'workflow-media')
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 export function mediaPublicBase() {
-  const raw = String(process.env.PUBLIC_BASE_URL || '').trim()
+  const candidates = [process.env.PUBLIC_BASE_URL, process.env.APP_ORIGIN]
+  const raw = String(candidates.find((value) => String(value || '').trim().startsWith('https://')) || '').trim()
   if (!raw) return ''
   let url
   try { url = new URL(raw) } catch { throw new Error('PUBLIC_BASE_URL harus berupa URL HTTPS publik yang valid.') }
