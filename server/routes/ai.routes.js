@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { db, getSetting, setSetting, getNineRouterConfig } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
-import { CHAT_IMAGE_MODEL } from '../workflow-image.js'
 
 const router = Router()
 
@@ -112,6 +111,24 @@ function toDataUri(b64) {
   return `data:image/${isJpeg ? 'jpeg' : 'png'};base64,${b64}`
 }
 
+// Model Muse (worker image di 9Router) tidak terdaftar di /models maupun /models/image,
+// jadi harus disemai dari daftar tetap.
+export const MUSE_IMAGE_MODELS = [
+  'sdwebui/sdxl-base-1.0',
+  'sdwebui/sdxl-base-1.0-vm2',
+  'sdwebui/sdxl-base-1.0-turbo',
+  'sdwebui/sdxl-base-1.0-turbo-vm2',
+  'sdwebui/sdxl-turbo',
+  'sdwebui/sdxl',
+  'sdwebui/sd3.5',
+  'sdwebui/sd3.5-large',
+  'sdwebui/sd15',
+  'sdwebui/realistic-vision',
+  'sdwebui/flux-1-dev',
+  'sdwebui/flux-1-dev-vm2',
+  'sdwebui/flux-1-schnell',
+]
+
 export async function fetchNineRouterImageModels(customBaseUrl, customApiKey) {
   const config = getNineRouterConfig()
   const baseUrl = (customBaseUrl || config.baseUrl).replace(/\/+$/, '').replace(/\/models$/, '')
@@ -127,23 +144,7 @@ export async function fetchNineRouterImageModels(customBaseUrl, customApiKey) {
   const json = await response.json()
   const list = Array.isArray(json?.data) ? json.data : Array.isArray(json?.models) ? json.models : []
   const models = list.map((m) => (typeof m === 'string' ? m : m?.id)).filter(Boolean)
-
-  // Model gambar chat-only (mis. muse-image) punya capabilities.imageOutput=false,
-  // jadi tidak muncul di /models/image. Ambil dari /models.
-  try {
-    const allRes = await fetch(`${baseUrl}/models`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-    })
-    if (allRes.ok) {
-      const allJson = await allRes.json()
-      const allList = Array.isArray(allJson?.data) ? allJson.data : []
-      for (const entry of allList) {
-        const id = typeof entry === 'string' ? entry : entry?.id
-        if (typeof id === 'string' && CHAT_IMAGE_MODEL.test(id)) models.push(id)
-      }
-    }
-  } catch {}
+  models.push(...MUSE_IMAGE_MODELS)
 
   return Array.from(new Set(models)).sort()
 }

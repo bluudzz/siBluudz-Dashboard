@@ -36,6 +36,7 @@ export function formatModelLabel(id?: string): string {
     [/^river\//i, '[RIVER] '],
     [/^yeta\//i, '[YETA] '],
     [/^oc\//i, '[OC] '],
+    [/^sdwebui\//i, '[MUSE] '],
     [/^muse-image\//i, '[MUSE] '],
     [/^muse\//i, '[MUSE] '],
     [/^groq\//i, '[GROQ] '],

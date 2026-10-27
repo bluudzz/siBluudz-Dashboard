@@ -21,8 +21,9 @@ function parseImageResponse(data) {
   throw new Error('Model gambar tidak mengembalikan JPEG, PNG, atau URL gambar yang dapat dipakai.')
 }
 
-// Model yang hanya bisa membuat gambar lewat /chat/completions (multimodal), bukan /images/generations.
-export const CHAT_IMAGE_MODEL = /^(?:ag\/gemini-[\w.-]*image|muse-image\/)/i
+// Model gambar Gemini hanya punya jalur /chat/completions (multimodal), bukan /images/generations.
+// Model Muse (sdwebui/*) memakai /images/generations standar dan tidak terdaftar di /models.
+export const CHAT_IMAGE_MODEL = /^ag\/gemini-[\w.-]*image/i
 
 async function requestImage(config,model,prompt,fetchImpl) {
   const base = config.baseUrl.replace(/\/chat\/completions\/?$/,'').replace(/\/+$/,'')
