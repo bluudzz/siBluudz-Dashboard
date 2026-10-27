@@ -1,11 +1,11 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Clock, Bot, Braces, GitBranch, Settings, Check, AlertCircle, Pin, MessageCircle, Brain, Wrench, Plus, List, ShieldCheck, Search, Globe } from 'lucide-react'
+import { Check, AlertCircle, Pin, Plus } from 'lucide-react'
 import { catalog, formatModelLabel, ports, type StudioNode } from './workflow-model'
+import { iconForWorkflowNode } from './workflow-node-icons'
 import { aiPorts, isSubNode, isTrigger } from '../../../shared/workflow-connections'
 
-const icons = {trigger:Clock,chatTrigger:MessageCircle,chatModel:Bot,memory:Brain,tool:Wrench,aiAgent:Bot,set:Braces,splitOut:List,if:GitBranch,approval:ShieldCheck,searchContent:Search,httpRequest:Globe}
 function WorkflowNodeCard({data,type,selected}:NodeProps<StudioNode>) {
-  const Icon=icons[type as keyof typeof icons]||Settings
+  const Icon=iconForWorkflowNode(type)
   const definition=catalog.find(item=>item.type===type)
   const port=ports(type)
   const status=data.running?'running':data.result?.status||'idle'

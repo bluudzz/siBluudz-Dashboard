@@ -301,6 +301,10 @@
 .wf-palette-content section > button,.wf-planned-integrations > button { padding:8px 4px; gap:12px; }
 .wf-palette-content button strong { margin-bottom:2px; }
 .wf-palette-content button span span { line-height:1.45; }
+.wf-palette-content section > button { display:flex; align-items:flex-start; justify-content:flex-start; }
+.wf-palette-icon { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:8px; color:var(--node-hue,var(--wf-accent)); background:color-mix(in srgb,var(--node-hue,var(--wf-accent)) 12%,transparent); }
+.wf-palette-copy { flex:1; min-width:0; }
+.wf-palette-plus { flex:none; align-self:center; color:var(--wf-muted); }
 .wf-planned-integrations { margin-top:16px; padding-top:12px; }
 
 /* The dashboard supplies the height; canvas consumes the remaining space. */
