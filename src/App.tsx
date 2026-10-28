@@ -18,7 +18,7 @@ import type { InvoiceRecord } from '@/types/invoice'
 function DashboardContent() {
   const { isAuthenticated, authLoading, dataLoading, dataError, invoices, saveInvoices } = useUser()
   const [activeTab, setActiveTab] = React.useState('overview')
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(true)
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [searchOpen, setSearchOpen] = React.useState(false)
   const invoicesRef = React.useRef(invoices)

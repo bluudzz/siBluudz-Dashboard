@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { navigationSections } from './navData'
 import { Badge } from '@/components/ui/Badge'
 import { useUser } from '@/context/UserContext'
@@ -19,10 +20,13 @@ interface SidebarProps {
 export function Sidebar({
   activeTab,
   setActiveTab,
-  collapsed,
+  collapsed: autoCollapse,
   mobileOpen,
   setMobileOpen,
 }: SidebarProps) {
+  const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const collapsed = autoCollapse && !hovered && !focused
   const { profile } = useUser()
   const isPro = profile.tier === 'pro' || profile.role === 'admin'
   const visibleSections = navigationSections.filter((section) => !section.adminOnly || profile.role === 'admin')
@@ -39,8 +43,13 @@ export function Sidebar({
 
       {/* Sidebar Container */}
       <aside
+        aria-label="Navigasi utama"
+        onPointerEnter={event => { if (event.pointerType === 'mouse') setHovered(true) }}
+        onPointerLeave={() => setHovered(false)}
+        onFocusCapture={event => { if (event.target.matches(':focus-visible')) setFocused(true) }}
+        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false) }}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-sidebar transition-all duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:shrink-0',
+          'dashboard-sidebar fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-sidebar transition-[width,transform] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-dvh md:shrink-0',
           // Desktop collapse logic
           collapsed ? 'md:w-18' : 'md:w-64',
           // Mobile open logic
@@ -51,7 +60,7 @@ export function Sidebar({
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
           <div className="flex items-center gap-3 overflow-hidden">
             {/* Glowing Logo Icon */}
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-sky-500 text-white shadow-md shadow-blue-500/20">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Layers className="h-5 w-5" />
             </div>
 
@@ -67,7 +76,7 @@ export function Sidebar({
                   </span>
                 </span>
                 <span className="truncate text-[11px] font-medium text-muted-foreground">
-                  Modern Dashboard UI
+                  Ruang kerja Anda
                 </span>
               </div>
             )}
@@ -100,6 +109,8 @@ export function Sidebar({
                   return (
                     <button
                       key={item.id}
+                      aria-label={item.title}
+                      aria-current={isActive ? 'page' : undefined}
                       onClick={() => {
                         setActiveTab(item.id)
                         if (mobileOpen) setMobileOpen(false)
@@ -108,14 +119,14 @@ export function Sidebar({
                       className={cn(
                         'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer',
                         isActive
-                          ? 'bg-primary text-primary-foreground shadow-xs font-semibold'
+                          ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
                           : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                       )}
                     >
                       <Icon
                         className={cn(
                           'h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-110',
-                          isActive ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-foreground'
+                          isActive ? 'text-sidebar-accent-foreground' : 'text-muted-foreground group-hover:text-foreground'
                         )}
                       />
 
@@ -127,7 +138,7 @@ export function Sidebar({
                               variant={isActive ? 'outline' : 'secondary'}
                               className={cn(
                                 'text-[10px] px-1.5 py-0 font-normal shrink-0',
-                                isActive && 'border-white/30 text-white'
+                                isActive && 'border-sidebar-border text-sidebar-accent-foreground'
                               )}
                             >
                               {item.badge}
@@ -153,7 +164,7 @@ export function Sidebar({
         {/* Footer Workspace / Version Banner */}
         {(!collapsed || mobileOpen) ? (
           <div className="p-3 border-t border-sidebar-border space-y-2">
-            <div className="rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-transparent p-3">
+            <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                   <Zap className="h-3.5 w-3.5 text-blue-500" />
