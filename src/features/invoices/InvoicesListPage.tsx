@@ -76,8 +76,7 @@ export function InvoicesListPage({
                     <span className="iv-row-total">{formatMoney(calculateInvoiceTotal(inv), inv.currency)}</span>
                   </span>
                   <span className="iv-row-bottom">
-                    <span className="iv-row-client">{inv.to?.company || inv.to?.name || 'Tanpa klien'}</span>
-                    <span className="iv-row-subject">{inv.subject || inv.items?.[0]?.name || 'Tanpa perihal'}</span>
+                    <span className="iv-row-client">{[inv.to?.company, inv.to?.name].filter(Boolean).join(' | ') || 'Tanpa klien'}</span>
                     <span className="iv-row-date">{inv.issueDate || '—'}</span>
                   </span>
                 </button>

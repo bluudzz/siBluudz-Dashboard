@@ -7,4 +7,4 @@ export const WORKFLOW_NODE_TYPES: Set<string>
 export function validateGraph(nodes: unknown, edges: unknown, forRun?: boolean): string[]
 export function resolveValue(value: unknown, json:Record<string,unknown>): unknown
 export function executeGraph(nodes: WorkflowNode[], edges: WorkflowEdge[], targetNodeId?: string): ExecutionResult
-export function executeGraphAsync(nodes: WorkflowNode[], edges: WorkflowEdge[], targetNodeId:string|undefined, runAgent:(context:unknown)=>Promise<DataItem[]>, onProgress?:(progress:{phase:string;nodeId:string;label?:string;status?:string;error?:string})=>void, signal?:AbortSignal):Promise<ExecutionResult>
+export function executeGraphAsync(nodes: WorkflowNode[], edges: WorkflowEdge[], targetNodeId:string|undefined, runAgent:(context:unknown)=>Promise<DataItem[]>, onProgress?:(progress:{phase:string;nodeId:string;label?:string;status?:string;error?:string;result?:NodeResult})=>void, signal?:AbortSignal):Promise<ExecutionResult>

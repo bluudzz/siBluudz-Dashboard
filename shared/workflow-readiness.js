@@ -68,8 +68,14 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
       else if (!Array.isArray(data.approvedItems) || !data.approvedItems.length || data.approvedItems.length > 1000 || data.approvedItems.some(item => !object(item) || !object(item.json))) add('error', 'approval-data', `${label}: data persetujuan tidak valid. Cabut persetujuan lalu uji ulang.`, node.id)
     }
     if (node.type === 'searchContent') {
-      if (String(data.query || '').length > 200) add('error', 'search-query', `${label}: topik pencarian maksimal 200 karakter.`, node.id)
-      if (!Number.isInteger(Number(data.limit || 5)) || Number(data.limit || 5) < 1 || Number(data.limit || 5) > 10) add('error', 'search-limit', `${label}: pilih 1 sampai 10 sumber.`, node.id)
+      const mode=String(data.sourceMode||'search')
+      if(!['search','url'].includes(mode))add('error','search-mode',`${label}: pilih pencarian topik atau URL langsung.`,node.id)
+      if(mode==='search'&&String(data.query||'').length>200)add('error','search-query',`${label}: topik pencarian maksimal 200 karakter.`,node.id)
+      if(mode==='url'){
+        const raw=String(data.url||'').trim()
+        if(!raw)add('error','search-url',`${label}: isi alamat HTTPS publik yang akan dibaca.`,node.id)
+        else if(!raw.includes('{{'))try{const url=new URL(raw);if(url.protocol!=='https:'||url.username||url.password||url.port&&url.port!=='443')throw Error()}catch{add('error','search-url',`${label}: gunakan URL HTTPS publik tanpa kredensial.`,node.id)}
+      }
     }
     if(node.type==='googleDrive'){
       if(!String(data.accountId||'').trim())add('error','drive-account',`${label}: hubungkan dan pilih akun Google Drive.`,node.id)

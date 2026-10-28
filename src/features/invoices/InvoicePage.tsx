@@ -157,6 +157,10 @@ export function InvoicePage({ initialInvoiceId }: InvoicePageProps = {}) {
             <PlusCircle size={16} />
             Dokumen baru
           </Button>
+          <Button variant="outline" onClick={openInNewTab} title="Buka Invoice Builder di tab baru">
+            <ExternalLink size={16} />
+            Builder Invoice
+          </Button>
           <Button
             variant="outline"
             size="sm"

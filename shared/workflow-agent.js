@@ -12,12 +12,27 @@ export async function runWorkflowAgent({node,input,resources,createModel,loadMem
   const output=[]
   for(const item of input){
      const configuredPrompt=String(node.data.aiPrompt||'{{ $json.chatInput }}').trim()
+    // Keep the agent input contract stable even when an upstream node returns
+    // domain fields (topic, sources, content, etc.) instead of a literal
+    // `input` field. This lets older prompts using {{ $json.input }} continue
+    // to work without asking the assistant to rewrite the workflow.
+    const agentJson=Object.hasOwn(item.json,'input')?item.json:{...item.json,input:item.json}
      let prompt
-     try { prompt=String(resolveValue(configuredPrompt,item.json)) }
+    try { prompt=String(resolveValue(configuredPrompt,agentJson)) }
      catch(error) {
        if(configuredPrompt==='{{ $json.chatInput }}'&&!Object.hasOwn(item.json,'chatInput')) prompt=`Bantu saya mengolah data workflow berikut:\n${JSON.stringify(item.json)}`
        else throw error
      }
+    // Research nodes carry their evidence in pages/sources. Attach a bounded
+    // context block automatically so the agent can analyze it instead of
+    // asking the user to paste the raw research again.
+    const researchPages=Array.isArray(item.json.pages)?item.json.pages:Array.isArray(item.json.sources)?item.json.sources:[]
+    if(researchPages.length){
+      const evidence=researchPages.slice(0,20).map((page,index)=>({
+        no:index+1,title:String(page?.title||''),url:String(page?.url||''),status:String(page?.status||''),publishedAt:String(page?.publishedAt||''),content:String(page?.content||page?.snippet||'').slice(0,3500),
+      }))
+      prompt+=`\n\nDATA RISET DARI NODE SEBELUMNYA:\n${JSON.stringify({topic:item.json.query||item.json.topic||'',sourceCount:item.json.sourceCount||researchPages.length,pages:evidence})}\n\nGunakan data riset tersebut sebagai bahan utama. Bedakan fakta bersumber dan opini; jangan meminta pengguna mengirim ulang data yang sudah tersedia.`
+    }
      if(prompt.length>16000)throw new Error('Prompt AI Agent maksimal 16.000 karakter.')
      const splitOutCount=Number(node.data.splitOutCount)
      const splitOutInstruction=Number.isInteger(splitOutCount)&&splitOutCount>=1?`\n\nAturan wajib dari node Split Out berikutnya: hasilkan tepat ${splitOutCount} prompt. Balas hanya dengan JSON valid berbentuk {"prompts":[{"slide":1,"prompt":"..."}]} tanpa markdown atau penjelasan tambahan. Jumlah elemen prompts harus tepat ${splitOutCount}.`:''

@@ -9,10 +9,10 @@
 .em-workspace h1 { font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.025em; }
 .em-muted { color: var(--em-muted); font-size: 12px; line-height: 1.6; }
 
-.em-page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.em-page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
 .em-page-header p { color: var(--em-muted); margin-top: 4px; line-height: 1.6; }
 .em-header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
-.em-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 0; color: var(--em-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.em-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 4px 0 8px; color: var(--em-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .em-stat strong { color: var(--em-ink); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 .em-actions-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
 .em-tool-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 10px; border-radius: 6px; color: var(--em-muted); font-size: 12px; }

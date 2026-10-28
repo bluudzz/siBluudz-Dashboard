@@ -10,10 +10,10 @@
 .iv-muted { color: var(--iv-muted); font-size: 12px; line-height: 1.6; }
 .iv-strong { color: var(--iv-ink); font-weight: 600; }
 
-.iv-page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.iv-page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
 .iv-page-header p { color: var(--iv-muted); margin-top: 4px; line-height: 1.6; }
 .iv-header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
-.iv-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 0; color: var(--iv-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.iv-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 4px 0 8px; color: var(--iv-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .iv-stat strong { color: var(--iv-ink); }
 .iv-stat-value { margin-left: auto; }
 .iv-stat-value strong { font-size: 14px; }

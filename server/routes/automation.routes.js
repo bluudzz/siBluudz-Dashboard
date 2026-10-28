@@ -7,7 +7,7 @@ import { decodeWorkflowRun } from '../workflow-history.js'
 import { createWorkflowRuntime } from '../workflow-runtime.js'
 import { isAiConnection } from '../../shared/workflow-connections.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
-import { proposeWorkflowChange } from '../workflow-assistant.js'
+import { proposeWorkflowChange, loadAssistantHistory, clearAssistantHistory } from '../workflow-assistant.js'
 
 const router = Router()
 const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
@@ -33,28 +33,27 @@ function templateGraph(template) {
       {id:'agent-1',type:'aiAgent',position:{x:430,y:120},data:{label:'AI Agent',executionMode:'live',aiPrompt:'{{ $json.chatInput }}',systemMessage:'Anda membantu menyusun rencana konten Instagram. Gunakan brief brand jika relevan. Tanyakan informasi yang belum tersedia. Jangan mengarang fakta atau mengaku membuat gambar dan memposting.',maxIterations:'3'}},
       {id:'model-1',type:'chatModel',position:{x:230,y:380},data:{label:'9router Chat Model',model:'',temperature:'0.7'}},
       {id:'memory-1',type:'memory',position:{x:460,y:380},data:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'}},
-      {id:'tool-1',type:'tool',position:{x:690,y:380},data:{label:'Tools',toolType:'knowledge',description:'Baca brief brand yang disediakan pengguna sebelum merencanakan konten.',content:'Brief brand belum diisi. Tanyakan produk, audiens, tujuan, dan CTA kepada pengguna.'}},
     ],
-    edges:[{id:'chat-agent',source:'chat-1',target:'agent-1',sourceHandle:'out',targetHandle:'prompt'},...['model','memory','tool'].map((type,index)=>({id:type+'-agent',source:type+'-1',target:'agent-1',sourceHandle:['ai_languageModel','ai_memory','ai_tool'][index],targetHandle:['ai_languageModel','ai_memory','ai_tool'][index]}))],
+    edges:[{id:'chat-agent',source:'chat-1',target:'agent-1',sourceHandle:'out',targetHandle:'prompt'},...['model','memory'].map((type,index)=>({id:type+'-agent',source:type+'-1',target:'agent-1',sourceHandle:['ai_languageModel','ai_memory'][index],targetHandle:['ai_languageModel','ai_memory'][index]}))],
   }
   if(template === 'ig-research')return {
     nodes:[
       {id:'topic-1',type:'promptTrigger',position:{x:80,y:140},data:{label:'Topik riset',prompt:'Cari fakta terbaru tentang Fisch Roblox untuk konten Instagram @bluudzstore',promptMode:'normal'}},
-      {id:'research-1',type:'aiAgent',position:{x:450,y:140},data:{label:'Riset konten AI',executionMode:'live',aiPrompt:'Teliti topik ini: {{ $json.prompt }}. Cari sumber web, baca halaman yang tersedia, tulis fakta dengan URL dan tanggal sumber, lalu pisahkan hal yang belum terverifikasi. Pertahankan nama game, gear, lokasi, dan slang gamer dalam bahasa aslinya.',systemMessage:'Anda peneliti konten Roblox untuk @bluudzstore. Gunakan alat pencarian. Jangan mengarang angka, patch, stat, atau mekanik. Jika halaman sumber gagal dibaca, tandai belum terverifikasi.',maxIterations:'3'}},
-      {id:'model-1',type:'chatModel',position:{x:350,y:390},data:{label:'Model AI · 9router',model:'',temperature:'0.2'}},
-      {id:'web-tool-1',type:'tool',position:{x:690,y:390},data:{label:'Cari web · 5 halaman',toolType:'webResearch'}},
+      {id:'search-1',type:'searchContent',position:{x:390,y:140},data:{label:'Riset Informasi',sourceMode:'search',query:'{{ $json.prompt }}',url:'',model:'ag/gemini-3.8-flash'}},
+      {id:'research-1',type:'aiAgent',position:{x:720,y:140},data:{label:'Riset konten AI',executionMode:'live',aiPrompt:'Analisis sumber berikut: {{ $json.sources }}. Tulis fakta dengan URL dan tanggal sumber, lalu pisahkan hal yang belum terverifikasi. Pertahankan nama game, gear, lokasi, dan slang gamer dalam bahasa aslinya.',systemMessage:'Anda peneliti konten Roblox untuk @bluudzstore. Gunakan hanya isi sumber yang berstatus read. Jangan mengarang angka, patch, stat, atau mekanik.',maxIterations:'3'}},
+      {id:'model-1',type:'chatModel',position:{x:640,y:390},data:{label:'Model AI · 9router',model:'',temperature:'0.2'}},
     ],
     edges:[
-      {id:'topic-research',source:'topic-1',target:'research-1',sourceHandle:'out',targetHandle:'prompt'},
+      {id:'topic-search',source:'topic-1',target:'search-1',sourceHandle:'out',targetHandle:'in'},
+      {id:'search-research',source:'search-1',target:'research-1',sourceHandle:'out',targetHandle:'prompt'},
       {id:'model-research',source:'model-1',target:'research-1',sourceHandle:'ai_languageModel',targetHandle:'ai_languageModel'},
-      {id:'web-research',source:'web-tool-1',target:'research-1',sourceHandle:'ai_tool',targetHandle:'ai_tool'},
     ],
   }
   let steps
   if(template === 'ig-autopost') {
     trigger.data.sampleData = JSON.stringify({topic:'Ide carousel produk',product:'Nama produk',audience:'Calon pelanggan',objective:'Edukasi lalu mendorong percakapan',cta:'Kirim DM untuk informasi lebih lanjut',slideCount:3,factStatus:'needs_review'})
     steps = [
-      {type:'searchContent',data:{label:'Cari Referensi Konten',query:'',limit:'5'}},
+      {type:'searchContent',data:{label:'Cari Referensi Konten',query:'',limit:'5',model:'ag/gemini-3.8-flash'}},
       {type:'set',data:{label:'Penentuan Topik',fields:'{"topic":"{{ $json.topic }}","product":"{{ $json.product }}","audience":"{{ $json.audience }}","objective":"{{ $json.objective }}","cta":"{{ $json.cta }}","slideCount":3,"contentStatus":"draft","factStatus":"{{ $json.factStatus }}"}',keepInput:true}},
       {type:'aiAgent',data:{label:'Validasi Fakta',role:'Fact Checker',aiModel:'',aiPrompt:'Validasi fakta untuk konten Instagram tentang {{ $json.topic }} dan {{ $json.product }}. Target audiens: {{ $json.audience }}. Referensi awal: {{ $json.sources }}. Periksa isi sumber sebelum menganggap klaim terverifikasi; daftar judul berita saja bukan bukti. Identifikasi setiap klaim, kebutuhan sumber, tanggal sumber, tingkat keyakinan, dan risiko klaim berlebihan. Jika sumber kurang, tandai needs_review. Keluarkan status factStatus: verified, needs_review, atau rejected.'}},
       {type:'aiAgent',data:{label:'Strategi Marketing 3 Slide',role:'Content Strategist',aiModel:'',aiPrompt:'Rancang strategi marketing carousel Instagram 3 slide untuk {{ $json.topic }} tentang {{ $json.product }}. Target audiens: {{ $json.audience }}. Tujuan: {{ $json.objective }}. CTA: {{ $json.cta }}. Tetapkan Slide 1 sebagai hook, Slide 2 sebagai value atau proof, dan Slide 3 sebagai CTA. Jelaskan pesan utama, urutan narasi, angle, dan alasan strategi. Jangan membuat klaim yang belum tervalidasi.'}},
@@ -126,7 +125,7 @@ async function run(req,res,partial=false,chat=false){
   const activeKey=req.user.id+':'+workflow.id
   if(activeRuns.get(activeKey)?.running)return res.status(409).json({error:'Workflow ini sedang berjalan. Tunggu hasilnya sebelum menjalankan lagi.'})
   const controller=new AbortController()
-  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],running:true,controller}
+  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],statuses:{},events:[],sequence:0,running:true,controller}
   activeRuns.set(activeKey,active)
   try{
      const normalized=normalizedWorkflow(workflow)
@@ -149,7 +148,13 @@ async function run(req,res,partial=false,chat=false){
        active.phase=progress.phase
        active.currentNodeId=progress.phase==='start'?progress.nodeId:''
        active.currentNodeLabel=progress.label||''
-       if(progress.phase==='complete')active.completed.push({nodeId:progress.nodeId,status:progress.status})
+       if(progress.phase==='start')active.statuses[progress.nodeId]='running'
+       if(progress.phase==='complete'){
+         active.statuses[progress.nodeId]=progress.status||'success'
+         active.completed.push({nodeId:progress.nodeId,status:progress.status})
+       }
+       active.events.push({sequence:++active.sequence,...progress})
+       if(active.events.length>250)active.events.splice(0,active.events.length-250)
      },controller.signal)
      active.phase=result.status==='cancelled'?'stopped':'complete';active.currentNodeId='';active.currentNodeLabel='';active.status=result.status
     const runId=randomUUID()
@@ -169,9 +174,20 @@ router.post('/:id/assistant',requireSameOrigin,requireUser,async(req,res)=>{
     ?sanitizeGraph(req.body?.nodes,req.body?.edges)
     :normalizedWorkflow(row)
   try{
-    const result=await proposeWorkflowChange({user:req.user,instruction:req.body?.instruction,nodes:graph.nodes,edges:graph.edges,history:req.body?.history,model:req.body?.model})
+    const result=await proposeWorkflowChange({user:req.user,instruction:req.body?.instruction,nodes:graph.nodes,edges:graph.edges,model:req.body?.model,workflowId:row.id})
     res.json(result)
   }catch(error){res.status(422).json({error:error instanceof Error?error.message:'Asisten workflow gagal membuat usulan.'})}
+})
+router.get('/:id/assistant/history',requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  res.json({messages:loadAssistantHistory(req.user.id,row.id)})
+})
+router.delete('/:id/assistant/history',requireSameOrigin,requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  clearAssistantHistory(req.user.id,row.id)
+  res.json({cleared:true})
 })
 router.post('/:id/execute',requireSameOrigin,requireUser,(req,res)=>run(req,res))
 router.post('/:id/test-node',requireSameOrigin,requireUser,(req,res)=>run(req,res,true))
@@ -190,7 +206,9 @@ router.get('/:id/active',requireUser,(req,res)=>{
   const workflow=findWorkflow(req.params.id,req.user.id)
   if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
   const active=activeRuns.get(req.user.id+':'+workflow.id)
-  res.json({active:active?{nodeId:active.currentNodeId,label:active.currentNodeLabel,phase:active.phase,completed:active.completed}:null})
+  if(!active)return res.json({active:null})
+  const after=Math.max(0,Number.parseInt(String(req.query.after||'0'),10)||0)
+  res.json({active:{nodeId:active.currentNodeId,label:active.currentNodeLabel,phase:active.phase,completed:active.completed,statuses:active.statuses,sequence:active.sequence,events:active.events.filter(event=>event.sequence>after)}})
 })
 router.get('/:id/runs',requireUser,(req,res)=>{
   try {

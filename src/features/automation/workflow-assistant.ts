@@ -26,7 +26,7 @@ export function assistantContext(node:StudioNode,nodes:StudioNode[],edges:Edge[]
   const allowed=editable[node.type||'aiAgent']||editable.aiAgent
   const config=Object.fromEntries(allowed.map(key=>[key,node.data[key]]).filter(([,value])=>value!==undefined))
   const neighbors=edges.filter(edge=>edge.source===node.id||edge.target===node.id).slice(0,8).map(edge=>({direction:edge.target===node.id?'input':'output',node:nodes.find(item=>item.id===(edge.target===node.id?edge.source:edge.target))?.data.label||'Node'}))
-  return {workflow:workflowName.slice(0,120),nodeType:node.type||'aiAgent',executionMode:node.data.executionMode||'preview',config:safe(config),neighbors,allowedChanges:allowed,inputSample:safe(node.data.result?.input?.[0]?.json),outputSample:safe(node.data.result?.output?.[0]?.json),limitations:'AI Agent live memakai sub-node Chat Model 9router, Memory dan Tool opsional. Tool yang tersedia: knowledge dan textLength.'}
+  return {workflow:workflowName.slice(0,120),nodeType:node.type||'aiAgent',executionMode:node.data.executionMode||'preview',config:safe(config),neighbors,allowedChanges:allowed,inputSample:safe(node.data.result?.input?.[0]?.json),outputSample:safe(node.data.result?.output?.[0]?.json),limitations:'AI Agent live memakai Model AI 9router dan Memory opsional. Pencarian internet dilakukan oleh node Riset Informasi sebelum AI Agent.'}
 }
 export type AssistantSuggestion={summary:string;reason:string;changes:Record<string,string|boolean>;nextStep:string}
 export function parseAssistantSuggestion(reply:string,nodeType:string):AssistantSuggestion {

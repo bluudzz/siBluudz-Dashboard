@@ -162,11 +162,11 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
       }
       else if (node.type === 'searchContent' || node.type === 'httpRequest' || node.type === 'googleDrive') {
         if (!live) throw new Error('Langkah internet hanya dapat diuji lewat backend.')
-        const response = yield {kind:node.type==='googleDrive'?'googleDrive':'external',node,input}
+        const response = yield {kind:node.type==='googleDrive'?'googleDrive':node.type==='searchContent'?'research':'external',node,input}
         if (response.error) throw new Error(response.error)
         result.output = response.output
         usedLive = true
-        result.message = node.type === 'searchContent' ? 'Sumber berita berhasil diambil; periksa tanggal dan fakta sebelum dipakai.' : node.type==='googleDrive'?'File Google Drive berhasil dibaca.':'Respons halaman/API berhasil diambil.'
+        result.message = node.type === 'searchContent' ? 'Informasi dan isi sumber berhasil diambil; gunakan hanya halaman yang berhasil dibaca.' : node.type==='googleDrive'?'File Google Drive berhasil dibaca.':'Respons halaman/API berhasil diambil.'
       }
       else if (node.type === 'imageGenerate' || node.type === 'instagram') {
         if (!live) throw new Error('Langkah ini hanya dapat diuji lewat backend.')
@@ -233,7 +233,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
     } catch (error) { result.status = 'error'; result.error = error.message; result.output = []; failed = true }
     result.durationMs = Date.now() - start
     logs.push({ nodeId:id, step:result.label, status:result.status, time:new Date().toISOString(), message:result.error || result.message || `${result.output.length} item dihasilkan.` })
-    onProgress({phase:'complete',nodeId:id,label:result.label,status:result.status,error:result.error})
+    onProgress({phase:'complete',nodeId:id,label:result.label,status:result.status,error:result.error,result})
   }
   return { status: failed ? 'error' : awaitingApproval ? 'waiting_approval' : 'completed', mode: usedLive?'live':'simulation', nodeResults, nodeOutputs: Object.fromEntries(Object.entries(nodeResults).map(([id,result]) => [id,result.output])), logs }
 }

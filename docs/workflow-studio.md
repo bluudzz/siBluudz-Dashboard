@@ -9,12 +9,13 @@ Editor siBluudz memakai kanvas dengan alur data dan koneksi pendukung AI seperti
 - Manual Trigger menerima objek JSON atau array `[{"json":{...}}]`.
 - **Prompt Trigger** memulai alur dari satu perintah teks. Mode bawaan **AI** memakai model utama 9router atau model yang dipilih di node, lalu meneruskan jawabannya sebagai `prompt` dan `output` ke langkah berikutnya; perintah awal tersimpan sebagai `originalPrompt`. **Mode Normal** meneruskan prompt tanpa memanggil AI. Kedua mode dijalankan saat tombol **Jalankan alur** atau **Uji langkah** ditekan, bukan saat mengetik.
 - Edit Fields memetakan objek JSON ke tiap item; IF memisahkan item ke output `true` dan `false`. **Persetujuan Manual** menahan cabang setelahnya sampai versi hasil yang masuk disetujui.
-- **Cari Informasi** membaca hasil Google News RSS berdasarkan topik dan menyertakan judul, tautan, tanggal, serta sumber. **Ambil Halaman/API** membaca respons teks atau JSON dari URL HTTPS publik menggunakan GET. Keduanya aktif hanya saat workflow diuji; data hasilnya tersimpan di riwayat.
+- **Riset Informasi** dapat menyusun pencarian topik lalu membaca banyak halaman publik, atau membaca satu URL HTTPS langsung. Node lama **Ambil Halaman/API** tetap dapat dijalankan pada workflow lama, tetapi tidak ditawarkan lagi untuk workflow baru.
 - **Generate Gambar** membuat satu gambar per item memakai model gambar 9router. Rasio dan ukuran ditulis pada prompt dari langkah sebelumnya; node tidak meminta ukuran tersendiri. PNG hasil model dikonversi menjadi JPEG. Hasil gambar tampil sebagai pratinjau di panel Hasil dan Persetujuan Manual. **Post to Instagram** dapat menerbitkan satu foto atau carousel 2–10 foto melalui Meta API, membaca daftar post, dan memeriksa satu post. Semua node memiliki ikon di katalog dan kanvas.
 - Ekspresi terbatas `{{ $json.field }}` / `{{ $json.nested.field }}`; nilai ekspresi penuh mempertahankan tipe. Placeholder lama `{field}` tetap diterima. JavaScript arbitrer tidak dievaluasi.
 - Execute step menjalankan node tujuan beserta ancestor yang dibutuhkan. Node terputus dan cabang tanpa data dilewati. Error menghentikan langkah berikutnya.
 - Nonaktifkan node untuk meneruskan input. Pin output untuk menggunakan data pengujian tetap (IF tidak dapat dipin).
 - Hasil per langkah berupa ringkasan yang dapat dibaca, data teknis opsional, status/durasi, log dan riwayat persisten. Data runtime tidak disimpan sebagai konfigurasi workflow.
+- Selama pengujian, editor menampilkan status node secara langsung: **Menunggu giliran** sesaat setelah alur dimulai, **Sedang diproses…** pada node yang sedang berjalan (border putus-putus dan indikator berkedip), lalu **Selesai**, **Dilewati**, **Error**, atau **Menunggu persetujuan**. Panel status di kanan atas menampilkan nama node aktif dan jumlah node yang sudah selesai. Nilai ini berasal dari endpoint `GET /api/workflows/:id/active` yang di-polling tiap 250 ms, jadi bukan tebakan sisi klien.
 - Impor/ekspor JSON siBluudz; impor mengganti draft dan bisa di-undo. Maksimal 100 node, 300 koneksi, 1000 item per node, file impor 1 MB.
 - Ponsel menampilkan daftar node yang dapat dibuka, sementara desktop/tablet menggunakan kanvas. Menggambar koneksi tersedia di kanvas desktop/tablet.
 - Tombol **Cara pakai** di toolbar membuka panduan singkat fungsi node dan langkah membuat template Instagram tanpa menutup kanvas secara permanen.
@@ -39,20 +40,20 @@ Jika respons Meta gagal setelah permintaan publikasi dimulai, node menahan perco
 
 Persetujuan yang dipilih akan tersimpan bersama draft setelah Anda klik **Simpan** atau **Jalankan alur**. Bila editor dimuat ulang sebelum disetujui, node dapat mengambil bahan terakhir yang menunggu dari riwayat pengujian. Ini adalah gerbang pengujian manual dengan menjalankan ulang dari awal, belum sistem jeda dan lanjut otomatis yang tahan restart.
 
-Topik pencarian dikirim ke Google News. Node Ambil Halaman/API meminta URL yang diisi pengguna atau berasal dari data workflow. Akses dibatasi ke HTTPS publik pada port 443, metode GET, IPv4 publik, tanpa kredensial di URL atau parameter kunci akses umum, tanpa redirect, dengan timeout 10 detik dan respons maksimal 256 KB. Maksimal 10 item input per node internet. Hasil mesin pencari belum otomatis menjadi fakta terverifikasi; tinjau sumber sebelum publikasi. Node Persetujuan Manual sendiri tidak mengirim data ke layanan luar.
+Mode pencarian memakai AI 9router untuk menyusun hingga lima sudut riset dari topik node sebelumnya. Bing RSS dan Google News RSS memberi kandidat sumber untuk setiap sudut; node membagi jatah baca antarsudut, menyaring duplikat, dan mencari lagi bila sumber yang berhasil dibaca atau ragamnya masih kurang. Batas halaman diatur pada node (default 12, maksimal 20). Hasil mencatat sumber yang terbaca, sumber yang gagal, domain, sudut riset, dan kueri lanjutan. Jika tersedia layanan SearXNG pada alamat HTTPS publik, set `RESEARCH_SEARXNG_URL=https://search.example.com` di backend untuk menambah sumber hasil pencarian melalui API JSON; tidak perlu memasang SearXNG pada VPS dashboard yang sama. Bila konektor itu gagal, pencarian RSS tetap berjalan. Mode URL langsung meminta alamat yang diisi pengguna atau berasal dari data workflow. Akses dibatasi ke HTTPS publik, metode GET, tanpa kredensial di URL, tanpa redirect, serta dengan batas waktu dan ukuran respons. Maksimal 10 item input per node internet. Hasil pencarian belum otomatis menjadi fakta terverifikasi; tinjau sumber sebelum publikasi.
 
 ## Pemeriksaan sebelum pengujian
 
-Klik **Periksa alur** untuk melihat konfigurasi yang perlu dilengkapi. Klik pesan masalah untuk membuka node terkait. Pemeriksaan mencakup trigger aktif, Model AI yang belum terhubung atau belum dipilih, format bahan awal, Edit Fields, serta pengaturan Tools dan kondisi. Mode pratinjau, node yang terputus, jadwal yang belum aktif, dan penggunaan data pin ditampilkan sebagai catatan.
+Klik **Periksa alur** untuk melihat konfigurasi yang perlu dilengkapi. Klik pesan masalah untuk membuka node terkait. Pemeriksaan mencakup trigger aktif, Model AI yang belum terhubung atau belum dipilih, format bahan awal, Edit Fields, pencarian informasi, dan kondisi. Mode pratinjau, node yang terputus, jadwal yang belum aktif, dan penggunaan data pin ditampilkan sebagai catatan.
 
 Pemeriksaan yang sama dijalankan pada backend sebelum eksekusi. Draft yang belum lengkap tetap boleh disimpan. **Uji langkah** hanya memeriksa node tujuan dan jalur sebelumnya; node sesudahnya boleh belum selesai. Workflow yang sedang berjalan menolak permintaan eksekusi kedua agar satu tugas tidak memanggil AI dua kali dari tab berbeda. Perlindungan ini berlaku pada satu proses backend; beberapa replika backend membutuhkan kunci bersama di database atau antrean.
 
-Node ditambahkan melalui satu katalog **Tambah node**. Model teks, Memory, dan Tools untuk AI Agent tetap menjadi sumber daya internal AI Agent, bukan langkah utama. Generate Gambar dan Post to Instagram tersedia pada kategori AI dan Publikasi. Script lanjutan belum tersedia.
+Node ditambahkan melalui satu katalog **Tambah node**. Model teks dan Memory menjadi sumber daya internal AI Agent. Pencarian internet dilakukan oleh node **Riset Informasi**. Generate Gambar dan Post to Instagram tersedia pada kategori AI dan Publikasi. Script lanjutan belum tersedia.
 
 
 ## Batas integrasi
 
-AI Agent berjalan menggunakan **OpenAI Agents SDK** (`Agent`, `Runner`, dan `tool`) pada backend siBluudz. Model dipanggil melalui adapter Chat Completions menuju 9router. Agent baru memakai mode aktif; agent lama tetap pratinjau sampai pengguna menekan **Aktifkan AI terhubung**. Hubungkan satu **Model AI**; Memory dan Tools bersifat opsional. Jika memakai alat bantu, pilih model yang mendukung tool calling. Alat yang tersedia adalah pembaca brief (`knowledge`), penghitung karakter/kata (`textLength`), dan riset web (`webResearch`). Riset web mencari lewat RSS Bing dengan Google News sebagai cadangan, lalu mencoba membaca maksimal lima halaman HTTPS publik secara berurutan. Halaman gagal baca ditandai dan tidak boleh dipakai sebagai bukti. Tidak ada proses browser atau MCP tambahan di VPS. Setiap permintaan model dicatat pada penggunaan kuota AI.
+AI Agent berjalan menggunakan **OpenAI Agents SDK** pada backend siBluudz dan model dipanggil melalui adapter Chat Completions menuju 9router. Hubungkan satu **Model AI**; Memory bersifat opsional. Aturan AI menentukan perilaku tetap agent, sedangkan Memory menyimpan percakapan sebelumnya dalam sesi yang sama. Riset web berada pada node terpisah agar tidak menghabiskan putaran tool AI Agent. Setiap permintaan model dicatat pada penggunaan kuota AI.
 
 ## Google Drive di Auto Workflow
 
@@ -69,11 +70,11 @@ Kontrol duplikat yang dihapus: deretan shortcut node yang mengulang katalog, tem
 
 ## Mencoba chat agent
 
-1. Pilih **Workflow baru → Chat AI Agent · 9router + Memory + Tool**.
-2. Buka **9router Chat Model**, lalu pilih model yang mendukung Tools.
+1. Pilih **Workflow baru → AI Agent · Model dan Memory**.
+2. Buka **9router Chat Model**, lalu pilih model teks.
 3. Isi bahan produk/brand pada **Brief brand**. Pengaturan percakapan boleh memakai nilai bawaan.
 4. Klik **Uji chat**, tulis permintaan, dan klik **Kirim**. Draft disimpan sebelum dijalankan.
-5. AI Agent memakai pesan sebagai tugas. Koneksi garis utuh membawa data; garis putus menghubungkan Model AI, Memory, dan Tools ke agent.
+5. AI Agent memakai pesan sebagai tugas. Koneksi garis utuh membawa data; garis putus menghubungkan Model AI dan Memory ke agent.
 6. Memory disimpan di SQLite per pengguna, workflow, node Memory, dan kunci sesi. **Sesi baru** memulai konteks baru. Ini adalah chat uji dalam dashboard yang membutuhkan login, belum webhook chat publik.
 
 `.taste-skill/check-agent.mjs` menguji koneksi bertipe, chat melalui endpoint backend, tool calling lewat provider lokal tiruan, pemisahan sesi, riwayat, kepemilikan workflow, dan UI pada tiga lebar layar. Tes ini tidak memanggil provider 9router sungguhan.

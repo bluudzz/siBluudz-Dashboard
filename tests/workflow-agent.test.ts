@@ -73,6 +73,15 @@ test('manual input can run legacy chat prompt without chatInput field',async()=>
   })})
   assert.equal(output[0].json.output,'Data berhasil diproses')
 })
+
+test('agent keeps a compatibility input alias for upstream research data',async()=>{
+  const legacyNode=node('research-agent','aiAgent',{executionMode:'live',aiPrompt:'Gunakan data: {{ $json.input }}'})
+  let received=''
+  const output=await runWorkflowAgent({node:legacyNode,input:[{json:{query:'Roblox update',sources:[{title:'Patch notes'}]}}],resources:{model:nodes[2],memory:undefined,tools:[]},createModel:()=>createTestModel(async(request:any)=>{received=String(request.messages.at(-1)?.content||'');return {choices:[{message:{role:'assistant',content:'Ringkasan siap'}}]}})})
+  assert.equal(output[0].json.output,'Ringkasan siap')
+  assert.match(received,/Roblox update/)
+  assert.match(received,/Patch notes/)
+})
 test('agent receives the requested Split Out count automatically',async()=>{
   let sawInstruction=false
   const splitAgent=node('split-agent','aiAgent',{executionMode:'live',aiPrompt:'Buat prompt gambar',splitOutCount:2})

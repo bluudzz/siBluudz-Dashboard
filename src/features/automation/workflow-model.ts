@@ -4,18 +4,20 @@ import type { NodeResult, ExecutionResult } from '../../../shared/workflow-engin
 export type WorkflowData = { label: string; result?: NodeResult; running?: boolean; [key:string]: unknown }
 export type StudioNode = Node<WorkflowData>
 export type { NodeResult, ExecutionResult }
+export const PROMPT_TRIGGER_DEFAULT_MODEL='ag/gemini-3.8-flash'
+export const RESEARCH_DEFAULT_MODEL='ag/gemini-3.8-flash'
 export interface WorkflowItem { id:string; name:string; description?:string; is_active?:number }
 export interface RunItem { id:string; status:string; trigger_type:string; started_at:string; completed_at?:string; result: Partial<ExecutionResult> }
 
 export const catalog = [
-  {type:'promptTrigger',title:'Prompt Trigger',group:'Pemicu',description:'Tulis perintah; minta AI mengerjakannya atau teruskan langsung.',data:{label:'Prompt Trigger',prompt:'',promptMode:'ai',model:''}},
+  {type:'promptTrigger',title:'Prompt Trigger',group:'Pemicu',description:'Tulis perintah; minta AI mengerjakannya atau teruskan langsung.',data:{label:'Prompt Trigger',prompt:'',promptMode:'ai',model:PROMPT_TRIGGER_DEFAULT_MODEL}},
   {type:'chatTrigger',title:'Chat Trigger',group:'Pemicu',description:'Starts the workflow when you send a message through the chat test panel.',data:{label:'Chat Trigger',chatInput:'Help me plan content',sessionId:'test-session'}},
   {type:'trigger',title:'Manual Trigger',group:'Pemicu',description:'Starts the workflow when you click the Run button manually.',data:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{"topic":"Content idea", "approved":true}',cron:'0 10 * * *',interval:'Every day at 10:00 AM'}},
   {type:'set',title:'Atur Data (Edit Fields)',group:'Data',description:'Menambahkan atau mengubah data sebelum diteruskan ke langkah berikutnya.',data:{label:'Atur Data',fields:'{"headline":"Konten: {{ $json.topic }}"}',keepInput:true}},
   {type:'splitOut',title:'Split Out',group:'Data',description:'Membagi hasil AI Agent menjadi beberapa item sesuai jumlah yang Anda pilih.',data:{label:'Split Out',splitCount:'3',sourceField:'output',arrayField:'prompts'}},
   {type:'if',title:'Periksa Kondisi (If)',group:'Logika',description:'Memeriksa data lalu memilih jalur berikutnya berdasarkan kondisi yang Anda buat.',data:{label:'Periksa Kondisi',field:'approved',operator:'equals',value:'true'}},
   {type:'approval',title:'Persetujuan Manual',group:'Logika',description:'Hentikan cabang alur sampai Anda meninjau dan menyetujui konten yang masuk.',data:{label:'Persetujuan Manual',approvedItems:null}},
-  {type:'searchContent',title:'Cari Informasi',group:'Data',description:'Cari berita dan referensi topik dari Google News dengan tautan sumber.',data:{label:'Cari Informasi',query:'',limit:'5'}},
+  {type:'searchContent',title:'Riset Informasi',group:'Data',description:'Susun pencarian, baca banyak sumber internet dan komunitas, lalu kumpulkan fakta.',data:{label:'Riset Informasi',sourceMode:'search',query:'',url:'',model:RESEARCH_DEFAULT_MODEL,maxPages:'12'}},
   {type:'httpRequest',title:'Ambil Halaman/API',group:'Data',description:'Ambil data dari URL HTTPS publik dengan metode GET.',data:{label:'Ambil Halaman/API',url:''}},
   {type:'googleDrive',title:'Google Drive',group:'Data',description:'Pilih gambar dari link berbagi, secara acak atau berdasarkan nama.',data:{label:'Google Drive',accountId:'',operation:'shared',sharedLink:'',selectionMode:'random',nameFilter:'',search:'',fileId:''}},
   {type:'imageGenerate',title:'Generate Gambar',group:'AI',description:'Buat satu gambar per ide atau slide dengan model gambar 9router.',data:{label:'Generate Gambar',model:'',prompt:''}},
@@ -25,7 +27,7 @@ export const catalog = [
   {type:'memory',title:'Memory',group:'Gunakan AI',description:'Menyimpan pesan sebelumnya agar AI Agent dapat memahami konteks percakapan.',data:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'}},
   {type:'tool',title:'Tools',group:'Gunakan AI',description:'Memberi kemampuan tambahan kepada AI Agent, seperti membaca brief atau menghitung teks.',data:{label:'Tools',toolType:'knowledge',description:'Baca brief brand yang disediakan pengguna.',content:''}},
 ] as const
-export const availableCatalog = catalog.filter(item => !['chatModel','memory','tool'].includes(item.type))
+export const availableCatalog = catalog.filter(item => !['chatModel','memory','tool','httpRequest'].includes(item.type))
 export function formatModelLabel(id?: string): string {
   if (!id) return ''
   const clean = id.replace(/^(customendpoint\/)?9Router[^/]*\//i, '')
@@ -81,7 +83,8 @@ export async function workflowRequest<T>(path:string,init?:RequestInit):Promise<
   if(response.status===204)return undefined as T
   const data=await response.json().catch(()=>({}))
   if(!response.ok){
-    const error=Object.assign(new Error(data.error||(response.status>=502&&response.status<=504?`Server workflow tidak merespons (${response.status}). Periksa layanan backend di VPS.`:`Permintaan workflow gagal (${response.status}).`)),{code:data.code||'',status:response.status})
+    const gatewayMessage=response.status===502?'Proxy tidak mendapat jawaban dari backend workflow (502). Coba lagi; jika berulang, periksa status proses backend dan log proxy di VPS.':response.status===503?'Backend workflow sedang tidak tersedia (503). Coba lagi setelah layanan aktif.':response.status===504?'Backend workflow terlalu lama merespons (504). Periksa batas waktu proxy dan log backend di VPS.':`Permintaan workflow gagal (${response.status}).`
+    const error=Object.assign(new Error(data.error||gatewayMessage),{code:data.code||'',status:response.status})
     throw error
   }
   return data as T

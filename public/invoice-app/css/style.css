@@ -2344,9 +2344,9 @@ input[type="number"] {
 }
 
 .col-subtotal.item-subtotal-val {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #0f172a;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1e293b;
   min-height: 32px;
   display: flex;
   align-items: center;

@@ -4,13 +4,13 @@ import { validateGraph, WORKFLOW_NODE_TYPES } from './workflow-engine.js'
 
 const defaults={
   trigger:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{}'},
-  promptTrigger:{label:'Prompt Trigger',prompt:'',promptMode:'normal',model:''},
+  promptTrigger:{label:'Prompt Trigger',prompt:'',promptMode:'normal',model:'ag/gemini-3.8-flash'},
   chatTrigger:{label:'Chat Trigger',chatInput:'',sessionId:'test-session'},
   set:{label:'Atur Data',fields:'{}',keepInput:true},
   splitOut:{label:'Split Out',splitCount:'3',sourceField:'output',arrayField:'prompts'},
   if:{label:'Periksa Kondisi',field:'approved',operator:'equals',value:'true'},
   approval:{label:'Persetujuan Manual',approvedItems:null},
-  searchContent:{label:'Cari Informasi',query:'',limit:'5'},
+  searchContent:{label:'Riset Informasi',sourceMode:'search',query:'',url:'',model:'ag/gemini-3.8-flash',maxPages:'12'},
   httpRequest:{label:'Ambil Halaman/API',url:''},
   googleDrive:{label:'Google Drive',accountId:'',operation:'shared',sharedLink:'',selectionMode:'random',nameFilter:''},
   imageGenerate:{label:'Generate Gambar',model:'',prompt:''},
@@ -20,10 +20,12 @@ const defaults={
   memory:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'},
   tool:{label:'Tools',toolType:'knowledge',description:'',content:''},
 }
+const assistantAddableTypes=new Set(Object.keys(defaults).filter(type=>!['tool','httpRequest'].includes(type)))
+const hiddenLegacyTypes=new Set(['tool','httpRequest'])
 const editable={
   trigger:['label','sampleData'],promptTrigger:['label','prompt','promptMode'],chatTrigger:['label','chatInput'],
   set:['label','fields','keepInput'],splitOut:['label','splitCount'],if:['label','field','operator','value'],approval:['label'],
-  searchContent:['label','query','limit'],httpRequest:['label','url'],
+  searchContent:['label','sourceMode','query','url','maxPages'],httpRequest:['label','url'],
   googleDrive:['label','operation','sharedLink','selectionMode','nameFilter','search','fileId'],
   imageGenerate:['label','prompt'],instagram:['label','operation','caption'],
   aiAgent:['label','aiPrompt','systemMessage','executionMode','maxIterations'],
@@ -56,6 +58,7 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
   const connect=(sourceId,targetId,branch='')=>{
     const source=getNode(nodes,resolveId(sourceId)),target=getNode(nodes,resolveId(targetId))
     if(!source||!target)throw new Error('Koneksi mengarah ke node yang tidak tersedia.')
+    if(hiddenLegacyTypes.has(source.type)||hiddenLegacyTypes.has(target.type))throw new Error('Asisten Workflow tidak dapat memakai node lama yang sudah disembunyikan.')
     const aiPort=isSubNode(source.type)?aiPorts[source.type]:null
     const sourceHandle=aiPort||(source.type==='if'?(branch||'true'):portOut(source.type))
     const targetHandle=aiPort||portIn(target.type)
@@ -65,7 +68,7 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
   for(const op of operations){
     if(!op||typeof op!=='object')throw new Error('Format perubahan asisten tidak valid.')
     if(op.op==='addNode'){
-      if(!WORKFLOW_NODE_TYPES.has(op.type))throw new Error(`Tipe node tidak tersedia: ${op.type}`)
+      if(!WORKFLOW_NODE_TYPES.has(op.type)||!assistantAddableTypes.has(op.type))throw new Error(`Tipe node tidak tersedia untuk Asisten Workflow: ${op.type}`)
       if(typeof op.ref!=='string'||!/^[A-Za-z][\w-]{0,40}$/.test(op.ref)||refs.has(op.ref)||getNode(nodes,op.ref))throw new Error('Referensi node baru tidak valid atau duplikat.')
       const anchor=op.after?getNode(nodes,resolveId(op.after)):undefined
       if(op.after&&!anchor)throw new Error('Node tempat menyisipkan langkah tidak ditemukan.')
@@ -96,6 +99,7 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
     }else if(op.op==='updateNode'){
       const node=getNode(nodes,resolveId(op.id))
       if(!node)throw new Error('Node yang akan diubah tidak ditemukan.')
+      if(hiddenLegacyTypes.has(node.type))throw new Error('Asisten Workflow tidak dapat mengatur node lama yang sudah disembunyikan.')
       const patch=safePatch(node.type,op.config)
       if(!Object.keys(patch).length)continue
       node.data={...node.data,...patch}
@@ -123,7 +127,7 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
 const purposes={
   trigger:'Mulai alur secara manual dengan data awal JSON.',promptTrigger:'Terima perintah pengguna; mode normal meneruskan prompt, mode AI mengolahnya.',chatTrigger:'Mulai alur dari pesan Uji chat.',
   set:'Bentuk atau ubah data yang diteruskan.',splitOut:'Pisahkan daftar hasil AI Agent menjadi beberapa item.',if:'Cabangkan alur berdasarkan kondisi true atau false.',approval:'Hentikan alur sampai pengguna menyetujui hasil.',
-  searchContent:'Cari referensi topik dari Google News.',httpRequest:'Ambil isi URL HTTPS publik.',googleDrive:'Pilih dan unduh berkas dari link Google Drive bersama.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',instagram:'Terbitkan gambar atau carousel dengan akun Instagram tersimpan.',
-  aiAgent:'Jalankan instruksi memakai Model AI terhubung dan Tool opsional.',chatModel:'Pilih model 9router untuk AI Agent.',memory:'Simpan konteks percakapan untuk AI Agent.',tool:'Berikan brief atau kemampuan riset web kepada AI Agent.',
+  searchContent:'Susun pencarian, baca banyak sumber, atau baca satu URL HTTPS langsung.',httpRequest:'Node lama untuk membaca URL HTTPS.',googleDrive:'Pilih dan unduh berkas dari link Google Drive bersama.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',instagram:'Terbitkan gambar atau carousel dengan akun Instagram tersimpan.',
+  aiAgent:'Jalankan instruksi memakai Model AI dan Memory opsional.',chatModel:'Pilih model 9router untuk AI Agent.',memory:'Simpan konteks percakapan AI Agent.',tool:'Node lama untuk workflow terdahulu.',
 }
-export const workflowAssistantCatalog=Object.entries(defaults).map(([type,data])=>({type,title:data.label,purpose:purposes[type],editable:editable[type]}))
+export const workflowAssistantCatalog=Object.entries(defaults).filter(([type])=>!['tool','httpRequest'].includes(type)).map(([type,data])=>({type,title:data.label,purpose:purposes[type],editable:editable[type]}))

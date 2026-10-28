@@ -5,12 +5,20 @@ import { applyWorkflowOperations } from '../shared/workflow-assistant.js'
 test('assistant builds a connected workflow and adds a model to AI Agent',()=>{
   const result=applyWorkflowOperations([],[],[
     {op:'addNode',ref:'start',type:'promptTrigger',config:{prompt:'Riset konten Instagram'}},
-    {op:'addNode',ref:'research',type:'aiAgent',after:'start',config:{label:'Riset',aiPrompt:'Cari fakta terkini'}},
-    {op:'addNode',ref:'search',type:'tool',after:'research',config:{label:'Cari web',toolType:'webResearch'}},
+    {op:'addNode',ref:'search',type:'searchContent',after:'start',config:{label:'Cari & Baca',sourceMode:'search',query:'Riset konten Instagram'}},
+    {op:'addNode',ref:'research',type:'aiAgent',after:'search',config:{label:'Riset',aiPrompt:'Analisis sumber yang sudah dibaca'}},
   ],{defaultModel:'ag/gemini-3.8-flash'})
-  assert.deepEqual(result.nodes.map(node=>node.type),['promptTrigger','aiAgent','chatModel','tool'])
+  assert.deepEqual(result.nodes.map(node=>node.type),['promptTrigger','searchContent','aiAgent','chatModel'])
   assert.equal(result.edges.length,3)
   assert.equal(result.nodes.find(node=>node.type==='chatModel')?.data.model,'ag/gemini-3.8-flash')
+})
+
+test('assistant cannot add hidden legacy Tool or HTTP nodes',()=>{
+  for(const type of ['tool','httpRequest'])assert.throws(()=>applyWorkflowOperations([],[],[{op:'addNode',ref:'legacy',type}]),/tidak tersedia untuk Asisten Workflow/)
+  const oldTool={id:'old-tool',type:'tool',position:{x:0,y:0},data:{label:'Old Tool',toolType:'knowledge'}}
+  const agent={id:'agent',type:'aiAgent',position:{x:300,y:0},data:{label:'Agent'}}
+  assert.throws(()=>applyWorkflowOperations([oldTool,agent],[],[{op:'connect',from:'old-tool',to:'agent'}]),/tidak dapat memakai node lama/)
+  assert.throws(()=>applyWorkflowOperations([oldTool],[],[{op:'updateNode',id:'old-tool',config:{label:'Use me'}}]),/tidak dapat mengatur node lama/)
 })
 
 test('assistant cannot replace saved accounts or approval state',()=>{

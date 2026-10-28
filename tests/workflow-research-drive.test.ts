@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import sharp from 'sharp'
-import { researchWeb } from '../server/workflow-research.js'
+import { researchWeb, runResearchNode } from '../server/workflow-research.js'
 import { parseGoogleDriveLink } from '../shared/google-drive-link.js'
 
 test('shared Google Drive links accept file and folder IDs only from Google hosts',()=>{
@@ -15,18 +15,91 @@ test('shared Google Drive links accept file and folder IDs only from Google host
   assert.throws(()=>parseGoogleDriveLink('http://drive.google.com/file/d/file-id-12345/view'),/HTTPS/)
 })
 
-test('web research reads no more than five public pages and keeps source URLs',async()=>{
+test('web research limits page reads and keeps source URLs',async()=>{
   let reads=0
   const feed='<rss>'+Array.from({length:8},(_,index)=>`<item><title>Source ${index}</title><link>https://example.com/page-${index}</link></item>`).join('')+'</rss>'
   const result=await researchWeb('Roblox update',{read:async url=>{
     if(url.includes('bing.com'))return {body:feed,contentType:'application/rss+xml'}
+    if(url.includes('news.google.com'))return {body:'<rss></rss>',contentType:'application/rss+xml'}
     reads++
-    return {body:`<html><script>ignore</script><p>Verified page ${reads}</p></html>`,contentType:'text/html'}
+    return {body:`<html><script>ignore</script><p>Verified page ${reads} contains substantive information and further factual context about the research topic, with enough text to assess.</p></html>`,contentType:'text/html'}
   }})
   assert.equal(reads,5)
   assert.equal(result.pages.length,5)
-  assert.equal(result.pages[0].url,'https://example.com/page-0')
+  assert.match(result.pages[0].url,/^https:\/\/example\.com\/page-/)
   assert.equal(result.pages[0].content.includes('ignore'),false)
+})
+
+test('combined information node searches and reads pages or accepts one direct URL',async()=>{
+  const feed='<rss><item><title>Source A</title><link>https://example.com/article</link><pubDate>Tue, 27 Oct 2026 10:00:00 GMT</pubDate></item></rss>'
+  const searched=await runResearchNode({node:{data:{sourceMode:'search',query:'{{ $json.topic }}'}},input:[{json:{topic:'Roblox update'}}]},{read:async url=>url.includes('bing.com')?{status:200,body:feed,contentType:'application/rss+xml'}:url.includes('news.google.com')?{status:200,body:'<rss></rss>',contentType:'application/rss+xml'}:{status:200,body:'<article>Verified detail provides substantial context and an explanation of the topic from the source page for the following node.</article>',contentType:'text/html'}})
+  assert.equal(searched[0].json.query,'Roblox update')
+  assert.equal(searched[0].json.readCount,1)
+  assert.match(searched[0].json.pages[0].content,/Verified detail provides substantial context/)
+
+  const direct=await runResearchNode({node:{data:{sourceMode:'url',url:'{{ $json.sourceUrl }}'}},input:[{json:{sourceUrl:'https://example.com/data.json'}}]},{read:async()=>({status:200,body:'{"fact":"verified"}',contentType:'application/json'})})
+  assert.deepEqual(direct[0].json.content,{fact:'verified'})
+  assert.equal(direct[0].json.researchMode,'url')
+})
+
+test('research node validates AI query JSON and falls back when the plan is invalid',async()=>{
+  const feed='<rss><item><title>Official guide</title><link>https://example.com/guide</link></item></rss>'
+  const searched:string[]=[]
+  const read=async(url:string)=>{if(url.includes('bing.com')){searched.push(new URL(url).searchParams.get('q')||'');return {status:200,body:feed,contentType:'application/rss+xml'}}if(url.includes('news.google.com'))return {status:200,body:'<rss></rss>',contentType:'application/rss+xml'};return {status:200,body:'<article>Guide content with a detailed practical explanation and examples that can be passed to the next workflow node.</article>',contentType:'text/html'}}
+  const node={data:{sourceMode:'search',query:'',model:'ag/test-model',maxPages:'5'}}
+  const input=[{json:{prompt:'Cari panduan kopi untuk pemula'}}]
+  const planned=await runResearchNode({node,input},{read,planQuery:async({model}:any)=>{assert.equal(model,'ag/test-model');return '{"queries":["panduan kopi resmi","diskusi komunitas kopi"]}'}})
+  assert.deepEqual(planned[0].json.queries,['panduan kopi resmi','diskusi komunitas kopi'])
+  assert.equal(planned[0].json.researchPlan,'AI planner')
+  assert.equal(searched[0],'panduan kopi resmi')
+  const fallback=await runResearchNode({node,input},{read,planQuery:async()=>'{"queries":["",123]}'})
+  assert.equal(fallback[0].json.researchPlan,'Fallback query planner')
+  assert.equal(fallback[0].json.readCount,1)
+})
+
+test('research balances angles and searches again when the first sources cannot be read',async()=>{
+  const searched:string[]=[]
+  const rss=(host:string,count:number)=>'<rss>'+Array.from({length:count},(_,index)=>`<item><title>Topic guide ${index}</title><link>https://${host}/article-${index}</link></item>`).join('')+'</rss>'
+  const result=await researchWeb('coffee brewing',{
+    maxPages:5,
+    queries:['coffee brewing','coffee brewing official','coffee brewing community'],
+    read:async(url:string)=>{
+      if(url.includes('bing.com')){
+        const q=new URL(url).searchParams.get('q')||''
+        searched.push(q)
+        if(q==='coffee brewing')return {body:rss('first.example',5),contentType:'application/rss+xml'}
+        if(q==='coffee brewing official')return {body:rss('official.example',2),contentType:'application/rss+xml'}
+        if(q==='coffee brewing community')return {body:rss('forum.example',2),contentType:'application/rss+xml'}
+        return {body:rss('followup.example',2),contentType:'application/rss+xml'}
+      }
+      if(url.includes('news.google.com'))return {body:'<rss></rss>',contentType:'application/rss+xml'}
+      if(url.includes('first.example'))throw new Error('blocked')
+      return {body:'<article>Detailed source material about coffee brewing with enough context and practical evidence to support the next step of the workflow.</article>',contentType:'text/html'}
+    },
+  })
+  assert.equal(result.pages.length,5)
+  assert.ok(result.pages.some(page=>page.url.includes('official.example')))
+  assert.ok(result.pages.some(page=>page.url.includes('forum.example')))
+  assert.ok(result.followUpQueries.length>0)
+  assert.ok(searched.some(q=>q.includes('primary source')))
+  assert.ok(result.coverage.domains.includes('official.example'))
+  assert.equal(result.coverage.unreadableCount,result.sourceCount-result.readCount)
+})
+
+test('optional SearXNG results are used alongside RSS without requiring another local service',async()=>{
+  const result=await researchWeb('urban gardening',{
+    maxPages:1,
+    queries:['urban gardening'],
+    searxngUrl:'https://search.example.com',
+    read:async(url:string)=>{
+      if(url.startsWith('https://search.example.com/search?'))return {body:JSON.stringify({results:[{title:'Urban gardening handbook',url:'https://handbook.example.com/gardening',content:'Practical guide'}]}),contentType:'application/json'}
+      if(url.includes('bing.com')||url.includes('news.google.com'))return {body:'<rss></rss>',contentType:'application/rss+xml'}
+      return {body:'<article>Urban gardening handbook with practical guidance and detailed explanations for a reader preparing a small garden.</article>',contentType:'text/html'}
+    },
+  })
+  assert.equal(result.searchProvider,'SearXNG + RSS')
+  assert.equal(result.readCount,1)
+  assert.equal(result.pages[0].url,'https://handbook.example.com/gardening')
 })
 
 test('Google Drive image download gives Instagram a tokenized image URL without exposing OAuth tokens',async()=>{
