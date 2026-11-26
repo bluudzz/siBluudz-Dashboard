@@ -33,6 +33,10 @@
   margin-bottom: 10px;
 }
 
+.relight-mobile-submit {
+  display: none;
+}
+
 .relight-controls-footer {
   flex: none;
   padding: 12px 20px;
@@ -927,7 +931,14 @@
   }
 
   .relight-controls-footer {
-    padding: 10px 16px;
+    display: none;
+  }
+
+  .relight-mobile-submit {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 6px;
   }
 }
 

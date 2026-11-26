@@ -1804,8 +1804,25 @@
   .ag-rail {
     position: relative;
     z-index: 20;
-    padding: 6px 10px;
+    padding: 4px 10px;
     gap: 0;
+  }
+
+  .ag-rail-top {
+    padding: 0;
+    gap: 6px;
+  }
+
+  .ag-mobile-tool-trigger {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 8px 0 6px;
+    font-size: 12.5px;
+  }
+
+  .ag-mobile-tool-icon {
+    width: 20px;
+    height: 20px;
   }
 
   .ag-brand,
@@ -1825,15 +1842,15 @@
 
   .ag-find-btn,
   .ag-rail-action-btn {
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
     padding: 0;
   }
 
   .ag-icon-btn {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
   }
 
   .ag-stage {
@@ -1947,6 +1964,16 @@
   .ai-workspace .ag-mobile-tool-option,
   .ai-workspace .ag-primary-btn {
     min-height: 44px;
+  }
+
+  .ai-workspace .ag-rail-top :is(.ag-mobile-tool-trigger, .ag-find-btn, .ag-rail-action-btn, .ag-icon-btn) {
+    min-height: 36px;
+    height: 36px;
+  }
+
+  .ai-workspace .ag-rail-top :is(.ag-find-btn, .ag-rail-action-btn, .ag-icon-btn) {
+    width: 36px;
+    min-width: 36px;
   }
 }
 

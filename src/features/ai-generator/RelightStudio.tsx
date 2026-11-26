@@ -646,6 +646,25 @@ export function RelightStudio({
     }
   }
 
+  const submitAction = (
+    <>
+      {!busy && blockedReason && <p className="ag-disabled-reason">{blockedReason}</p>}
+      <button
+        type="button"
+        className="ag-primary-btn relight-submit"
+        disabled={busy || !!blockedReason}
+        onClick={() => void generate()}
+      >
+        {busy ? (
+          <RefreshCw size={16} className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Sun size={16} aria-hidden="true" />
+        )}
+        <span>{busy ? 'Mengatur pencahayaan...' : 'Terapkan lighting'}</span>
+      </button>
+    </>
+  )
+
   return (
     <div className="relight-workspace" data-pane={pane} hidden={!active}>
       <input
@@ -663,23 +682,6 @@ export function RelightStudio({
 
       <section className="relight-controls" aria-label="Pengaturan Relight Studio">
         <div className="relight-controls-body">
-          <div className="ag-section-heading">
-            <h2>Pengaturan cahaya</h2>
-            <button
-              type="button"
-              className="ag-text-btn"
-              disabled={busy || reading}
-              onClick={() => {
-                setSettings({ ...defaultRelightSettings })
-                setResolution('auto')
-                setInstructions('')
-                setError('')
-              }}
-            >
-              Reset
-            </button>
-          </div>
-
           <div
             className="relight-model-field"
             ref={modelPickerRef}
@@ -859,13 +861,6 @@ export function RelightStudio({
               </div>
             </div>
 
-            <LightingChoices
-              setting="pattern"
-              value={settings.pattern}
-              disabled={busy}
-              onChange={(value) => setSettings((previous) => ({ ...previous, pattern: value }))}
-            />
-
             <fieldset className="relight-choice-field relight-choice-wide" disabled={busy}>
               <legend>Resolusi output</legend>
               <div className="relight-segments">
@@ -899,22 +894,7 @@ export function RelightStudio({
           </label>
         </div>
 
-        <div className="relight-controls-footer">
-          {!busy && blockedReason && <p className="ag-disabled-reason">{blockedReason}</p>}
-          <button
-            type="button"
-            className="ag-primary-btn relight-submit"
-            disabled={busy || !!blockedReason}
-            onClick={() => void generate()}
-          >
-            {busy ? (
-              <RefreshCw size={16} className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Sun size={16} aria-hidden="true" />
-            )}
-            <span>{busy ? 'Mengatur pencahayaan...' : 'Terapkan lighting'}</span>
-          </button>
-        </div>
+        <div className="relight-controls-footer">{submitAction}</div>
       </section>
 
       <section className="relight-result" aria-labelledby="relight-result-heading" aria-busy={busy}>
@@ -1199,6 +1179,8 @@ export function RelightStudio({
             </div>
           )}
         </div>
+
+        <div className="relight-mobile-submit">{submitAction}</div>
 
         {result && (
           <div className="relight-strength-bar" role="group" aria-label="Pengaturan kekuatan pencahayaan">
