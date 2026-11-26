@@ -184,8 +184,6 @@ async function runYtDlpJson(url, netscapeCookies, binaries, fetchTimeoutMs = 30_
       '--dump-single-json',
       '--no-warnings',
       '--no-call-home',
-      '--user-agent',
-      BROWSER_UA,
     ]
     if (cookieFile) {
       args.push('--cookies', cookieFile)
@@ -581,13 +579,68 @@ function parseIgEmbedHtml(html) {
   return null
 }
 
+function findJsonKeyRecursive(root, targetKeys) {
+  const stack = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (!current || typeof current !== 'object') continue
+    if (Array.isArray(current)) {
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        stack.push(current[i])
+      }
+      continue
+    }
+    for (const key of targetKeys) {
+      if (Object.prototype.hasOwnProperty.call(current, key) && current[key] !== undefined) {
+        return { key, data: current[key] }
+      }
+    }
+    for (const val of Object.values(current)) {
+      if (val && typeof val === 'object') {
+        stack.push(val)
+      }
+    }
+  }
+  return null
+}
+
+function extractIgSsrBlock(html, targetKeys) {
+  if (!html) return null
+  const scriptRegex = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi
+  let match
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const body = match[1]
+    if (!targetKeys.some((key) => body.includes(key))) continue
+    try {
+      const parsed = JSON.parse(body)
+      const hit = findJsonKeyRecursive(parsed, targetKeys)
+      if (hit) return hit
+    } catch {
+      // Ignore unparseable script blocks and continue scanning
+    }
+  }
+  return null
+}
+
+function buildIgPageHeaders(cookieHeader) {
+  return {
+    'User-Agent': BROWSER_UA,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Dest': 'document',
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+  }
+}
+
 export async function extractInstagramMedia(url, mode, cookies = { netscape: '', header: '' }, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
   const binaries = deps.binaries
   const parsedUrl = new URL(url)
   const pathname = parsedUrl.pathname
 
-  // Case 1: Instagram Story (`/stories/<username>/<storyId?>/`)
+  // Case 1: Instagram Story (`/stories/<username>/<storyId?>/` or `/stories/highlights/<highlightId>/`)
   const storyMatch = pathname.match(/^\/stories\/([a-zA-Z0-9._]+)(?:\/(\d+))?/i)
   if (storyMatch || mode === 'instagram_story') {
     if (!cookies.header && !cookies.netscape) {
@@ -599,7 +652,80 @@ export async function extractInstagramMedia(url, mode, cookies = { netscape: '',
 
     const username = storyMatch?.[1]
     const targetStoryId = storyMatch?.[2]
+    const isHighlight = username?.toLowerCase() === 'highlights'
+
+    // Strategy 1A: Authenticated SSR Relay JSON directly from instagram.com/stories/<username>/
     if (username && cookies.header) {
+      try {
+        const storyPageUrl = isHighlight
+          ? url
+          : `https://www.instagram.com/stories/${encodeURIComponent(username)}/`
+        const pageRes = await fetchImpl(storyPageUrl, {
+          headers: buildIgPageHeaders(cookies.header),
+          signal: AbortSignal.timeout(15_000),
+        })
+        if (pageRes.url && pageRes.url.includes('/accounts/login')) {
+          throw new DownloaderHttpError(
+            422,
+            'Cookie sesi Instagram sudah kedaluwarsa atau tidak valid. Perbarui Cookie Sesi IG di pengaturan admin.'
+          )
+        }
+        if (pageRes.ok) {
+          const html = await pageRes.text()
+          const ssrBlock = extractIgSsrBlock(html, ['xdt_api__v1__feed__reels_media'])
+          if (ssrBlock) {
+            const reel = Array.isArray(ssrBlock.data?.reels_media)
+              ? ssrBlock.data.reels_media[0]
+              : null
+            const rawItems = Array.isArray(reel?.items) ? reel.items : []
+            if (rawItems.length === 0) {
+              throw new DownloaderHttpError(
+                404,
+                isHighlight
+                  ? 'IG Story Highlight tidak ditemukan atau akun sedang privat.'
+                  : `Akun @${username} tidak memiliki IG Story aktif saat ini.`
+              )
+            }
+            const resolvedAuthor = String(reel?.user?.username || (isHighlight ? 'highlight' : username)).replace(/^@+/, '')
+            const ordered = [...rawItems]
+            if (targetStoryId && !isHighlight) {
+              ordered.sort((a, b) => {
+                const aHit = String(a?.pk || a?.id || '').startsWith(targetStoryId) ? 0 : 1
+                const bHit = String(b?.pk || b?.id || '').startsWith(targetStoryId) ? 0 : 1
+                return aHit - bHit
+              })
+            }
+            const items = ordered
+              .map((node, idx) => {
+                const parsed = parseIgMediaNode(node, resolvedAuthor, 'story', idx)
+                if (!parsed) return null
+                const isExact = !isHighlight && targetStoryId && String(node?.pk || node?.id || '').startsWith(targetStoryId)
+                parsed.label = isExact
+                  ? `Story Pilihan (${parsed.kind === 'video' ? 'Video' : 'Foto'})`
+                  : `Story ${idx + 1} (${parsed.kind === 'video' ? 'Video' : 'Foto'})`
+                return parsed
+              })
+              .filter(Boolean)
+
+            if (items.length > 0) {
+              return {
+                platform: 'instagram',
+                resolvedMode: 'instagram_story',
+                title: isHighlight ? `Highlight @${resolvedAuthor}` : `Story @${resolvedAuthor}`,
+                author: resolvedAuthor,
+                items,
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof DownloaderHttpError) throw err
+        // Fall through to mobile API / yt-dlp fallback
+      }
+    }
+
+    // Strategy 1B: Legacy web_profile_info + reels_media fallback
+    if (username && !isHighlight && cookies.header) {
       try {
         const profileRes = await fetchImpl(
           `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
@@ -695,7 +821,41 @@ export async function extractInstagramMedia(url, mode, cookies = { netscape: '',
   const codeMatch = pathname.match(/^\/(?:p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i)
   const shortcode = codeMatch?.[1]
 
-  // Strategy A: Web JSON (with cookies if available) — best for Carousels & Photos
+  // Strategy A: Authenticated SSR Relay JSON directly from post/reel page HTML
+  if (shortcode && cookies.header) {
+    try {
+      const pageRes = await fetchImpl(url, {
+        headers: buildIgPageHeaders(cookies.header),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (pageRes.ok && (!pageRes.url || !pageRes.url.includes('/accounts/login'))) {
+        const html = await pageRes.text()
+        const ssrBlock = extractIgSsrBlock(html, [
+          'xdt_api__v1__media__shortcode__web_info',
+          'xdt_shortcode_media',
+        ])
+        if (ssrBlock) {
+          const jsonPayload =
+            ssrBlock.key === 'xdt_shortcode_media'
+              ? { graphql: { shortcode_media: ssrBlock.data } }
+              : ssrBlock.data
+          const extracted = extractItemsFromIgWebJson(jsonPayload)
+          if (extracted) {
+            const hasVideoOnly = extracted.items.every((i) => i.kind === 'video')
+            return {
+              platform: 'instagram',
+              resolvedMode: hasVideoOnly ? 'instagram_reel' : 'instagram_photo',
+              ...extracted,
+            }
+          }
+        }
+      }
+    } catch {
+      // continue to __a=1 / embed / yt-dlp fallback
+    }
+  }
+
+  // Strategy B: Web JSON (with cookies if available) — fallback for Carousels & Photos
   if (shortcode && cookies.header) {
     try {
       const res = await fetchImpl(

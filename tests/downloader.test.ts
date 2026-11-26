@@ -258,3 +258,88 @@ test('downloader API enforces auth, encrypts admin cookies, scopes proxy tokens 
   ).json()
   assert.equal(histAfter.items.length, 0)
 })
+
+test('extractInstagramMedia parses SSR xdt_api__v1__feed__reels_media story items and rejects empty reels cleanly', async () => {
+  const { extractInstagramMedia } = await import('../server/downloader-service.js')
+
+  const ssrPayload = {
+    require: [
+      [
+        'RelayPrefetchedStreamCache',
+        'next',
+        [],
+        [
+          'adp_PolarisStoriesV3ReelPageStandaloneQueryRelayPreloader_test',
+          {
+            __bbox: {
+              result: {
+                data: {
+                  xdt_api__v1__feed__reels_media: {
+                    reels_media: [
+                      {
+                        user: { username: 'creator_ig' },
+                        items: [
+                          {
+                            pk: '111',
+                            image_versions2: {
+                              candidates: [{ url: 'https://scontent.cdninstagram.com/story1.jpg', width: 1080, height: 1920 }],
+                            },
+                          },
+                          {
+                            pk: '222',
+                            video_versions: [{ url: 'https://video.xx.fbcdn.net/story2.mp4', width: 720, height: 1280 }],
+                            image_versions2: {
+                              candidates: [{ url: 'https://scontent.cdninstagram.com/thumb2.jpg', width: 720, height: 1280 }],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      ],
+    ],
+  }
+
+  const res = await extractInstagramMedia(
+    'https://www.instagram.com/stories/creator_ig/222/',
+    'instagram_story',
+    { header: 'sessionid=123%3Aabc; ds_user_id=123', netscape: '' },
+    {
+      fetchImpl: async () =>
+        new Response(
+          `<html><body><script type="application/json">${JSON.stringify(ssrPayload)}</script></body></html>`,
+          { status: 200 }
+        ),
+    }
+  )
+
+  assert.equal(res.platform, 'instagram')
+  assert.equal(res.resolvedMode, 'instagram_story')
+  assert.equal(res.author, 'creator_ig')
+  assert.equal(res.items.length, 2)
+  assert.equal(res.items[0].kind, 'video')
+  assert.match(res.items[0].label, /Story Pilihan/)
+  assert.equal(res.items[1].kind, 'image')
+
+  await assert.rejects(
+    () =>
+      extractInstagramMedia(
+        'https://www.instagram.com/stories/quiet_user/',
+        'instagram_story',
+        { header: 'sessionid=123%3Aabc; ds_user_id=123', netscape: '' },
+        {
+          fetchImpl: async () =>
+            new Response(
+              `<html><body><script type="application/json">${JSON.stringify({ xdt_api__v1__feed__reels_media: { reels_media: [] } })}</script></body></html>`,
+              { status: 200 }
+            ),
+        }
+      ),
+    (err: { status?: number; message?: string }) => err.status === 404 && /tidak memiliki IG Story aktif/i.test(err.message || '')
+  )
+})
