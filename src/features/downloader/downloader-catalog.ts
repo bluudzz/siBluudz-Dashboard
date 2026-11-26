@@ -33,10 +33,6 @@ export interface DownloaderResult {
 export interface DownloaderStatus {
   ytDlpAvailable: boolean
   ffmpegAvailable: boolean
-  hasInstagramCookies: boolean
-  hasTiktokCookies: boolean
-  canManageCookies: boolean
-  cookieEncryptionReady: boolean
 }
 
 export interface DownloaderHistoryItem {

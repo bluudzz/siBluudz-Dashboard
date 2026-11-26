@@ -6,7 +6,6 @@ import {
   ExternalLink,
   History,
   Info,
-  KeyRound,
   Loader2,
   Music,
   Share2,
@@ -48,29 +47,10 @@ export function DownloaderPage() {
   const [historyLoading, setHistoryLoading] = React.useState(false)
   const historyDialogRef = React.useRef<HTMLDialogElement>(null)
 
-  // Admin cookies dialog
-  const [cookiesOpen, setCookiesOpen] = React.useState(false)
-  const [igCookieDraft, setIgCookieDraft] = React.useState('')
-  const [ttCookieDraft, setTtCookieDraft] = React.useState('')
-  const [cookiesSaving, setCookiesSaving] = React.useState(false)
-  const [cookiesMessage, setCookiesMessage] = React.useState('')
-  const cookiesDialogRef = React.useRef<HTMLDialogElement>(null)
-
   // iOS save sheet fallback
   const [iosPending, setIosPending] = React.useState<IosPendingSave | null>(null)
 
   const activeTool = getDownloaderTool(mode)
-
-  const loadStatus = React.useCallback(async () => {
-    try {
-      const res = await fetch('/api/downloader/status')
-      if (!res.ok) return
-      const json = (await res.json()) as DownloaderStatus
-      setStatus(json)
-    } catch {
-      // ignore transient network errors
-    }
-  }, [])
 
   const loadHistory = React.useCallback(async () => {
     setHistoryLoading(true)
@@ -105,15 +85,6 @@ export function DownloaderPage() {
     }
     if (!historyOpen && dialog?.open) dialog.close()
   }, [historyOpen, loadHistory])
-
-  React.useEffect(() => {
-    const dialog = cookiesDialogRef.current
-    if (cookiesOpen && dialog && !dialog.open) {
-      setCookiesMessage('')
-      dialog.showModal()
-    }
-    if (!cookiesOpen && dialog?.open) dialog.close()
-  }, [cookiesOpen])
 
   React.useEffect(() => {
     return () => {
@@ -269,55 +240,6 @@ export function DownloaderPage() {
     }
   }
 
-  const handleSaveCookies = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setCookiesSaving(true)
-    setCookiesMessage('')
-    try {
-      const payload: Record<string, string> = {}
-      if (igCookieDraft.trim()) payload.instagramCookies = igCookieDraft.trim()
-      if (ttCookieDraft.trim()) payload.tiktokCookies = ttCookieDraft.trim()
-
-      const res = await fetch('/api/downloader/cookies', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(json?.error || 'Gagal menyimpan cookie sesi.')
-      }
-      setIgCookieDraft('')
-      setTtCookieDraft('')
-      await loadStatus()
-      setCookiesMessage('Cookie sesi berhasil disimpan dan dienkripsi.')
-    } catch (err) {
-      setCookiesMessage(err instanceof Error ? err.message : 'Gagal menyimpan cookie.')
-    } finally {
-      setCookiesSaving(false)
-    }
-  }
-
-  const handleClearCookie = async (target: 'instagram' | 'tiktok') => {
-    setCookiesSaving(true)
-    setCookiesMessage('')
-    try {
-      const payload = target === 'instagram' ? { instagramCookies: '' } : { tiktokCookies: '' }
-      const res = await fetch('/api/downloader/cookies', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error('Gagal menghapus cookie.')
-      await loadStatus()
-      setCookiesMessage(`Cookie ${target === 'instagram' ? 'Instagram' : 'TikTok'} dihapus.`)
-    } catch (err) {
-      setCookiesMessage(err instanceof Error ? err.message : 'Gagal menghapus cookie.')
-    } finally {
-      setCookiesSaving(false)
-    }
-  }
-
   const handleDeleteHistoryItem = async (id: string) => {
     await fetch(`/api/downloader/history/${encodeURIComponent(id)}`, { method: 'DELETE' })
     setHistoryItems((prev) => prev.filter((item) => item.id !== id))
@@ -345,7 +267,6 @@ export function DownloaderPage() {
             setNotice('')
           }}
           onOpenHistory={() => setHistoryOpen(true)}
-          onOpenCookies={() => setCookiesOpen(true)}
         />
 
         <main className="dl-stage">
@@ -361,18 +282,6 @@ export function DownloaderPage() {
                 </div>
               </div>
               <div className="dl-header-controls">
-                {mode === 'instagram_story' && status && !status.hasInstagramCookies && (
-                  <button
-                    type="button"
-                    className="dl-warning-pill"
-                    onClick={() => status.canManageCookies && setCookiesOpen(true)}
-                    disabled={!status.canManageCookies}
-                    title="IG Story memerlukan Cookie Sesi Instagram"
-                  >
-                    <KeyRound size={13} aria-hidden="true" />
-                    <span>{status.canManageCookies ? 'Atur Sesi IG untuk Story' : 'IG Story butuh sesi admin'}</span>
-                  </button>
-                )}
                 <span className="dl-kind-pill">{activeTool.kindLabel}</span>
               </div>
             </header>
@@ -465,7 +374,7 @@ export function DownloaderPage() {
                       <>
                         <span>Reel &amp; video HD</span>
                         <span>Postingan &amp; carousel multi-slide</span>
-                        <span>IG Story (dengan sesi IG)</span>
+                        <span>Tanpa login &amp; tanpa cookie</span>
                       </>
                     )}
                   </div>
@@ -674,117 +583,6 @@ export function DownloaderPage() {
             )
           })}
         </div>
-      </dialog>
-
-      {/* Admin Session Cookies Dialog */}
-      <dialog
-        ref={cookiesDialogRef}
-        className="dl-dialog dl-cookies-dialog"
-        aria-labelledby="dl-cookies-title"
-        onCancel={() => setCookiesOpen(false)}
-        onClose={() => setCookiesOpen(false)}
-      >
-        <div className="dl-dialog-head">
-          <div>
-            <h2 id="dl-cookies-title">Pengaturan Sesi Cookie (Admin)</h2>
-            <p className="dl-muted">
-              Tempel header <code>Cookie</code> (contoh: <code>sessionid=...; ds_user_id=...</code>) atau isi file <code>cookies.txt</code> format Netscape dari akun cadangan.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="dl-icon-btn"
-            aria-label="Tutup pengaturan sesi"
-            onClick={() => setCookiesOpen(false)}
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <form className="dl-cookies-form" onSubmit={(e) => void handleSaveCookies(e)}>
-          <div className="dl-cookie-field">
-            <div className="dl-cookie-field-head">
-              <label htmlFor="dl-ig-cookie">Cookie Sesi Instagram (Wajib untuk IG Story)</label>
-              <span className={`dl-cookie-badge${status?.hasInstagramCookies ? ' is-ready' : ''}`}>
-                {status?.hasInstagramCookies ? 'Tersimpan' : 'Kosong'}
-              </span>
-            </div>
-            <textarea
-              id="dl-ig-cookie"
-              rows={3}
-              value={igCookieDraft}
-              onChange={(e) => setIgCookieDraft(e.target.value)}
-              placeholder={
-                status?.hasInstagramCookies
-                  ? 'Sudah tersimpan (terenkripsi). Tempel cookie baru untuk mengganti...'
-                  : 'Tempel cookie Instagram atau isi Netscape cookies.txt...'
-              }
-            />
-            {status?.hasInstagramCookies && (
-              <button
-                type="button"
-                className="dl-danger-text-btn"
-                onClick={() => void handleClearCookie('instagram')}
-                disabled={cookiesSaving}
-              >
-                Hapus cookie Instagram
-              </button>
-            )}
-          </div>
-
-          <div className="dl-cookie-field">
-            <div className="dl-cookie-field-head">
-              <label htmlFor="dl-tt-cookie">Cookie Sesi TikTok (Opsional)</label>
-              <span className={`dl-cookie-badge${status?.hasTiktokCookies ? ' is-ready' : ''}`}>
-                {status?.hasTiktokCookies ? 'Tersimpan' : 'Kosong'}
-              </span>
-            </div>
-            <textarea
-              id="dl-tt-cookie"
-              rows={2}
-              value={ttCookieDraft}
-              onChange={(e) => setTtCookieDraft(e.target.value)}
-              placeholder={
-                status?.hasTiktokCookies
-                  ? 'Sudah tersimpan (terenkripsi). Tempel cookie baru untuk mengganti...'
-                  : 'Opsional: isi hanya jika mengambil konten TikTok terbatas...'
-              }
-            />
-            {status?.hasTiktokCookies && (
-              <button
-                type="button"
-                className="dl-danger-text-btn"
-                onClick={() => void handleClearCookie('tiktok')}
-                disabled={cookiesSaving}
-              >
-                Hapus cookie TikTok
-              </button>
-            )}
-          </div>
-
-          {cookiesMessage && (
-            <p className="dl-cookie-feedback" role="status">
-              {cookiesMessage}
-            </p>
-          )}
-
-          <div className="dl-cookies-actions">
-            <button
-              type="button"
-              className="dl-secondary-btn"
-              onClick={() => setCookiesOpen(false)}
-            >
-              Tutup
-            </button>
-            <button
-              type="submit"
-              className="dl-primary-btn"
-              disabled={cookiesSaving || (!igCookieDraft.trim() && !ttCookieDraft.trim())}
-            >
-              {cookiesSaving ? 'Menyimpan...' : 'Simpan Cookie'}
-            </button>
-          </div>
-        </form>
       </dialog>
 
       {/* iOS Save Modal Fallback */}

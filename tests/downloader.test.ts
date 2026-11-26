@@ -4,12 +4,11 @@ import express from 'express'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
   detectDownloaderModeFromUrl,
   isAllowedMediaProxyHost,
   normalizeAndValidateUrl,
-  normalizeCookieInput,
   sanitizeDownloadFilename,
   shortcodeToInstagramMediaId,
 } from '../shared/downloader.js'
@@ -60,27 +59,8 @@ test('isAllowedMediaProxyHost permits known CDN suffixes and blocks private IPs 
   assert.equal(isAllowedMediaProxyHost('evil.example'), false)
 })
 
-test('normalizeCookieInput converts between HTTP Cookie headers and Netscape format cleanly', () => {
-  const fromHeader = normalizeCookieInput('sessionid=abc123; ds_user_id=999888; csrftoken=tok', 'instagram')
-  assert.match(fromHeader.netscape, /^# Netscape HTTP Cookie File/)
-  assert.match(fromHeader.netscape, /\.instagram\.com\tTRUE\t\/\tTRUE\t2147483647\tsessionid\tabc123/)
-  assert.equal(fromHeader.header, 'sessionid=abc123; ds_user_id=999888; csrftoken=tok')
-
-  const fromNetscape = normalizeCookieInput(fromHeader.netscape, 'instagram')
-  assert.equal(fromNetscape.header, 'sessionid=abc123; ds_user_id=999888; csrftoken=tok')
-
-  const autoDerived = normalizeCookieInput('sessionid=123456%3Aabc%3A27', 'instagram')
-  assert.match(autoDerived.header, /ds_user_id=123456/)
-  assert.match(autoDerived.netscape, /\tds_user_id\t123456/)
-
-  assert.deepEqual(normalizeCookieInput('   ', 'instagram'), { netscape: '', header: '' })
-  assert.throws(() => normalizeCookieInput('not-a-valid-cookie-line', 'instagram'))
-  assert.equal(sanitizeDownloadFilename('My Clip: #1?', 'MP4'), 'My_Clip_#1.mp4')
-})
-
-test('downloader API enforces auth, encrypts admin cookies, scopes proxy tokens per user, and tracks history', async (t) => {
+test('downloader API enforces auth, scopes proxy tokens per user, and tracks history', async (t) => {
   process.env.DATA_DIRECTORY = mkdtempSync(join(tmpdir(), 'sibluudz-dl-'))
-  process.env.MAIL_CREDENTIALS_KEY = randomBytes(32).toString('base64')
   process.env.NODE_ENV = 'test'
 
   const { db } = await import('../server/db.js')
@@ -174,40 +154,13 @@ test('downloader API enforces auth, encrypts admin cookies, scopes proxy tokens 
 
   // Unauthenticated blocked
   assert.equal((await fetch(`${origin}/api/downloader/status`)).status, 401)
-
-  // User B cannot update admin cookies
-  const forbiddenCookie = await fetch(`${origin}/api/downloader/cookies`, {
-    method: 'PUT',
-    headers: {
-      Cookie: 'sibluudz_session=userb-tok',
-      Origin: origin,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ instagramCookies: 'sessionid=secret123' }),
-  })
-  assert.equal(forbiddenCookie.status, 403)
-
-  // Admin can save cookies and raw cookie never leaks via /status
-  const saveCookieRes = await fetch(`${origin}/api/downloader/cookies`, {
-    method: 'PUT',
-    headers: {
-      Cookie: 'sibluudz_session=admin-tok',
-      Origin: origin,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ instagramCookies: 'sessionid=secret123; ds_user_id=42' }),
-  })
-  assert.equal(saveCookieRes.status, 200)
-  const saveJson = await saveCookieRes.json()
-  assert.equal(saveJson.hasInstagramCookies, true)
+  assert.equal(sanitizeDownloadFilename('My Clip: #1?', 'MP4'), 'My_Clip_#1.mp4')
 
   const statusRes = await fetch(`${origin}/api/downloader/status`, {
     headers: { Cookie: 'sibluudz_session=userb-tok' },
   })
   assert.equal(statusRes.status, 200)
-  const statusText = await statusRes.text()
-  assert.doesNotMatch(statusText, /secret123/)
-  assert.equal(JSON.parse(statusText).canManageCookies, false)
+  assert.deepEqual(await statusRes.json(), { ytDlpAvailable: true, ffmpegAvailable: true })
 
   // Extract filters out untrusted host and wraps valid item in proxy URL
   const extractRes = await fetch(`${origin}/api/downloader/extract`, {
@@ -260,92 +213,7 @@ test('downloader API enforces auth, encrypts admin cookies, scopes proxy tokens 
   assert.equal(histAfter.items.length, 0)
 })
 
-test('extractInstagramMedia parses SSR xdt_api__v1__feed__reels_media story items and rejects empty reels cleanly', async () => {
-  const { extractInstagramMedia } = await import('../server/downloader-service.js')
-
-  const ssrPayload = {
-    require: [
-      [
-        'RelayPrefetchedStreamCache',
-        'next',
-        [],
-        [
-          'adp_PolarisStoriesV3ReelPageStandaloneQueryRelayPreloader_test',
-          {
-            __bbox: {
-              result: {
-                data: {
-                  xdt_api__v1__feed__reels_media: {
-                    reels_media: [
-                      {
-                        user: { username: 'creator_ig' },
-                        items: [
-                          {
-                            pk: '111',
-                            image_versions2: {
-                              candidates: [{ url: 'https://scontent.cdninstagram.com/story1.jpg', width: 1080, height: 1920 }],
-                            },
-                          },
-                          {
-                            pk: '222',
-                            video_versions: [{ url: 'https://video.xx.fbcdn.net/story2.mp4', width: 720, height: 1280 }],
-                            image_versions2: {
-                              candidates: [{ url: 'https://scontent.cdninstagram.com/thumb2.jpg', width: 720, height: 1280 }],
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        ],
-      ],
-    ],
-  }
-
-  const res = await extractInstagramMedia(
-    'https://www.instagram.com/stories/creator_ig/222/',
-    'instagram_story',
-    { header: 'sessionid=123%3Aabc; ds_user_id=123', netscape: '' },
-    {
-      fetchImpl: async () =>
-        new Response(
-          `<html><body><script type="application/json">${JSON.stringify(ssrPayload)}</script></body></html>`,
-          { status: 200 }
-        ),
-    }
-  )
-
-  assert.equal(res.platform, 'instagram')
-  assert.equal(res.resolvedMode, 'instagram_story')
-  assert.equal(res.author, 'creator_ig')
-  assert.equal(res.items.length, 2)
-  assert.equal(res.items[0].kind, 'video')
-  assert.match(res.items[0].label, /Story Pilihan/)
-  assert.equal(res.items[1].kind, 'image')
-
-  await assert.rejects(
-    () =>
-      extractInstagramMedia(
-        'https://www.instagram.com/stories/quiet_user/',
-        'instagram_story',
-        { header: 'sessionid=123%3Aabc; ds_user_id=123', netscape: '' },
-        {
-          fetchImpl: async () =>
-            new Response(
-              `<html><body><script type="application/json">${JSON.stringify({ xdt_api__v1__feed__reels_media: { reels_media: [] } })}</script></body></html>`,
-              { status: 200 }
-            ),
-        }
-      ),
-    (err: { status?: number; message?: string }) => err.status === 404 && /tidak memiliki IG Story aktif/i.test(err.message || '')
-  )
-})
-
-test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel and Carousel without session cookies', async () => {
+test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel and Carousel', async () => {
   assert.equal(shortcodeToInstagramMediaId('BQ0eAlwhDrw'), '1455920561485265648')
   assert.equal(shortcodeToInstagramMediaId('BQ0eAlwhDrw' + 'a'.repeat(28)), '1455920561485265648')
   assert.equal(shortcodeToInstagramMediaId('bad!code'), '')
@@ -357,7 +225,6 @@ test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel 
   const carouselRes = await extractInstagramMedia(
     'https://www.instagram.com/p/BQ0eAlwhDrw/',
     'instagram_photo',
-    { header: '', netscape: '' },
     {
       ytDlpRun: async () => {
         ytDlpCalled = true

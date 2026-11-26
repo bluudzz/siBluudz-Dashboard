@@ -34,9 +34,5 @@ export function normalizeAndValidateUrl(
   mode?: DownloaderMode
 ): { url: string; platform: DownloaderPlatform; detectedMode: DownloaderMode }
 export function isAllowedMediaProxyHost(hostname: string): boolean
-export function normalizeCookieInput(
-  raw: string,
-  platform?: DownloaderPlatform
-): { netscape: string; header: string }
 export function sanitizeDownloadFilename(name: string, ext?: string): string
 export function shortcodeToInstagramMediaId(shortcode: string): string

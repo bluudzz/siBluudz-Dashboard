@@ -390,12 +390,6 @@
   background: var(--dl-warning);
 }
 
-.dl-cookie-state {
-  font-size: 11.5px;
-  color: var(--dl-muted);
-  padding-left: 14px;
-}
-
 .dl-rail-actions {
   display: flex;
   align-items: center;
@@ -421,11 +415,6 @@
 .dl-rail-action-btn:hover:not(:disabled) {
   background: var(--dl-raised);
   border-color: var(--dl-control);
-}
-
-.dl-rail-action-btn.is-active {
-  border-color: var(--dl-accent);
-  color: var(--dl-accent-ink);
 }
 
 /* --- Main Work Sheet --- */
@@ -516,19 +505,6 @@
   background: var(--dl-well);
   border: 1px solid var(--dl-border);
   color: var(--dl-muted);
-}
-
-.dl-warning-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--dl-warning-soft);
-  color: var(--dl-warning);
-  border: 1px solid transparent;
-  font-size: 11.5px;
-  font-weight: 600;
 }
 
 /* --- Body --- */
@@ -982,19 +958,8 @@
   flex-direction: column;
 }
 
-.dl-history-dialog:not([open]),
-.dl-cookies-dialog:not([open]) {
+.dl-history-dialog:not([open]) {
   display: none;
-}
-
-.dl-cookies-dialog {
-  width: min(520px, calc(100vw - 28px));
-  max-height: 88dvh;
-  margin: auto;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .dl-dialog-head {
@@ -1123,73 +1088,6 @@
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--dl-border);
-}
-
-.dl-cookies-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.dl-cookie-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.dl-cookie-field-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.dl-cookie-field-head label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--dl-ink);
-}
-
-.dl-cookie-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--dl-well);
-  border: 1px solid var(--dl-border);
-  color: var(--dl-muted);
-}
-
-.dl-cookie-badge.is-ready {
-  background: var(--dl-accent-soft);
-  border-color: transparent;
-  color: var(--dl-accent-ink);
-}
-
-.dl-cookie-field textarea {
-  width: 100%;
-  padding: 9px 11px;
-  border-radius: 9px;
-  border: 1px solid var(--dl-border);
-  background: var(--dl-well);
-  color: var(--dl-ink);
-  font-size: 12.5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  resize: vertical;
-}
-
-.dl-cookie-feedback {
-  font-size: 12.5px;
-  color: var(--dl-accent-ink);
-  background: var(--dl-accent-soft);
-  padding: 8px 11px;
-  border-radius: 8px;
-}
-
-.dl-cookies-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 /* --- iOS Save Modal --- */

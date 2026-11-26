@@ -9,7 +9,6 @@ import {
   Film,
   History,
   Images,
-  KeyRound,
 } from 'lucide-react'
 import {
   DOWNLOADER_GROUPS,
@@ -74,7 +73,6 @@ interface DownloaderNavProps {
   status: DownloaderStatus | null
   onSelect: (mode: DownloaderMode) => void
   onOpenHistory: () => void
-  onOpenCookies: () => void
 }
 
 export function DownloaderNav({
@@ -83,7 +81,6 @@ export function DownloaderNav({
   status,
   onSelect,
   onOpenHistory,
-  onOpenCookies,
 }: DownloaderNavProps) {
   const [menuOpen, setMenuOpen] = React.useState(false)
   const mobileMenuRef = React.useRef<HTMLDivElement>(null)
@@ -117,33 +114,18 @@ export function DownloaderNav({
   }
 
   const engineOnline = Boolean(status?.ytDlpAvailable)
-  const igSessionReady = Boolean(status?.hasInstagramCookies)
 
   const actionButtons = (
-    <>
-      <button
-        type="button"
-        className="dl-rail-action-btn"
-        onClick={onOpenHistory}
-        aria-label="Riwayat unduhan"
-        title="Riwayat unduhan"
-      >
-        <History size={15} aria-hidden="true" />
-        <span className="dl-action-label">Riwayat</span>
-      </button>
-      {status?.canManageCookies && (
-        <button
-          type="button"
-          className={`dl-rail-action-btn${igSessionReady ? ' is-active' : ''}`}
-          onClick={onOpenCookies}
-          aria-label="Pengaturan cookie sesi Instagram & TikTok"
-          title="Pengaturan Sesi IG & TikTok"
-        >
-          <KeyRound size={15} aria-hidden="true" />
-          <span className="dl-action-label">Sesi IG</span>
-        </button>
-      )}
-    </>
+    <button
+      type="button"
+      className="dl-rail-action-btn"
+      onClick={onOpenHistory}
+      aria-label="Riwayat unduhan"
+      title="Riwayat unduhan"
+    >
+      <History size={15} aria-hidden="true" />
+      <span className="dl-action-label">Riwayat</span>
+    </button>
   )
 
   return (
@@ -249,9 +231,6 @@ export function DownloaderNav({
               aria-hidden="true"
             />
             <span>{engineOnline ? 'Engine yt-dlp siap' : 'TikWM aktif (yt-dlp offline)'}</span>
-          </span>
-          <span className="dl-cookie-state">
-            <span>{igSessionReady ? 'Sesi IG aktif (Story & Privat)' : 'IG Reel/Foto tanpa cookie · Story perlu sesi'}</span>
           </span>
         </div>
         <div className="dl-rail-actions">{actionButtons}</div>

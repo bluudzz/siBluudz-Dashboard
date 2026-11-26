@@ -2,21 +2,18 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { db } from '../db.js'
-import { requireAdmin, requireSameOrigin, requireUser } from '../middleware/auth.js'
+import { requireSameOrigin, requireUser } from '../middleware/auth.js'
 import {
   isAllowedMediaProxyHost,
   normalizeAndValidateUrl,
 } from '../../shared/downloader.js'
 import {
-  canEncryptDownloaderCookies,
   createProxyTokenStore,
   detectDownloaderBinaries,
   DownloaderHttpError,
   extractInstagramMedia,
   extractTikTokMedia,
   fetchAllowedUpstream,
-  getStoredDownloaderCookies,
-  saveStoredDownloaderCookies,
 } from '../downloader-service.js'
 
 const RATE_WINDOW_MS = 60 * 1000
@@ -38,50 +35,15 @@ export function createDownloaderRouter(deps = {}) {
     return true
   }
 
-  router.get('/status', requireUser, async (req, res) => {
+  router.get('/status', requireUser, async (_req, res) => {
     const binaries = deps.detectBinaries
       ? await deps.detectBinaries()
       : await detectDownloaderBinaries()
-    const igCookies = getStoredDownloaderCookies('instagram')
-    const ttCookies = getStoredDownloaderCookies('tiktok')
 
     res.json({
       ytDlpAvailable: Boolean(binaries.ytDlpAvailable),
       ffmpegAvailable: Boolean(binaries.ffmpegAvailable),
-      hasInstagramCookies: Boolean(igCookies.configured),
-      hasTiktokCookies: Boolean(ttCookies.configured),
-      canManageCookies: req.user.role === 'admin',
-      cookieEncryptionReady: canEncryptDownloaderCookies(),
     })
-  })
-
-  router.put('/cookies', requireSameOrigin, requireAdmin, (req, res) => {
-    try {
-      const { instagramCookies, tiktokCookies } = req.body || {}
-      if (instagramCookies !== undefined && typeof instagramCookies !== 'string') {
-        return res.status(400).json({ error: 'Format cookie Instagram harus berupa teks.' })
-      }
-      if (tiktokCookies !== undefined && typeof tiktokCookies !== 'string') {
-        return res.status(400).json({ error: 'Format cookie TikTok harus berupa teks.' })
-      }
-
-      if (instagramCookies !== undefined) {
-        saveStoredDownloaderCookies('instagram', instagramCookies)
-      }
-      if (tiktokCookies !== undefined) {
-        saveStoredDownloaderCookies('tiktok', tiktokCookies)
-      }
-
-      const ig = getStoredDownloaderCookies('instagram')
-      const tt = getStoredDownloaderCookies('tiktok')
-      res.json({
-        hasInstagramCookies: Boolean(ig.configured),
-        hasTiktokCookies: Boolean(tt.configured),
-      })
-    } catch (error) {
-      const status = error instanceof DownloaderHttpError ? error.status : 400
-      res.status(status).json({ error: error.message || 'Gagal menyimpan cookie sesi.' })
-    }
   })
 
   router.post('/extract', requireSameOrigin, requireUser, async (req, res) => {
@@ -104,15 +66,13 @@ export function createDownloaderRouter(deps = {}) {
 
       let extracted
       if (validated.platform === 'tiktok') {
-        const ttCookies = getStoredDownloaderCookies('tiktok')
         extracted = deps.extractTikTok
-          ? await deps.extractTikTok(validated.url, validated.detectedMode, ttCookies)
-          : await extractTikTokMedia(validated.url, validated.detectedMode, ttCookies, { binaries })
+          ? await deps.extractTikTok(validated.url, validated.detectedMode)
+          : await extractTikTokMedia(validated.url, validated.detectedMode, { binaries })
       } else {
-        const igCookies = getStoredDownloaderCookies('instagram')
         extracted = deps.extractInstagram
-          ? await deps.extractInstagram(validated.url, validated.detectedMode, igCookies)
-          : await extractInstagramMedia(validated.url, validated.detectedMode, igCookies, { binaries })
+          ? await deps.extractInstagram(validated.url, validated.detectedMode)
+          : await extractInstagramMedia(validated.url, validated.detectedMode, { binaries })
       }
 
       const safeItems = (extracted.items || [])
