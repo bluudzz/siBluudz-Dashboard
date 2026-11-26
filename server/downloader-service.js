@@ -4,7 +4,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { getSetting, setSetting } from './db.js'
+import { db, getSetting, setSetting } from './db.js'
 import { encryptSocialToken, decryptSocialToken } from './utils/social-crypto.js'
 import {
   isAllowedMediaProxyHost,
@@ -949,19 +949,19 @@ export async function extractInstagramMedia(url, mode, deps = {}) {
 }
 
 export function createProxyTokenStore() {
-  const store = new Map()
-
   function prune() {
     const now = Date.now()
-    for (const [token, entry] of store.entries()) {
-      if (entry.expiresAt <= now) {
-        store.delete(token)
-      }
-    }
-    while (store.size > MAX_PROXY_ENTRIES) {
-      const oldestKey = store.keys().next().value
-      if (!oldestKey) break
-      store.delete(oldestKey)
+    db.prepare('delete from downloader_proxy_tokens where expires_at <= ?').run(now)
+    const countRow = db.prepare('select count(*) as total from downloader_proxy_tokens').get()
+    const total = Number(countRow?.total || 0)
+    if (total > MAX_PROXY_ENTRIES) {
+      const overflow = total - MAX_PROXY_ENTRIES
+      db.prepare(`
+        delete from downloader_proxy_tokens
+        where token in (
+          select token from downloader_proxy_tokens order by expires_at asc limit ?
+        )
+      `).run(overflow)
     }
   }
 
@@ -969,32 +969,31 @@ export function createProxyTokenStore() {
     if (!url) return ''
     prune()
     const token = randomUUID()
-    store.set(token, {
-      userId,
-      url,
-      filename,
-      mimeType,
-      platform,
-      expiresAt: Date.now() + PROXY_TTL_MS,
-    })
+    db.prepare(`
+      insert into downloader_proxy_tokens (token, user_id, url, filename, mime_type, platform, expires_at)
+      values (?, ?, ?, ?, ?, ?, ?)
+    `).run(token, userId, url, filename, mimeType, platform, Date.now() + PROXY_TTL_MS)
     return token
   }
 
   function get(token, userId) {
-    const entry = store.get(token)
-    if (!entry) return null
-    if (entry.expiresAt <= Date.now()) {
-      store.delete(token)
+    const row = db.prepare(`
+      select token, user_id as userId, url, filename, mime_type as mimeType, platform, expires_at as expiresAt
+      from downloader_proxy_tokens
+      where token = ? and user_id = ?
+    `).get(token, userId)
+    if (!row) return null
+    if (row.expiresAt <= Date.now()) {
+      db.prepare('delete from downloader_proxy_tokens where token = ?').run(token)
       return null
     }
-    if (entry.userId !== userId) return null
-    return entry
+    return row
   }
 
   return { register, get }
 }
 
-export async function fetchAllowedUpstream(targetUrl, headers, fetchImpl = fetch) {
+export async function fetchAllowedUpstream(targetUrl, headers, fetchImpl = fetch, extraSignal = undefined) {
   let currentUrl = targetUrl
   for (let hop = 0; hop < 4; hop += 1) {
     let parsed
@@ -1010,11 +1009,14 @@ export async function fetchAllowedUpstream(targetUrl, headers, fetchImpl = fetch
       throw new DownloaderHttpError(403, 'Host CDN media tidak berada dalam daftar izin.')
     }
 
+    const timeoutSignal = AbortSignal.timeout(45_000)
+    const signal = extraSignal ? AbortSignal.any([timeoutSignal, extraSignal]) : timeoutSignal
+
     const res = await fetchImpl(currentUrl, {
       method: 'GET',
       headers,
       redirect: 'manual',
-      signal: AbortSignal.timeout(45_000),
+      signal,
     })
 
     if (res.status >= 300 && res.status < 400) {

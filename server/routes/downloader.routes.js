@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { db } from '../db.js'
 import { requireAdmin, requireSameOrigin, requireUser } from '../middleware/auth.js'
 import {
@@ -214,9 +215,18 @@ export function createDownloaderRouter(deps = {}) {
       headers.Range = req.headers.range
     }
 
+    const abortController = new AbortController()
+    const onClose = () => {
+      if (!res.writableEnded) {
+        abortController.abort()
+      }
+    }
+    res.on('close', onClose)
+
     try {
-      const upstream = await fetchAllowedUpstream(entry.url, headers, deps.fetchImpl)
+      const upstream = await fetchAllowedUpstream(entry.url, headers, deps.fetchImpl, abortController.signal)
       if (!upstream.ok && upstream.status !== 206) {
+        await upstream.body?.cancel?.().catch(() => {})
         return res.status(502).json({ error: `Server CDN menolak permintaan (${upstream.status}).` })
       }
 
@@ -238,15 +248,37 @@ export function createDownloaderRouter(deps = {}) {
         res.setHeader('Content-Disposition', `attachment; filename="${cleanName}"`)
       }
 
-      if (!upstream.body) {
+      if (req.method === 'HEAD' || !upstream.body) {
+        await upstream.body?.cancel?.().catch(() => {})
         return res.end()
       }
-      Readable.fromWeb(upstream.body).pipe(res)
+
+      const nodeStream = Readable.fromWeb(upstream.body)
+      nodeStream.on('error', () => {
+        // Handled by pipeline catch below without crashing the server
+      })
+      await pipeline(nodeStream, res)
     } catch (error) {
+      const code = error?.code
+      const name = error?.name
+      if (
+        abortController.signal.aborted ||
+        code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        code === 'ABORT_ERR' ||
+        code === 'ECONNRESET' ||
+        code === 'EPIPE' ||
+        name === 'AbortError'
+      ) {
+        return
+      }
       const status = error instanceof DownloaderHttpError ? error.status : 502
       if (!res.headersSent) {
         res.status(status).json({ error: error?.message || 'Gagal mengunduh stream media.' })
+      } else {
+        res.destroy()
       }
+    } finally {
+      res.off('close', onClose)
     }
   })
 

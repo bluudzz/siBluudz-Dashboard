@@ -175,6 +175,16 @@ db.exec(`
     created_at text not null default (datetime('now'))
   );
   create index if not exists downloader_history_user_idx on downloader_history(user_id, created_at desc);
+  create table if not exists downloader_proxy_tokens (
+    token text primary key,
+    user_id text not null references users(id) on delete cascade,
+    url text not null,
+    filename text not null,
+    mime_type text not null,
+    platform text not null,
+    expires_at integer not null
+  );
+  create index if not exists downloader_proxy_tokens_exp_idx on downloader_proxy_tokens(expires_at);
 `)
 
 // Dynamic column migrations for workflows

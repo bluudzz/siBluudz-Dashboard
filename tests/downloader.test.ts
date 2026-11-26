@@ -275,6 +275,68 @@ test('downloader API enforces auth, manages admin bare Session ID without leakin
     })
   ).json()
   assert.equal(histAfter.items.length, 0)
+
+  // Verify SQLite proxy token persistence across fresh createProxyTokenStore() instances and abort resilience
+  const { createProxyTokenStore } = await import('../server/downloader-service.js')
+  const storeA = createProxyTokenStore()
+  const persistedToken = storeA.register({
+    userId: 'dl-user-b',
+    url: 'https://instagram.fsub9-1.fna.fbcdn.net/story_clip.mp4',
+    filename: 'story_clip.mp4',
+    mimeType: 'video/mp4',
+    platform: 'instagram',
+  })
+  const storeB = createProxyTokenStore()
+  assert.ok(storeB.get(persistedToken, 'dl-user-b'))
+
+  app.use(
+    '/api/downloader-stream',
+    createDownloaderRouter({
+      proxyStore: storeB,
+      fetchImpl: async (_u, init) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3, 4]))
+          },
+          pull(controller) {
+            if (init?.signal?.aborted) return
+            return new Promise((resolve) => {
+              const timer = setTimeout(() => {
+                try {
+                  controller.enqueue(new Uint8Array([5, 6, 7, 8]))
+                  controller.close()
+                } catch {}
+                resolve()
+              }, 30)
+              init?.signal?.addEventListener('abort', () => {
+                clearTimeout(timer)
+                resolve()
+              }, { once: true })
+            })
+          },
+        })
+        return new Response(stream, {
+          status: 200,
+          headers: { 'content-type': 'video/mp4', 'content-length': '8' },
+        })
+      },
+    })
+  )
+
+  const ac = new AbortController()
+  setTimeout(() => ac.abort(), 5)
+  await assert.rejects(() =>
+    fetch(`${origin}/api/downloader-stream/proxy/${persistedToken}`, {
+      headers: { Cookie: 'sibluudz_session=userb-tok' },
+      signal: ac.signal,
+    })
+  )
+
+  const fullStream = await fetch(`${origin}/api/downloader-stream/proxy/${persistedToken}?download=1`, {
+    headers: { Cookie: 'sibluudz_session=userb-tok' },
+  })
+  assert.equal(fullStream.status, 200)
+  assert.equal((await fullStream.arrayBuffer()).byteLength, 8)
 })
 
 test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel and Carousel', async () => {
