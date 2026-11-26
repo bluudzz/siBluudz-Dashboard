@@ -163,6 +163,18 @@ db.exec(`
     updated_at text not null default (datetime('now'))
   );
   create index if not exists wf_notify_channels_user_idx on workflow_notification_channels(user_id, created_at desc);
+  create table if not exists downloader_history (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    mode text not null,
+    platform text not null,
+    source_url text not null,
+    title text not null default '',
+    author text not null default '',
+    item_count integer not null default 1,
+    created_at text not null default (datetime('now'))
+  );
+  create index if not exists downloader_history_user_idx on downloader_history(user_id, created_at desc);
 `)
 
 // Dynamic column migrations for workflows

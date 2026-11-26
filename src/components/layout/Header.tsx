@@ -49,6 +49,7 @@ export function Header({
     'cat-utility': 'Utilities & Scraper',
     'ai-generator': 'AI Generator',
     'prompt-studio': 'AI Generator / Prompt Studio',
+    downloader: 'Downloader',
     automation: 'Auto Workflow Studio',
     'invoices-list': 'Invoice',
     invoice: 'Invoice',
@@ -60,18 +61,18 @@ export function Header({
   const pageTitle = pageTitleMap[activeTab] || (activeTab.charAt(0).toUpperCase() + activeTab.slice(1))
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
+    <header className="sticky top-0 z-30 flex h-12 w-full items-center justify-between border-b border-border bg-background/85 px-3 backdrop-blur-md sm:px-5">
       {/* Left side: Hamburger (mobile), Collapse button (desktop), Breadcrumbs */}
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2">
         {/* Mobile menu trigger */}
         <Button
           variant="ghost"
           size="icon"
           onClick={() => setMobileOpen((prev) => !prev)}
-          className="md:hidden"
+          className="h-8 w-8 rounded-md md:hidden"
           aria-label="Buka menu navigasi"
         >
-          <Menu className="h-5 w-5" />
+          <Menu className="h-4 w-4" />
         </Button>
 
         {/* Desktop sidebar collapse toggle */}
@@ -79,37 +80,37 @@ export function Header({
           variant="ghost"
           size="icon"
           onClick={() => setSidebarCollapsed((prev) => !prev)}
-          className="hidden md:flex text-muted-foreground hover:text-foreground"
+          className="hidden h-8 w-8 rounded-md md:flex text-muted-foreground hover:text-foreground"
           title={sidebarCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar'}
         >
           {sidebarCollapsed ? (
-            <PanelLeft className="h-5 w-5" />
+            <PanelLeft className="h-4 w-4" />
           ) : (
-            <PanelLeftClose className="h-5 w-5" />
+            <PanelLeftClose className="h-4 w-4" />
           )}
         </Button>
 
         {/* Breadcrumb Navigation */}
-        <div className="flex min-w-0 items-center gap-2 text-sm">
+        <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
           <span className="text-muted-foreground hidden lg:inline">Dashboard</span>
-          <span className="text-muted-foreground/60 hidden lg:inline">/</span>
+          <span className="text-muted-foreground/45 hidden lg:inline">/</span>
           <span className="truncate font-semibold text-foreground tracking-tight">{pageTitle}</span>
         </div>
       </div>
 
       {/* Right side: Search, Theme, Notifications, User Profile */}
-      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {/* Search trigger button */}
         <button
           onClick={onOpenSearch}
           aria-label="Cari apapun"
-          className="flex h-9 w-9 xl:w-60 items-center justify-between rounded-lg border border-input bg-card/60 px-2.5 xl:px-3 text-xs text-muted-foreground shadow-2xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
+          className="flex h-8 w-8 xl:w-52 items-center justify-between rounded-md border border-input bg-card/60 px-2 xl:px-2.5 text-xs text-muted-foreground shadow-2xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
         >
           <span className="flex items-center gap-2 truncate">
             <Search className="h-3.5 w-3.5" />
             <span className="hidden truncate xl:inline">Cari apapun...</span>
           </span>
-          <kbd className="hidden xl:inline-flex items-center gap-0.5 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+          <kbd className="hidden xl:inline-flex h-5 items-center gap-0.5 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
             ⌘K
           </kbd>
         </button>
@@ -119,7 +120,7 @@ export function Header({
           variant="ghost"
           size="icon"
           onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-          className="rounded-lg text-muted-foreground hover:text-foreground"
+          className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground"
           aria-label="Toggle tema"
         >
           {resolvedTheme === 'dark' ? (
@@ -138,14 +139,11 @@ export function Header({
               setShowNotifications(!showNotifications)
               setShowUserMenu(false)
             }}
-            className="relative rounded-lg text-muted-foreground hover:text-foreground"
+            className="relative h-8 w-8 rounded-md text-muted-foreground hover:text-foreground"
             aria-label="Notifikasi"
           >
             <Bell className="h-4 w-4" />
-            <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-600"></span>
-            </span>
+            <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
           </Button>
 
           {showNotifications && (
@@ -209,7 +207,7 @@ export function Header({
           >
             <Avatar
               fallback={profile.name ? profile.name.slice(0, 2).toUpperCase() : profile.email.slice(0, 2).toUpperCase() || 'U'}
-              className="h-8 w-8 ring-2 ring-primary/20 ring-offset-1 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-semibold text-xs"
+              className="h-7 w-7 ring-1 ring-border bg-primary text-primary-foreground font-semibold text-[11px]"
             />
           </button>
 

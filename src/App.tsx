@@ -10,6 +10,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage'
 import { InvoicePage } from '@/features/invoices/InvoicePage'
 import { invoiceListSignature } from '@/features/invoices/invoice-utils'
 import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
+import { DownloaderPage } from '@/features/downloader/DownloaderPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
 import { AuthPage } from '@/features/auth/AuthPage'
@@ -105,6 +106,8 @@ function DashboardContent() {
         return <AiGeneratorPage key="ai-generator" />
       case 'prompt-studio':
         return <AiGeneratorPage key="prompt-studio" initialMode="prompt_studio" />
+      case 'downloader':
+        return <DownloaderPage />
       case 'automation':
         return <WorkflowStudioPage />
       case 'email-manager':
@@ -118,7 +121,7 @@ function DashboardContent() {
     }
   }
 
-  const isEmbeddedPage = ['automation', 'invoice', 'invoices-list', 'ai-generator', 'prompt-studio'].includes(activeTab)
+  const isEmbeddedPage = ['automation', 'invoice', 'invoices-list', 'ai-generator', 'prompt-studio', 'downloader'].includes(activeTab)
 
   return (
     <div className={`flex bg-background text-foreground ${isEmbeddedPage ? 'h-dvh overflow-hidden' : 'min-h-screen'}`}>

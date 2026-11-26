@@ -57,16 +57,16 @@ export function Sidebar({
         )}
       >
         {/* Brand Header */}
-        <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
-          <div className="flex items-center gap-3 overflow-hidden">
+        <div className="flex h-12 items-center justify-between border-b border-sidebar-border px-3.5">
+          <div className="flex items-center gap-2.5 overflow-hidden">
             {/* Glowing Logo Icon */}
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Layers className="h-5 w-5" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Layers className="h-4 w-4" />
             </div>
 
             {(!collapsed || mobileOpen) && (
               <div className="flex flex-col overflow-hidden transition-all duration-200">
-                <span className="truncate text-base font-bold tracking-tight text-foreground flex items-center gap-1.5">
+                <span className="truncate text-sm font-bold leading-tight tracking-tight text-foreground flex items-center gap-1.5">
                   siBluudz
                   <span className={cn(
                     'text-[10px] uppercase font-bold px-1.5 py-0.2 rounded',
@@ -75,7 +75,7 @@ export function Sidebar({
                     {profile.role === 'admin' ? 'Admin' : (isPro ? 'Pro' : 'Free')}
                   </span>
                 </span>
-                <span className="truncate text-[11px] font-medium text-muted-foreground">
+                <span className="truncate text-[10.5px] leading-tight font-medium text-muted-foreground">
                   Ruang kerja Anda
                 </span>
               </div>

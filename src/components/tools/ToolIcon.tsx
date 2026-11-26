@@ -26,6 +26,7 @@ import {
   CreditCard,
   Wallet,
   FileSpreadsheet,
+  Download,
   type LucideProps,
 } from 'lucide-react'
 
@@ -58,6 +59,7 @@ export const iconMap: Record<string, React.FC<LucideProps>> = {
   CreditCard,
   Wallet,
   FileSpreadsheet,
+  Download,
 }
 
 interface ToolIconProps extends LucideProps {

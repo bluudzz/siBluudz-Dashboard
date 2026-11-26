@@ -5,6 +5,7 @@ import {
   ShieldCheck,
   Receipt,
   Sparkles,
+  Download,
   Mail,
   Workflow,
 } from 'lucide-react'
@@ -53,6 +54,13 @@ export const navigationSections: NavSection[] = [
         icon: Sparkles,
         badge: 'AI',
         description: 'Generate prompt, struktur invoice & follow-up',
+      },
+      {
+        title: 'Downloader',
+        id: 'downloader',
+        icon: Download,
+        badge: 'Media',
+        description: 'Unduh video, foto, reel & story dari TikTok dan Instagram',
       },
       {
         title: 'Auto Workflow',

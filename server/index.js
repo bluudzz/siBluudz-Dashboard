@@ -13,6 +13,7 @@ import adminRoutes from './routes/admin.routes.js'
 import automationRoutes from './routes/automation.routes.js'
 import { workflowMediaRouter } from './workflow-media.js'
 import instagramRoutes from './routes/instagram.routes.js'
+import downloaderRoutes from './routes/downloader.routes.js'
 import { googleDriveRouter } from './workflow-drive.js'
 import { workflowChannelsRouter } from './workflow-notify.js'
 import { startWorkflowScheduler } from './workflow-scheduler.js'
@@ -36,6 +37,7 @@ app.use('/api/workflows', automationRoutes)
 app.use('/api/workflow-media', workflowMediaRouter)
 app.use('/api/workflow-channels', workflowChannelsRouter)
 app.use('/api/instagram', instagramRoutes)
+app.use('/api/downloader', downloaderRoutes)
 app.use('/api/google-drive', googleDriveRouter)
 
 // Error handler
