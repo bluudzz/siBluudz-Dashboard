@@ -16,6 +16,8 @@ const execFileAsync = promisify(execFile)
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+const IG_MOBILE_UA =
+  'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)'
 const IG_APP_ID = '936619743392459'
 const PROXY_TTL_MS = 30 * 60 * 1000
 const MAX_PROXY_ENTRIES = 600
@@ -46,7 +48,7 @@ export function canEncryptDownloaderCookies() {
 async function resolveExecutable(candidates, versionArg = '--version') {
   for (const bin of candidates) {
     try {
-      const { stdout } = await execFileAsync(bin, [versionArg], { timeout: 5000 })
+      const { stdout } = await execFileAsync(bin, [versionArg], { timeout: 10_000 })
       const firstLine = String(stdout || '').trim().split(/\r?\n/)[0] || ''
       return { available: true, bin, version: firstLine }
     } catch {
@@ -58,16 +60,21 @@ async function resolveExecutable(candidates, versionArg = '--version') {
 
 export async function detectDownloaderBinaries({ force = false } = {}) {
   const now = Date.now()
-  if (!force && cachedBinaryCheck.value && now - cachedBinaryCheck.checkedAt < 60_000) {
+  const ttlMs = cachedBinaryCheck.value?.ytDlpAvailable ? 60_000 : 5_000
+  if (!force && cachedBinaryCheck.value && now - cachedBinaryCheck.checkedAt < ttlMs) {
     return cachedBinaryCheck.value
   }
 
   const ytCandidates = [
     'yt-dlp',
+    'yt-dlp.exe',
     '/usr/local/bin/yt-dlp',
     path.join(homedir(), '.local', 'bin', 'yt-dlp'),
+    path.join(homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
+    path.join(homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python313', 'Scripts', 'yt-dlp.exe'),
+    path.join(homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'Scripts', 'yt-dlp.exe'),
   ]
-  const ffmpegCandidates = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']
+  const ffmpegCandidates = ['ffmpeg', 'ffmpeg.exe', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']
 
   const [yt, ff] = await Promise.all([
     resolveExecutable(ytCandidates, '--version'),
@@ -193,6 +200,24 @@ async function runYtDlpJson(url, netscapeCookies, binaries, fetchTimeoutMs = 30_
       return JSON.parse(stdout)
     } catch (error) {
       const stderr = String(error?.stderr || error?.message || '').toLowerCase()
+      if (stderr.includes('there is no video in this post') || stderr.includes('no video')) {
+        throw new DownloaderHttpError(
+          422,
+          'Postingan ini hanya berisi foto (bukan video). Gunakan mode Instagram Foto atau pastikan Cookie Sesi IG aktif.'
+        )
+      }
+      if (stderr.includes('no stories') || (stderr.includes('story') && stderr.includes('not found'))) {
+        throw new DownloaderHttpError(
+          404,
+          'Story tidak ditemukan atau sudah kedaluwarsa (lebih dari 24 jam).'
+        )
+      }
+      if (stderr.includes('checkpoint') || stderr.includes('challenge')) {
+        throw new DownloaderHttpError(
+          422,
+          'Akun sesi Instagram terkena verifikasi/checkpoint. Buka Instagram dari akun cadangan lalu perbarui cookie sesi.'
+        )
+      }
       if (stderr.includes('login') || stderr.includes('cookie') || stderr.includes('sign in')) {
         throw new DownloaderHttpError(
           422,
@@ -596,7 +621,7 @@ export async function extractInstagramMedia(url, mode, cookies = { netscape: '',
               `https://i.instagram.com/api/v1/feed/reels_media/?reel_ids=${encodeURIComponent(userId)}`,
               {
                 headers: {
-                  'User-Agent': BROWSER_UA,
+                  'User-Agent': IG_MOBILE_UA,
                   'x-ig-app-id': IG_APP_ID,
                   Cookie: cookies.header,
                   Accept: 'application/json',
@@ -606,7 +631,10 @@ export async function extractInstagramMedia(url, mode, cookies = { netscape: '',
             )
             if (reelsRes.ok) {
               const reelsJson = await reelsRes.json().catch(() => null)
-              const rawItems = reelsJson?.reels_media?.[0]?.items || []
+              const rawItems =
+                reelsJson?.reels_media?.[0]?.items ||
+                reelsJson?.reels?.[String(userId)]?.items ||
+                []
               if (Array.isArray(rawItems) && rawItems.length > 0) {
                 const ordered = [...rawItems]
                 if (targetStoryId) {

@@ -68,6 +68,10 @@ test('normalizeCookieInput converts between HTTP Cookie headers and Netscape for
   const fromNetscape = normalizeCookieInput(fromHeader.netscape, 'instagram')
   assert.equal(fromNetscape.header, 'sessionid=abc123; ds_user_id=999888; csrftoken=tok')
 
+  const autoDerived = normalizeCookieInput('sessionid=123456%3Aabc%3A27', 'instagram')
+  assert.match(autoDerived.header, /ds_user_id=123456/)
+  assert.match(autoDerived.netscape, /\tds_user_id\t123456/)
+
   assert.deepEqual(normalizeCookieInput('   ', 'instagram'), { netscape: '', header: '' })
   assert.throws(() => normalizeCookieInput('not-a-valid-cookie-line', 'instagram'))
   assert.equal(sanitizeDownloadFilename('My Clip: #1?', 'MP4'), 'My_Clip_#1.mp4')

@@ -233,6 +233,26 @@ export function isAllowedMediaProxyHost(hostname) {
   return ALLOWED_PROXY_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))
 }
 
+function ensureInstagramUserIdCookie(platform, rows, headerPairs, defaultDomain) {
+  if (platform !== 'instagram') return
+  const hasUserId = headerPairs.some((pair) => pair.toLowerCase().startsWith('ds_user_id='))
+  if (hasUserId) return
+  const sessPair = headerPairs.find((pair) => pair.toLowerCase().startsWith('sessionid='))
+  if (!sessPair) return
+  const rawSess = sessPair.slice(sessPair.indexOf('=') + 1)
+  let decoded = rawSess
+  try {
+    decoded = decodeURIComponent(rawSess)
+  } catch {
+    decoded = rawSess
+  }
+  const uid = decoded.split(':')[0]
+  if (/^\d+$/.test(uid)) {
+    headerPairs.push(`ds_user_id=${uid}`)
+    rows.push(`${defaultDomain}\tTRUE\t/\tTRUE\t2147483647\tds_user_id\t${uid}`)
+  }
+}
+
 export function normalizeCookieInput(raw, platform = 'instagram') {
   const text = String(raw || '').trim()
   if (!text) {
@@ -276,6 +296,7 @@ export function normalizeCookieInput(raw, platform = 'instagram') {
     if (validRows.length === 0) {
       throw new Error('Format cookies.txt Netscape tidak valid atau kosong.')
     }
+    ensureInstagramUserIdCookie(platform, validRows, headerPairs, defaultDomain)
     return {
       netscape: `# Netscape HTTP Cookie File\n${validRows.join('\n')}\n`,
       header: headerPairs.join('; '),
@@ -301,6 +322,7 @@ export function normalizeCookieInput(raw, platform = 'instagram') {
     throw new Error('Format cookie tidak dikenali. Tempel header Cookie (nama=nilai; ...) atau isi cookies.txt Netscape.')
   }
 
+  ensureInstagramUserIdCookie(platform, netscapeRows, headerPairs, defaultDomain)
   return {
     netscape: `# Netscape HTTP Cookie File\n${netscapeRows.join('\n')}\n`,
     header: headerPairs.join('; '),
