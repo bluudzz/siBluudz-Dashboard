@@ -8,6 +8,7 @@ import {
   EXPORT_QUALITY_MAX,
   EXPORT_QUALITY_MIN,
   EXPORT_TARGET_BYTES,
+  prepareSyncRelightExport,
   selectExportDimensions,
 } from '../src/features/ai-generator/relight-export.ts'
 
@@ -64,4 +65,40 @@ test('encodeWithinBudget enforces EXPORT_QUALITY_MIN (0.90) floor even on oversi
 
   assert.ok(result)
   assert.equal(result.quality, EXPORT_QUALITY_MIN)
+})
+
+test('prepareSyncRelightExport prepares 100% data URL and 0% source synchronously without async gap', () => {
+  const samplePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+  const full = prepareSyncRelightExport({
+    sourceDataUrl: samplePng,
+    resultImageUrl: samplePng,
+    strength: 100,
+    resultFormat: 'png',
+  })
+  assert.ok(full)
+  assert.equal(full.ext, 'png')
+  assert.ok(full.blob.size > 0)
+
+  const zero = prepareSyncRelightExport({
+    sourceDataUrl: samplePng,
+    resultImageUrl: samplePng,
+    strength: 0,
+  })
+  assert.ok(zero)
+  assert.equal(zero.ext, 'png')
+
+  const blended = prepareSyncRelightExport({
+    sourceDataUrl: samplePng,
+    resultImageUrl: samplePng,
+    strength: 50,
+  })
+  assert.equal(blended, null)
+
+  const remote = prepareSyncRelightExport({
+    sourceDataUrl: samplePng,
+    resultImageUrl: 'https://example.com/relight.png',
+    strength: 100,
+  })
+  assert.equal(remote, null)
 })

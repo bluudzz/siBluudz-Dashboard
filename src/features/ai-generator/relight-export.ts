@@ -152,6 +152,61 @@ function extFromMimeOrUrl(mime: string, fallbackExt?: string): string {
   return clean || 'png'
 }
 
+export function isIOSDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
+
+export function canShareFile(file: File): boolean {
+  if (typeof navigator === 'undefined') return false
+  if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false
+  try {
+    return navigator.canShare({ files: [file] })
+  } catch {
+    return false
+  }
+}
+
+export function prepareSyncRelightExport({
+  sourceDataUrl,
+  resultImageUrl,
+  strength,
+  resultFormat,
+}: {
+  sourceDataUrl: string
+  resultImageUrl: string
+  strength: number
+  resultFormat?: string
+}): { blob: Blob; ext: string; width: number; height: number } | null {
+  if (strength <= 0) {
+    const sourceBlob = dataUrlToBlob(sourceDataUrl)
+    if (!sourceBlob) return null
+    return {
+      blob: sourceBlob,
+      ext: extFromMimeOrUrl(sourceBlob.type),
+      width: 0,
+      height: 0,
+    }
+  }
+
+  if (strength >= 100 && resultImageUrl.startsWith('data:image/')) {
+    const rawBlob = dataUrlToBlob(resultImageUrl)
+    if (rawBlob && rawBlob.size <= EXPORT_LOSSLESS_MAX_BYTES) {
+      return {
+        blob: rawBlob,
+        ext: extFromMimeOrUrl(rawBlob.type, resultFormat),
+        width: 0,
+        height: 0,
+      }
+    }
+  }
+
+  return null
+}
+
 export async function exportRelightImage({
   sourceDataUrl,
   resultImageUrl,

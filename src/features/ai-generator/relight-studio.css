@@ -941,7 +941,84 @@
   .relight-strength-presets button,
   .relight-zoom-btn,
   .relight-zoom-pct,
+  .relight-save-actions a,
+  .relight-save-actions button,
   .relight-submit {
     min-height: 44px;
   }
+}
+
+.relight-save-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.relight-save-dialog {
+  width: min(420px, 100%);
+  max-height: 90dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--ag-sheet);
+  border: 1px solid var(--ag-border);
+  border-radius: 12px;
+  color: var(--ag-ink);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+}
+
+.relight-save-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.relight-save-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ag-ink);
+}
+
+.relight-save-head p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ag-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.relight-save-dialog img {
+  display: block;
+  width: 100%;
+  max-height: 52dvh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--ag-well);
+  -webkit-touch-callout: default;
+}
+
+.relight-save-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ag-muted);
+}
+
+.relight-save-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.relight-save-actions .ag-primary-btn,
+.relight-save-actions .ag-primary-link {
+  width: 100%;
+  justify-content: center;
 }

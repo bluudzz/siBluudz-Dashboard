@@ -12,6 +12,7 @@ import {
   LampDesk,
   RefreshCw,
   Search,
+  Share2,
   Square,
   Sun,
   X,
@@ -21,7 +22,12 @@ import {
 import { defaultRelightSettings, relightOptions, relightPresets } from '../../../shared/relight.js'
 import type { RelightResolution, RelightSettings } from '../../../shared/relight.js'
 import { curateImageModels } from '../../../shared/model-catalog.js'
-import { exportRelightImage } from './relight-export.ts'
+import {
+  canShareFile,
+  exportRelightImage,
+  isIOSDevice,
+  prepareSyncRelightExport,
+} from './relight-export.ts'
 import './relight-studio.css'
 
 interface Usage {
@@ -203,6 +209,13 @@ export function RelightStudio({
   const [strength, setStrength] = React.useState(100)
   const [exporting, setExporting] = React.useState(false)
   const [lastExport, setLastExport] = React.useState<{ bytes: number; ext: string } | null>(null)
+  const [iosSaveSheet, setIosSaveSheet] = React.useState<{
+    url: string
+    filename: string
+    file: File
+    bytes: number
+    ext: string
+  } | null>(null)
   const [view, setView] = React.useState({ zoom: 1, x: 0, y: 0 })
   const [panning, setPanning] = React.useState(false)
   const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 })
@@ -303,6 +316,39 @@ export function RelightStudio({
     return () => el.removeEventListener('wheel', onWheel)
   }, [source])
 
+  React.useEffect(() => {
+    if (!iosSaveSheet) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIosSaveSheet(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      URL.revokeObjectURL(iosSaveSheet.url)
+    }
+  }, [iosSaveSheet])
+
+  const openIosSaveSheet = React.useCallback((blob: Blob, filename: string, ext: string) => {
+    const file = new File([blob], filename, { type: blob.type || 'image/png' })
+    const url = URL.createObjectURL(blob)
+    setIosSaveSheet({ url, filename, file, bytes: blob.size, ext })
+  }, [])
+
+  const sharePreparedFile = React.useCallback(
+    (file: File, filename: string, onFallback?: () => void) => {
+      try {
+        const sharePromise = navigator.share({ files: [file], title: filename })
+        void sharePromise.catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          onFallback?.()
+        })
+      } catch {
+        onFallback?.()
+      }
+    },
+    [],
+  )
+
   const handleDownloadResult = React.useCallback(async () => {
     if (!result) return
 
@@ -318,6 +364,42 @@ export function RelightStudio({
       document.body.appendChild(link)
       link.click()
       link.remove()
+    }
+
+    const ios = isIOSDevice()
+    const syncExported = prepareSyncRelightExport({
+      sourceDataUrl: result.source.data,
+      resultImageUrl: result.image,
+      strength,
+      resultFormat: result.output?.format,
+    })
+
+    if (syncExported) {
+      const filename =
+        strength >= 100
+          ? `sibluudz-relight.${syncExported.ext}`
+          : `sibluudz-relight-${strength}pct.${syncExported.ext}`
+      setLastExport({ bytes: syncExported.blob.size, ext: syncExported.ext })
+      setError('')
+
+      if (ios) {
+        const file = new File([syncExported.blob], filename, {
+          type: syncExported.blob.type || 'image/png',
+        })
+        if (canShareFile(file)) {
+          sharePreparedFile(file, filename, () =>
+            openIosSaveSheet(syncExported.blob, filename, syncExported.ext),
+          )
+        } else {
+          openIosSaveSheet(syncExported.blob, filename, syncExported.ext)
+        }
+        return
+      }
+
+      const url = URL.createObjectURL(syncExported.blob)
+      triggerDownload(url, filename)
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      return
     }
 
     setExporting(true)
@@ -339,10 +421,16 @@ export function RelightStudio({
         strength >= 100
           ? `sibluudz-relight.${exported.ext}`
           : `sibluudz-relight-${strength}pct.${exported.ext}`
+      setLastExport({ bytes: exported.blob.size, ext: exported.ext })
+
+      if (ios) {
+        openIosSaveSheet(exported.blob, filename, exported.ext)
+        return
+      }
+
       const url = URL.createObjectURL(exported.blob)
       triggerDownload(url, filename)
       window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
-      setLastExport({ bytes: exported.blob.size, ext: exported.ext })
     } catch (err) {
       setError(
         err instanceof Error
@@ -352,7 +440,7 @@ export function RelightStudio({
     } finally {
       setExporting(false)
     }
-  }, [result, strength])
+  }, [result, strength, openIosSaveSheet, sharePreparedFile])
 
   const activePreset = relightPresets.find((preset) => preset.id === settings.preset)!
   const curatedCatalog = React.useMemo(() => curateImageModels(catalog.models), [catalog.models])
@@ -444,6 +532,7 @@ export function RelightStudio({
       setComparePosition(50)
       setStrength(100)
       setLastExport(null)
+      setIosSaveSheet(null)
       resetView()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Gagal membaca foto.')
@@ -503,6 +592,7 @@ export function RelightStudio({
       setComparePosition(50)
       setStrength(100)
       setLastExport(null)
+      setIosSaveSheet(null)
       resetView()
       onResult?.()
       if (data.usage) onUsage(data.usage)
@@ -886,6 +976,7 @@ export function RelightStudio({
                   setResult(null)
                   setNaturalSize({ width: 0, height: 0 })
                   setLastExport(null)
+      setIosSaveSheet(null)
                   setError('')
                   resetView()
                 }}
@@ -1128,6 +1219,7 @@ export function RelightStudio({
                 onChange={(event) => {
                   setStrength(Number(event.target.value))
                   setLastExport(null)
+      setIosSaveSheet(null)
                 }}
               />
               <div className="relight-strength-presets" role="group" aria-label="Preset kekuatan lighting">
@@ -1139,6 +1231,7 @@ export function RelightStudio({
                     onClick={() => {
                       setStrength(preset)
                       setLastExport(null)
+      setIosSaveSheet(null)
                     }}
                   >
                     {preset}%
@@ -1221,6 +1314,71 @@ export function RelightStudio({
           )}
         </div>
       </section>
+
+      {iosSaveSheet && (
+        <div
+          className="relight-save-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIosSaveSheet(null)
+          }}
+        >
+          <div
+            className="relight-save-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="relight-ios-save-title"
+          >
+            <div className="relight-save-head">
+              <div>
+                <h3 id="relight-ios-save-title">Simpan Foto</h3>
+                <p>
+                  {iosSaveSheet.ext.toUpperCase()} ·{' '}
+                  {iosSaveSheet.bytes >= 1024 * 1024
+                    ? `${(iosSaveSheet.bytes / (1024 * 1024)).toFixed(2)} MB`
+                    : `${Math.ceil(iosSaveSheet.bytes / 1024)} KB`}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ag-icon-btn"
+                aria-label="Tutup dialog simpan foto"
+                onClick={() => setIosSaveSheet(null)}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            <img src={iosSaveSheet.url} alt="Pratinjau foto siap simpan" />
+
+            <p className="relight-save-hint">
+              Tekan &amp; tahan gambar di atas lalu pilih <strong>Simpan ke Foto</strong>, atau ketuk tombol di bawah.
+            </p>
+
+            <div className="relight-save-actions">
+              {canShareFile(iosSaveSheet.file) && (
+                <button
+                  type="button"
+                  className="ag-primary-btn"
+                  onClick={() => sharePreparedFile(iosSaveSheet.file, iosSaveSheet.filename)}
+                >
+                  <Share2 size={15} aria-hidden="true" />
+                  <span>Simpan ke Galeri / Bagikan</span>
+                </button>
+              )}
+              <a
+                className="ag-primary-link"
+                href={iosSaveSheet.url}
+                download={iosSaveSheet.filename}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Download size={15} aria-hidden="true" />
+                <span>Unduh / Buka file</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
