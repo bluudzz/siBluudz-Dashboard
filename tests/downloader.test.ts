@@ -307,7 +307,7 @@ test('downloader API enforces auth, manages admin bare Session ID without leakin
                   controller.close()
                 } catch {}
                 resolve()
-              }, 30)
+              }, 80)
               init?.signal?.addEventListener('abort', () => {
                 clearTimeout(timer)
                 resolve()
@@ -324,13 +324,14 @@ test('downloader API enforces auth, manages admin bare Session ID without leakin
   )
 
   const ac = new AbortController()
-  setTimeout(() => ac.abort(), 5)
-  await assert.rejects(() =>
-    fetch(`${origin}/api/downloader-stream/proxy/${persistedToken}`, {
+  setTimeout(() => ac.abort(), 15)
+  await assert.rejects(async () => {
+    const resp = await fetch(`${origin}/api/downloader-stream/proxy/${persistedToken}`, {
       headers: { Cookie: 'sibluudz_session=userb-tok' },
       signal: ac.signal,
     })
-  )
+    await resp.arrayBuffer()
+  })
 
   const fullStream = await fetch(`${origin}/api/downloader-stream/proxy/${persistedToken}?download=1`, {
     headers: { Cookie: 'sibluudz_session=userb-tok' },

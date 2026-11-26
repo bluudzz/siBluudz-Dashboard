@@ -235,6 +235,7 @@ export function createDownloaderRouter(deps = {}) {
       res.setHeader('Content-Type', contentType)
       res.setHeader('X-Content-Type-Options', 'nosniff')
       res.setHeader('Cache-Control', 'private, max-age=600')
+      res.setHeader('X-Accel-Buffering', 'no')
 
       const length = upstream.headers.get('content-length')
       if (length) res.setHeader('Content-Length', length)
@@ -245,7 +246,12 @@ export function createDownloaderRouter(deps = {}) {
 
       if (req.query.download === '1') {
         const cleanName = String(entry.filename || 'media.bin').replace(/["\r\n]/g, '')
-        res.setHeader('Content-Disposition', `attachment; filename="${cleanName}"`)
+        const asciiName = cleanName.replace(/[^\x20-\x7E]/g, '_') || 'media.bin'
+        const disposition =
+          asciiName === cleanName
+            ? `attachment; filename="${asciiName}"`
+            : `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(cleanName)}`
+        res.setHeader('Content-Disposition', disposition)
       }
 
       if (req.method === 'HEAD' || !upstream.body) {

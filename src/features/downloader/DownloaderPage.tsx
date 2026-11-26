@@ -171,31 +171,50 @@ export function DownloaderPage() {
     }
   }
 
-  const triggerDirectDownload = (item: DownloaderItem) => {
+  const fetchMediaBlob = async (item: DownloaderItem): Promise<Blob> => {
+    const res = await fetch(item.previewUrl, { credentials: 'same-origin' })
+    if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(
+        json?.error ||
+          (res.status === 404
+            ? 'Tautan unduhan kedaluwarsa. Klik Ambil Media lagi lalu unduh ulang.'
+            : `Gagal mengunduh media (HTTP ${res.status}).`)
+      )
+    }
+    const blob = await res.blob()
+    if (blob.size === 0) {
+      throw new Error('File media kosong. Coba klik Ambil Media lagi.')
+    }
+    return blob
+  }
+
+  const saveBlobAsFile = (blob: Blob, filename: string) => {
+    const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = item.downloadUrl
-    a.download = item.filename
-    a.rel = 'noopener'
+    a.href = blobUrl
+    a.download = filename
+    a.style.display = 'none'
     document.body.appendChild(a)
     a.click()
-    a.remove()
+    window.setTimeout(() => {
+      a.remove()
+      URL.revokeObjectURL(blobUrl)
+    }, 60_000)
   }
 
   const handleDownloadItem = async (item: DownloaderItem) => {
-    if (!isIOSDevice()) {
-      triggerDirectDownload(item)
-      return
-    }
-
-    // iOS Safari/Chrome: fetch proxied media blob and open iOS Share Sheet / Save modal
     setDownloadingId(item.id)
     setError('')
     try {
-      const res = await fetch(item.previewUrl)
-      if (!res.ok) {
-        throw new Error('Gagal mengunduh file untuk perangkat iOS.')
+      const blob = await fetchMediaBlob(item)
+
+      if (!isIOSDevice()) {
+        saveBlobAsFile(blob, item.filename)
+        return
       }
-      const blob = await res.blob()
+
+      // iOS Safari/Chrome: open iOS Share Sheet / Save modal from the downloaded blob
       const file = new File([blob], item.filename, { type: blob.type || item.mimeType })
 
       if (canShareFile(file)) {
@@ -216,7 +235,7 @@ export function DownloaderPage() {
         return { item, file, objectUrl }
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal memproses unduhan iOS.')
+      setError(err instanceof Error ? err.message : 'Gagal mengunduh file media.')
     } finally {
       setDownloadingId(null)
     }
@@ -232,7 +251,7 @@ export function DownloaderPage() {
       try {
         const files: File[] = []
         for (const slide of mediaSlides.slice(0, 12)) {
-          const res = await fetch(slide.previewUrl)
+          const res = await fetch(slide.previewUrl, { credentials: 'same-origin' })
           if (!res.ok) continue
           const blob = await res.blob()
           files.push(new File([blob], slide.filename, { type: blob.type || slide.mimeType }))
@@ -255,13 +274,18 @@ export function DownloaderPage() {
     }
 
     setDownloadingAll(true)
+    setError('')
     try {
       for (let i = 0; i < mediaSlides.length; i += 1) {
-        triggerDirectDownload(mediaSlides[i])
+        const slide = mediaSlides[i]
+        const blob = await fetchMediaBlob(slide)
+        saveBlobAsFile(blob, slide.filename)
         if (i < mediaSlides.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 260))
         }
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengunduh semua slide.')
     } finally {
       setDownloadingAll(false)
     }
@@ -857,7 +881,7 @@ export function DownloaderPage() {
                 </button>
               )}
               <a
-                href={iosPending.item.downloadUrl}
+                href={iosPending.objectUrl}
                 download={iosPending.item.filename}
                 className="dl-secondary-btn"
               >
