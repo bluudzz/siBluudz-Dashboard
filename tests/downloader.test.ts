@@ -11,6 +11,7 @@ import {
   normalizeAndValidateUrl,
   normalizeCookieInput,
   sanitizeDownloadFilename,
+  shortcodeToInstagramMediaId,
 } from '../shared/downloader.js'
 
 test('normalizeAndValidateUrl normalizes TikTok & Instagram URLs and blocks SSRF targets', () => {
@@ -342,4 +343,75 @@ test('extractInstagramMedia parses SSR xdt_api__v1__feed__reels_media story item
       ),
     (err: { status?: number; message?: string }) => err.status === 404 && /tidak memiliki IG Story aktif/i.test(err.message || '')
   )
+})
+
+test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel and Carousel without session cookies', async () => {
+  assert.equal(shortcodeToInstagramMediaId('BQ0eAlwhDrw'), '1455920561485265648')
+  assert.equal(shortcodeToInstagramMediaId('BQ0eAlwhDrw' + 'a'.repeat(28)), '1455920561485265648')
+  assert.equal(shortcodeToInstagramMediaId('bad!code'), '')
+
+  const { extractInstagramMedia } = await import('../server/downloader-service.js')
+
+  let capturedCsrf = ''
+  let ytDlpCalled = false
+  const carouselRes = await extractInstagramMedia(
+    'https://www.instagram.com/p/BQ0eAlwhDrw/',
+    'instagram_photo',
+    { header: '', netscape: '' },
+    {
+      ytDlpRun: async () => {
+        ytDlpCalled = true
+        return {}
+      },
+      fetchImpl: async (reqUrl, init) => {
+        const u = String(reqUrl)
+        if (u.includes('/web/get_ruling_for_content/')) {
+          return new Response(JSON.stringify({ status: 'ok' }), {
+            status: 200,
+            headers: { 'set-cookie': 'csrftoken=anon_csrf_123; Path=/; Secure' },
+          })
+        }
+        if (u.includes('/api/graphql')) {
+          const headers = init?.headers as Record<string, string>
+          capturedCsrf = headers['X-CSRFToken']
+          return new Response(
+            JSON.stringify({
+              data: {
+                xig_polaris_media: {
+                  if_not_gated_logged_out: {
+                    user: { username: 'instagram' },
+                    caption: { text: 'Carousel tanpa cookie' },
+                    carousel_media: [
+                      {
+                        image_versions2: {
+                          candidates: [{ url: 'https://scontent.cdninstagram.com/slide1.jpg', width: 1080, height: 1080 }],
+                        },
+                      },
+                      {
+                        video_versions: [{ url: 'https://video.xx.fbcdn.net/slide2.mp4', width: 720, height: 720 }],
+                        image_versions2: {
+                          candidates: [{ url: 'https://scontent.cdninstagram.com/thumb2.jpg', width: 720, height: 720 }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            }),
+            { status: 200 }
+          )
+        }
+        return new Response('unexpected', { status: 500 })
+      },
+    }
+  )
+
+  assert.equal(ytDlpCalled, false)
+  assert.equal(capturedCsrf, 'anon_csrf_123')
+  assert.equal(carouselRes.platform, 'instagram')
+  assert.equal(carouselRes.resolvedMode, 'instagram_photo')
+  assert.equal(carouselRes.author, 'instagram')
+  assert.equal(carouselRes.items.length, 2)
+  assert.equal(carouselRes.items[0].kind, 'image')
+  assert.equal(carouselRes.items[1].kind, 'video')
 })

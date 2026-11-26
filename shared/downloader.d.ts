@@ -39,3 +39,4 @@ export function normalizeCookieInput(
   platform?: DownloaderPlatform
 ): { netscape: string; header: string }
 export function sanitizeDownloadFilename(name: string, ext?: string): string
+export function shortcodeToInstagramMediaId(shortcode: string): string

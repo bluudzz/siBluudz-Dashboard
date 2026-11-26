@@ -251,7 +251,7 @@ export function DownloaderNav({
             <span>{engineOnline ? 'Engine yt-dlp siap' : 'TikWM aktif (yt-dlp offline)'}</span>
           </span>
           <span className="dl-cookie-state">
-            <span>{igSessionReady ? 'Sesi IG aktif' : 'IG tanpa cookie sesi'}</span>
+            <span>{igSessionReady ? 'Sesi IG aktif (Story & Privat)' : 'IG Reel/Foto tanpa cookie · Story perlu sesi'}</span>
           </span>
         </div>
         <div className="dl-rail-actions">{actionButtons}</div>

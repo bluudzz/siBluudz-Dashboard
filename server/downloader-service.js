@@ -10,6 +10,7 @@ import {
   isAllowedMediaProxyHost,
   normalizeCookieInput,
   sanitizeDownloadFilename,
+  shortcodeToInstagramMediaId,
 } from '../shared/downloader.js'
 
 const execFileAsync = promisify(execFile)
@@ -19,6 +20,9 @@ const BROWSER_UA =
 const IG_MOBILE_UA =
   'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 458229258)'
 const IG_APP_ID = '936619743392459'
+const IG_ANON_LSD = 'AVqbxe3J_YA'
+const IG_ANON_POST_DOC_ID = '27130156389949648'
+const IG_ANON_POST_FRIENDLY_NAME = 'PolarisLoggedOutDesktopWWWPostRootContentQuery'
 const PROXY_TTL_MS = 30 * 60 * 1000
 const MAX_PROXY_ENTRIES = 600
 const MAX_PROXY_BYTES = 150 * 1024 * 1024
@@ -634,6 +638,82 @@ function buildIgPageHeaders(cookieHeader) {
   }
 }
 
+function extractSetCookieValue(headers, cookieName) {
+  const list = typeof headers?.getSetCookie === 'function' ? headers.getSetCookie() : []
+  const prefix = `${cookieName}=`
+  for (const item of list) {
+    const pair = String(item || '').split(';')[0].trim()
+    if (pair.startsWith(prefix)) {
+      return pair.slice(prefix.length)
+    }
+  }
+  const rawHeader = headers?.get?.('set-cookie') || ''
+  const match = rawHeader.match(new RegExp(`(?:^|,\\s*)${cookieName}=([^;,\\s]+)`))
+  return match?.[1] || ''
+}
+
+async function extractInstagramAnonymousGraphql(shortcode, fetchImpl) {
+  const mediaId = shortcodeToInstagramMediaId(shortcode)
+  if (!mediaId) return null
+
+  const commonHeaders = {
+    'User-Agent': BROWSER_UA,
+    'X-IG-App-ID': IG_APP_ID,
+    'X-ASBD-ID': '129477',
+    'X-IG-WWW-Claim': '0',
+    Origin: 'https://www.instagram.com',
+    Referer: `https://www.instagram.com/p/${encodeURIComponent(shortcode)}/`,
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    Accept: '*/*',
+  }
+
+  try {
+    const rulingRes = await fetchImpl(
+      `https://www.instagram.com/api/v1/web/get_ruling_for_content/?content_type=MEDIA&target_id=${encodeURIComponent(mediaId)}`,
+      {
+        headers: commonHeaders,
+        signal: AbortSignal.timeout(12_000),
+      }
+    )
+    const csrf = extractSetCookieValue(rulingRes.headers, 'csrftoken')
+
+    const body = new URLSearchParams({
+      lsd: IG_ANON_LSD,
+      fb_api_caller_class: 'RelayModern',
+      fb_api_req_friendly_name: IG_ANON_POST_FRIENDLY_NAME,
+      server_timestamps: 'true',
+      variables: JSON.stringify({ media_id: mediaId }),
+      doc_id: IG_ANON_POST_DOC_ID,
+    }).toString()
+
+    const gqlRes = await fetchImpl('https://www.instagram.com/api/graphql', {
+      method: 'POST',
+      headers: {
+        ...commonHeaders,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-FB-Friendly-Name': IG_ANON_POST_FRIENDLY_NAME,
+        'X-CSRFToken': csrf,
+        'X-FB-LSD': IG_ANON_LSD,
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(csrf ? { Cookie: `csrftoken=${csrf}` } : {}),
+      },
+      body,
+      signal: AbortSignal.timeout(15_000),
+    })
+
+    if (!gqlRes.ok) return null
+    const json = await gqlRes.json().catch(() => null)
+    const info = json?.data?.xig_polaris_media?.if_not_gated_logged_out
+    if (!info || typeof info !== 'object') return null
+
+    return extractItemsFromIgWebJson({ items: [info] })
+  } catch {
+    return null
+  }
+}
+
 export async function extractInstagramMedia(url, mode, cookies = { netscape: '', header: '' }, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
   const binaries = deps.binaries
@@ -821,7 +901,20 @@ export async function extractInstagramMedia(url, mode, cookies = { netscape: '',
   const codeMatch = pathname.match(/^\/(?:p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i)
   const shortcode = codeMatch?.[1]
 
-  // Strategy A: Authenticated SSR Relay JSON directly from post/reel page HTML
+  // Strategy 2A: Anonymous GraphQL (csrftoken bootstrap + persisted doc_id, NO login cookies needed for public Posts/Reels/Carousels)
+  if (shortcode) {
+    const anonExtracted = await extractInstagramAnonymousGraphql(shortcode, fetchImpl)
+    if (anonExtracted) {
+      const hasVideoOnly = anonExtracted.items.every((i) => i.kind === 'video')
+      return {
+        platform: 'instagram',
+        resolvedMode: hasVideoOnly ? 'instagram_reel' : 'instagram_photo',
+        ...anonExtracted,
+      }
+    }
+  }
+
+  // Strategy 2B: Authenticated SSR Relay JSON directly from post/reel page HTML (for gated/followed posts)
   if (shortcode && cookies.header) {
     try {
       const pageRes = await fetchImpl(url, {

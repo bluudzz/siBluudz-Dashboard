@@ -338,3 +338,20 @@ export function sanitizeDownloadFilename(name, ext = 'mp4') {
     .slice(0, 72) || 'media'
   return `${base}.${safeExt}`
 }
+
+const IG_SHORTCODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+export function shortcodeToInstagramMediaId(shortcode) {
+  let clean = String(shortcode || '').trim()
+  if (!clean || !/^[A-Za-z0-9_-]+$/.test(clean)) return ''
+  if (clean.length > 28) {
+    clean = clean.slice(0, -28)
+  }
+  let id = 0n
+  for (const ch of clean) {
+    const idx = IG_SHORTCODE_ALPHABET.indexOf(ch)
+    if (idx < 0) return ''
+    id = id * 64n + BigInt(idx)
+  }
+  return id.toString()
+}
