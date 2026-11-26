@@ -1,10 +1,14 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { homedir } from 'node:os'
+import { writeFile, unlink } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { getSetting, setSetting } from './db.js'
+import { encryptSocialToken, decryptSocialToken } from './utils/social-crypto.js'
 import {
   isAllowedMediaProxyHost,
+  normalizeInstagramSessionInput,
   sanitizeDownloadFilename,
   shortcodeToInstagramMediaId,
 } from '../shared/downloader.js'
@@ -21,12 +25,75 @@ const PROXY_TTL_MS = 30 * 60 * 1000
 const MAX_PROXY_ENTRIES = 600
 const MAX_PROXY_BYTES = 150 * 1024 * 1024
 
+export const IG_STORY_SESSION_KEY = 'downloader_ig_cookies'
+
 let cachedBinaryCheck = { checkedAt: 0, value: null }
 
 export class DownloaderHttpError extends Error {
   constructor(status, message) {
     super(message)
     this.status = status
+  }
+}
+
+export function canEncryptDownloaderSession() {
+  const encoded = process.env.SOCIAL_CREDENTIALS_KEY || process.env.MAIL_CREDENTIALS_KEY
+  if (!encoded) return false
+  try {
+    return Buffer.from(encoded, 'base64').length === 32
+  } catch {
+    return false
+  }
+}
+
+export function getStoredInstagramSession() {
+  const encrypted = getSetting(IG_STORY_SESSION_KEY, '')
+  if (!encrypted) {
+    return { netscape: '', header: '', userId: '', masked: '', configured: false }
+  }
+  try {
+    const raw = decryptSocialToken(encrypted)
+    const normalized = normalizeInstagramSessionInput(raw)
+    return {
+      ...normalized,
+      configured: Boolean(normalized.header),
+    }
+  } catch {
+    return { netscape: '', header: '', userId: '', masked: '', configured: false }
+  }
+}
+
+export function saveStoredInstagramSession(rawInput) {
+  const trimmed = String(rawInput || '').trim()
+  if (!trimmed) {
+    setSetting(IG_STORY_SESSION_KEY, '')
+    return { configured: false, masked: '', userId: '' }
+  }
+  if (!canEncryptDownloaderSession()) {
+    throw new DownloaderHttpError(
+      500,
+      'MAIL_CREDENTIALS_KEY / SOCIAL_CREDENTIALS_KEY belum dikonfigurasi di server.'
+    )
+  }
+  const normalized = normalizeInstagramSessionInput(trimmed)
+  setSetting(IG_STORY_SESSION_KEY, encryptSocialToken(normalized.netscape))
+  return {
+    configured: Boolean(normalized.header),
+    masked: normalized.masked,
+    userId: normalized.userId,
+  }
+}
+
+async function withTempCookieFile(netscapeText, fn) {
+  if (!netscapeText) {
+    return fn(null)
+  }
+  const filePath = path.join(tmpdir(), `dl-cookie-${randomUUID()}.txt`)
+  await writeFile(filePath, netscapeText, { encoding: 'utf8', mode: 0o600 })
+  try {
+    return await fn(filePath)
+  } finally {
+    await unlink(filePath).catch(() => {})
   }
 }
 
@@ -111,56 +178,67 @@ function buildTitleSnippet(text, fallback = 'media') {
   return (firstLine || fallback).slice(0, 120)
 }
 
-async function runYtDlpJson(url, binaries, fetchTimeoutMs = 30_000) {
+async function runYtDlpJson(url, binaries, fetchTimeoutMs = 30_000, netscapeCookies = '') {
   const binInfo = binaries || (await detectDownloaderBinaries())
   if (!binInfo.ytDlpAvailable || !binInfo.ytDlpBin) {
     throw new DownloaderHttpError(503, 'Engine yt-dlp belum terpasang di server.')
   }
 
-  const args = [
-    '--dump-single-json',
-    '--no-warnings',
-    '--no-call-home',
-    url,
-  ]
+  return withTempCookieFile(netscapeCookies, async (cookieFile) => {
+    const args = [
+      '--dump-single-json',
+      '--no-warnings',
+      '--no-call-home',
+    ]
+    if (cookieFile) {
+      args.push('--cookies', cookieFile)
+    }
+    args.push(url)
 
-  try {
-    const { stdout } = await execFileAsync(binInfo.ytDlpBin, args, {
-      timeout: fetchTimeoutMs,
-      maxBuffer: 12 * 1024 * 1024,
-    })
-    return JSON.parse(stdout)
-  } catch (error) {
-    const stderr = String(error?.stderr || error?.message || '').toLowerCase()
-    if (stderr.includes('there is no video in this post') || stderr.includes('no video')) {
+    try {
+      const { stdout } = await execFileAsync(binInfo.ytDlpBin, args, {
+        timeout: fetchTimeoutMs,
+        maxBuffer: 12 * 1024 * 1024,
+      })
+      return JSON.parse(stdout)
+    } catch (error) {
+      const stderr = String(error?.stderr || error?.message || '').toLowerCase()
+      if (stderr.includes('there is no video in this post') || stderr.includes('no video')) {
+        throw new DownloaderHttpError(
+          422,
+          'Postingan ini hanya berisi foto (bukan video). Gunakan mode Instagram Foto.'
+        )
+      }
+      if (stderr.includes('no stories') || (stderr.includes('story') && stderr.includes('not found'))) {
+        throw new DownloaderHttpError(
+          404,
+          'Story tidak ditemukan atau sudah kedaluwarsa (lebih dari 24 jam).'
+        )
+      }
+      if (stderr.includes('checkpoint') || stderr.includes('challenge')) {
+        throw new DownloaderHttpError(
+          422,
+          'Akun Sesi IG terkena verifikasi/checkpoint. Perbarui Session ID lewat tombol Sesi IG.'
+        )
+      }
+      if (stderr.includes('login') || stderr.includes('cookie') || stderr.includes('sign in')) {
+        throw new DownloaderHttpError(
+          422,
+          'Konten ini meminta login. Perbarui Session ID Instagram lewat tombol Sesi IG.'
+        )
+      }
+      if (stderr.includes('rate-limit') || stderr.includes('429')) {
+        throw new DownloaderHttpError(
+          429,
+          'Server sementara dibatasi oleh platform target. Coba lagi sebentar.'
+        )
+      }
       throw new DownloaderHttpError(
         422,
-        'Postingan ini hanya berisi foto (bukan video). Gunakan mode Instagram Foto.'
+        'Gagal mengekstrak media dari tautan tersebut. Pastikan tautan valid dan akun bersifat publik.'
       )
     }
-    if (stderr.includes('no stories') || (stderr.includes('story') && stderr.includes('not found'))) {
-      throw new DownloaderHttpError(
-        404,
-        'Story tidak ditemukan atau sudah kedaluwarsa (lebih dari 24 jam).'
-      )
-    }
-    if (stderr.includes('login') || stderr.includes('cookie') || stderr.includes('sign in')) {
-      throw new DownloaderHttpError(
-        422,
-        'Konten ini dikunci/mewajibkan login oleh Instagram sehingga tidak bisa diambil tanpa akun.'
-      )
-    }
-    if (stderr.includes('rate-limit') || stderr.includes('429')) {
-      throw new DownloaderHttpError(
-        429,
-        'Server sementara dibatasi oleh platform target. Coba lagi sebentar.'
-      )
-    }
-    throw new DownloaderHttpError(
-      422,
-      'Gagal mengekstrak media dari tautan tersebut. Pastikan tautan valid dan akun bersifat publik.'
-    )
-  }
+  })
 }
 
 function pickBestYtDlpVideoFormat(entry) {
@@ -582,44 +660,171 @@ async function extractInstagramAnonymousGraphql(shortcode, fetchImpl) {
   }
 }
 
+function findJsonKeyRecursive(root, targetKeys) {
+  const stack = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (!current || typeof current !== 'object') continue
+    if (Array.isArray(current)) {
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        stack.push(current[i])
+      }
+      continue
+    }
+    for (const key of targetKeys) {
+      if (Object.prototype.hasOwnProperty.call(current, key) && current[key] !== undefined) {
+        return { key, data: current[key] }
+      }
+    }
+    for (const val of Object.values(current)) {
+      if (val && typeof val === 'object') {
+        stack.push(val)
+      }
+    }
+  }
+  return null
+}
+
+function extractIgSsrBlock(html, targetKeys) {
+  if (!html) return null
+  const scriptRegex = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi
+  let match
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const body = match[1]
+    if (!targetKeys.some((key) => body.includes(key))) continue
+    try {
+      const parsed = JSON.parse(body)
+      const hit = findJsonKeyRecursive(parsed, targetKeys)
+      if (hit) return hit
+    } catch {
+      // Ignore unparseable script blocks and continue scanning
+    }
+  }
+  return null
+}
+
+function buildIgPageHeaders(cookieHeader) {
+  return {
+    'User-Agent': BROWSER_UA,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Dest': 'document',
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+  }
+}
+
 export async function extractInstagramMedia(url, mode, deps = {}) {
   const fetchImpl = deps.fetchImpl || fetch
   const binaries = deps.binaries
+  const session = deps.igSession ?? getStoredInstagramSession()
   const parsedUrl = new URL(url)
   const pathname = parsedUrl.pathname
 
-  // Case 1: Instagram Story (`/stories/<username>/<storyId?>/`)
+  // Case 1: Instagram Story (`/stories/<username>/<storyId?>/` or `/stories/highlights/<highlightId>/`)
   const storyMatch = pathname.match(/^\/stories\/([a-zA-Z0-9._]+)(?:\/(\d+))?/i)
   if (storyMatch || mode === 'instagram_story') {
+    if (!session.header && !session.netscape) {
+      throw new DownloaderHttpError(
+        422,
+        'IG Story memerlukan Session ID Instagram. Klik tombol Sesi IG untuk menempel Session ID.'
+      )
+    }
+
     const username = storyMatch?.[1]
-    try {
-      const payload = deps.ytDlpRun
-        ? await deps.ytDlpRun(url)
-        : await runYtDlpJson(url, binaries)
-      const mapped = mapYtDlpPayload(payload, 'instagram', `Story ${username || ''}`.trim())
-      if (mapped.items.length > 0) {
-        return {
-          platform: 'instagram',
-          resolvedMode: 'instagram_story',
-          ...mapped,
+    const targetStoryId = storyMatch?.[2]
+    const isHighlight = username?.toLowerCase() === 'highlights'
+
+    // Strategy 1A: Authenticated SSR Relay JSON directly from instagram.com/stories/<username>/
+    if (username && session.header) {
+      try {
+        const storyPageUrl = isHighlight
+          ? url
+          : `https://www.instagram.com/stories/${encodeURIComponent(username)}/`
+        const pageRes = await fetchImpl(storyPageUrl, {
+          headers: buildIgPageHeaders(session.header),
+          signal: AbortSignal.timeout(15_000),
+        })
+        if (pageRes.url && pageRes.url.includes('/accounts/login')) {
+          throw new DownloaderHttpError(
+            422,
+            'Session ID Instagram sudah kedaluwarsa atau tidak valid. Perbarui lewat tombol Sesi IG.'
+          )
         }
-      }
-    } catch (err) {
-      if (err instanceof DownloaderHttpError && err.status !== 422) {
-        throw err
+        if (pageRes.ok) {
+          const html = await pageRes.text()
+          const ssrBlock = extractIgSsrBlock(html, ['xdt_api__v1__feed__reels_media'])
+          if (ssrBlock) {
+            const reel = Array.isArray(ssrBlock.data?.reels_media)
+              ? ssrBlock.data.reels_media[0]
+              : null
+            const rawItems = Array.isArray(reel?.items) ? reel.items : []
+            if (rawItems.length === 0) {
+              throw new DownloaderHttpError(
+                404,
+                isHighlight
+                  ? 'IG Story Highlight tidak ditemukan atau akun sedang privat.'
+                  : `Akun @${username} tidak memiliki IG Story aktif saat ini.`
+              )
+            }
+            const resolvedAuthor = String(reel?.user?.username || (isHighlight ? 'highlight' : username)).replace(/^@+/, '')
+            const ordered = [...rawItems]
+            if (targetStoryId && !isHighlight) {
+              ordered.sort((a, b) => {
+                const aHit = String(a?.pk || a?.id || '').startsWith(targetStoryId) ? 0 : 1
+                const bHit = String(b?.pk || b?.id || '').startsWith(targetStoryId) ? 0 : 1
+                return aHit - bHit
+              })
+            }
+            const items = ordered
+              .map((node, idx) => {
+                const parsed = parseIgMediaNode(node, resolvedAuthor, 'story', idx)
+                if (!parsed) return null
+                const isExact = !isHighlight && targetStoryId && String(node?.pk || node?.id || '').startsWith(targetStoryId)
+                parsed.label = isExact
+                  ? `Story Pilihan (${parsed.kind === 'video' ? 'Video' : 'Foto'})`
+                  : `Story ${idx + 1} (${parsed.kind === 'video' ? 'Video' : 'Foto'})`
+                return parsed
+              })
+              .filter(Boolean)
+
+            if (items.length > 0) {
+              return {
+                platform: 'instagram',
+                resolvedMode: 'instagram_story',
+                title: isHighlight ? `Highlight @${resolvedAuthor}` : `Story @${resolvedAuthor}`,
+                author: resolvedAuthor,
+                items,
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof DownloaderHttpError) throw err
+        // Fall through to yt-dlp fallback
       }
     }
-    throw new DownloaderHttpError(
-      422,
-      'IG Story dikunci Instagram tanpa login. Gunakan Instagram Reel atau Instagram Foto untuk postingan publik.'
-    )
+
+    const payload = deps.ytDlpRun
+      ? await deps.ytDlpRun(url, session.netscape)
+      : await runYtDlpJson(url, binaries, 30_000, session.netscape)
+    const mapped = mapYtDlpPayload(payload, 'instagram', `Story ${username || ''}`.trim())
+    if (mapped.items.length === 0) {
+      throw new DownloaderHttpError(422, 'IG Story tidak ditemukan atau Session ID Instagram perlu diperbarui.')
+    }
+    return {
+      platform: 'instagram',
+      resolvedMode: 'instagram_story',
+      ...mapped,
+    }
   }
 
   // Case 2: Post / Reel / Carousel (`/p/<shortcode>/`, `/reel/<shortcode>/`, `/reels/<shortcode>/`, `/tv/<shortcode>/`)
   const codeMatch = pathname.match(/^\/(?:p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i)
   const shortcode = codeMatch?.[1]
 
-  // Strategy A: Anonymous GraphQL (csrftoken bootstrap + persisted doc_id, NO cookies needed for public Posts/Reels/Carousels)
+  // Strategy 2A: Anonymous GraphQL (csrftoken bootstrap + persisted doc_id, NO session needed for public Posts/Reels/Carousels)
   if (shortcode) {
     const anonExtracted = await extractInstagramAnonymousGraphql(shortcode, fetchImpl)
     if (anonExtracted) {
@@ -632,7 +837,41 @@ export async function extractInstagramMedia(url, mode, deps = {}) {
     }
   }
 
-  // Strategy B: Embed HTML parser (fallback for public photo posts & carousels)
+  // Strategy 2B: Authenticated SSR Relay JSON directly from post/reel page HTML (for gated/private-followed posts)
+  if (shortcode && session.header) {
+    try {
+      const pageRes = await fetchImpl(url, {
+        headers: buildIgPageHeaders(session.header),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (pageRes.ok && (!pageRes.url || !pageRes.url.includes('/accounts/login'))) {
+        const html = await pageRes.text()
+        const ssrBlock = extractIgSsrBlock(html, [
+          'xdt_api__v1__media__shortcode__web_info',
+          'xdt_shortcode_media',
+        ])
+        if (ssrBlock) {
+          const jsonPayload =
+            ssrBlock.key === 'xdt_shortcode_media'
+              ? { graphql: { shortcode_media: ssrBlock.data } }
+              : ssrBlock.data
+          const extracted = extractItemsFromIgWebJson(jsonPayload)
+          if (extracted) {
+            const hasVideoOnly = extracted.items.every((i) => i.kind === 'video')
+            return {
+              platform: 'instagram',
+              resolvedMode: hasVideoOnly ? 'instagram_reel' : 'instagram_photo',
+              ...extracted,
+            }
+          }
+        }
+      }
+    } catch {
+      // continue to embed / yt-dlp fallback
+    }
+  }
+
+  // Strategy 2C: Embed HTML parser (fallback for public photo posts & carousels)
   if (shortcode && mode !== 'instagram_reel') {
     try {
       const embedRes = await fetchImpl(
@@ -662,11 +901,11 @@ export async function extractInstagramMedia(url, mode, deps = {}) {
     }
   }
 
-  // Strategy C: yt-dlp fallback
+  // Strategy 2D: yt-dlp fallback
   try {
     const payload = deps.ytDlpRun
-      ? await deps.ytDlpRun(url)
-      : await runYtDlpJson(url, binaries)
+      ? await deps.ytDlpRun(url, session.netscape)
+      : await runYtDlpJson(url, binaries, 30_000, session.netscape)
     const mapped = mapYtDlpPayload(payload, 'instagram', 'Instagram')
     if (mapped.items.length > 0) {
       const hasImage = mapped.items.some((i) => i.kind === 'image')

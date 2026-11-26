@@ -4,11 +4,12 @@ import express from 'express'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   detectDownloaderModeFromUrl,
   isAllowedMediaProxyHost,
   normalizeAndValidateUrl,
+  normalizeInstagramSessionInput,
   sanitizeDownloadFilename,
   shortcodeToInstagramMediaId,
 } from '../shared/downloader.js'
@@ -59,8 +60,30 @@ test('isAllowedMediaProxyHost permits known CDN suffixes and blocks private IPs 
   assert.equal(isAllowedMediaProxyHost('evil.example'), false)
 })
 
-test('downloader API enforces auth, scopes proxy tokens per user, and tracks history', async (t) => {
+test('normalizeInstagramSessionInput accepts bare sessionid, quotes, headers, and Netscape', () => {
+  const bare = normalizeInstagramSessionInput('55123456%3Aabcxyz1234%3A27')
+  assert.equal(bare.userId, '55123456')
+  assert.equal(bare.masked, '551234••••3A27')
+  assert.equal(bare.header, 'sessionid=55123456%3Aabcxyz1234%3A27; ds_user_id=55123456')
+  assert.match(bare.netscape, /\.instagram\.com\tTRUE\t\/\tTRUE\t2147483647\tsessionid\t55123456%3Aabcxyz1234%3A27/)
+  assert.match(bare.netscape, /\.instagram\.com\tTRUE\t\/\tTRUE\t2147483647\tds_user_id\t55123456/)
+
+  const quoted = normalizeInstagramSessionInput('"55123456:abcxyz1234:27"')
+  assert.equal(quoted.userId, '55123456')
+  assert.match(quoted.header, /^sessionid=55123456:abcxyz1234:27/)
+
+  const header = normalizeInstagramSessionInput('sessionid=998877%3Atok99; ds_user_id=998877; csrftoken=csrf1')
+  assert.equal(header.userId, '998877')
+  assert.match(header.header, /csrftoken=csrf1/)
+
+  assert.deepEqual(normalizeInstagramSessionInput('   '), { netscape: '', header: '', userId: '', masked: '' })
+  assert.throws(() => normalizeInstagramSessionInput('has space here'))
+  assert.throws(() => normalizeInstagramSessionInput('csrftoken=only_csrf'))
+})
+
+test('downloader API enforces auth, manages admin bare Session ID without leaking raw token, and tracks history', async (t) => {
   process.env.DATA_DIRECTORY = mkdtempSync(join(tmpdir(), 'sibluudz-dl-'))
+  process.env.MAIL_CREDENTIALS_KEY = randomBytes(32).toString('base64')
   process.env.NODE_ENV = 'test'
 
   const { db } = await import('../server/db.js')
@@ -156,11 +179,52 @@ test('downloader API enforces auth, scopes proxy tokens per user, and tracks his
   assert.equal((await fetch(`${origin}/api/downloader/status`)).status, 401)
   assert.equal(sanitizeDownloadFilename('My Clip: #1?', 'MP4'), 'My_Clip_#1.mp4')
 
+  // User B cannot update or delete admin IG session
+  const forbiddenPut = await fetch(`${origin}/api/downloader/session`, {
+    method: 'PUT',
+    headers: { Cookie: 'sibluudz_session=userb-tok', Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: '55123456%3AsecretToken99%3A27' }),
+  })
+  assert.equal(forbiddenPut.status, 403)
+
+  // Admin can save bare Session ID directly (no `sessionid=` prefix needed)
+  const saveRes = await fetch(`${origin}/api/downloader/session`, {
+    method: 'PUT',
+    headers: { Cookie: 'sibluudz_session=admin-tok', Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: '55123456%3AsecretToken99%3A27' }),
+  })
+  assert.equal(saveRes.status, 200)
+  const saveJson = await saveRes.json()
+  assert.equal(saveJson.hasInstagramSession, true)
+  assert.equal(saveJson.instagramUserId, '55123456')
+  assert.equal(saveJson.instagramSessionPreview, '551234••••3A27')
+
+  // Raw session value never leaks via /status
   const statusRes = await fetch(`${origin}/api/downloader/status`, {
     headers: { Cookie: 'sibluudz_session=userb-tok' },
   })
   assert.equal(statusRes.status, 200)
-  assert.deepEqual(await statusRes.json(), { ytDlpAvailable: true, ffmpegAvailable: true })
+  const statusText = await statusRes.text()
+  assert.doesNotMatch(statusText, /secretToken99/)
+  const statusJson = JSON.parse(statusText)
+  assert.equal(statusJson.hasInstagramSession, true)
+  assert.equal(statusJson.canManageSession, false)
+
+  // Admin can edit/replace and then delete the session cleanly
+  const editRes = await fetch(`${origin}/api/downloader/session`, {
+    method: 'PUT',
+    headers: { Cookie: 'sibluudz_session=admin-tok', Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: '77889900%3AupdatedToken%3A11' }),
+  })
+  assert.equal(editRes.status, 200)
+  assert.equal((await editRes.json()).instagramUserId, '77889900')
+
+  const delRes = await fetch(`${origin}/api/downloader/session`, {
+    method: 'DELETE',
+    headers: { Cookie: 'sibluudz_session=admin-tok', Origin: origin },
+  })
+  assert.equal(delRes.status, 200)
+  assert.equal((await delRes.json()).hasInstagramSession, false)
 
   // Extract filters out untrusted host and wraps valid item in proxy URL
   const extractRes = await fetch(`${origin}/api/downloader/extract`, {
@@ -281,4 +345,68 @@ test('shortcodeToInstagramMediaId and cookieless Anonymous GraphQL extract Reel 
   assert.equal(carouselRes.items.length, 2)
   assert.equal(carouselRes.items[0].kind, 'image')
   assert.equal(carouselRes.items[1].kind, 'video')
+})
+
+test('extractInstagramMedia parses authenticated SSR xdt_api__v1__feed__reels_media story items', async () => {
+  const { extractInstagramMedia } = await import('../server/downloader-service.js')
+
+  const ssrPayload = {
+    require: [
+      [
+        'RelayPrefetchedStreamCache',
+        'next',
+        [],
+        [
+          'adp_PolarisStoriesV3ReelPageStandaloneQueryRelayPreloader_test',
+          {
+            __bbox: {
+              result: {
+                data: {
+                  xdt_api__v1__feed__reels_media: {
+                    reels_media: [
+                      {
+                        user: { username: 'creator_ig' },
+                        items: [
+                          {
+                            pk: '111',
+                            image_versions2: {
+                              candidates: [{ url: 'https://scontent.cdninstagram.com/story1.jpg', width: 1080, height: 1920 }],
+                            },
+                          },
+                          {
+                            pk: '222',
+                            video_versions: [{ url: 'https://video.xx.fbcdn.net/story2.mp4', width: 720, height: 1280 }],
+                            image_versions2: {
+                              candidates: [{ url: 'https://scontent.cdninstagram.com/thumb2.jpg', width: 720, height: 1280 }],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      ],
+    ],
+  }
+
+  const res = await extractInstagramMedia('https://www.instagram.com/stories/creator_ig/222/', 'instagram_story', {
+    igSession: { header: 'sessionid=123%3Aabc; ds_user_id=123', netscape: '', userId: '123', masked: '123•••', configured: true },
+    fetchImpl: async () =>
+      new Response(
+        `<html><body><script type="application/json">${JSON.stringify(ssrPayload)}</script></body></html>`,
+        { status: 200 }
+      ),
+  })
+
+  assert.equal(res.platform, 'instagram')
+  assert.equal(res.resolvedMode, 'instagram_story')
+  assert.equal(res.author, 'creator_ig')
+  assert.equal(res.items.length, 2)
+  assert.equal(res.items[0].kind, 'video')
+  assert.match(res.items[0].label, /Story Pilihan/)
+  assert.equal(res.items[1].kind, 'image')
 })

@@ -259,3 +259,107 @@ export function shortcodeToInstagramMediaId(shortcode) {
   }
   return id.toString()
 }
+
+export function normalizeInstagramSessionInput(raw) {
+  let text = String(raw || '').trim()
+  if (!text) {
+    return { netscape: '', header: '', userId: '', masked: '' }
+  }
+  if (text.length > 65536) {
+    throw new Error('Data sesi terlalu panjang (maksimal 64 KB).')
+  }
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)) {
+    throw new Error('Format Session ID mengandung karakter tidak valid.')
+  }
+
+  // Strip surrounding single or double quotes if pasted from devtools/JSON
+  text = text.replace(/^["']+|["']+$/g, '').trim()
+  if (!text) {
+    return { netscape: '', header: '', userId: '', masked: '' }
+  }
+
+  const defaultDomain = '.instagram.com'
+  const rows = []
+  const pairs = []
+
+  const lines = text.split(/\r?\n/)
+  const hasNetscapeRows = lines.some((line) => {
+    const trimmed = line.trim()
+    return trimmed && !trimmed.startsWith('#') && trimmed.split('\t').length >= 7
+  })
+
+  if (hasNetscapeRows || text.startsWith('# Netscape HTTP Cookie File')) {
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const cols = line.split('\t')
+      if (cols.length < 7) continue
+      const [domain, flag, cookiePath, secure, expires, name, ...rest] = cols
+      const value = rest.join('\t').trim()
+      const cleanName = String(name || '').trim()
+      if (!cleanName || /[\r\n\0;]/.test(cleanName) || /[\r\n\0;]/.test(value)) continue
+      const cleanDomain = String(domain || '').trim() || defaultDomain
+      const cleanFlag = String(flag || 'TRUE').trim().toUpperCase() === 'FALSE' ? 'FALSE' : 'TRUE'
+      const cleanPath = String(cookiePath || '/').trim() || '/'
+      const cleanSecure = String(secure || 'TRUE').trim().toUpperCase() === 'FALSE' ? 'FALSE' : 'TRUE'
+      const cleanExpires = /^\d+$/.test(String(expires || '').trim()) ? String(expires).trim() : '2147483647'
+      rows.push(`${cleanDomain}\t${cleanFlag}\t${cleanPath}\t${cleanSecure}\t${cleanExpires}\t${cleanName}\t${value}`)
+      if (cleanDomain.toLowerCase().includes('instagram.com')) {
+        pairs.push([cleanName, value])
+      }
+    }
+  } else if (!text.includes('=')) {
+    // Bare Session ID pasted directly without `sessionid=`
+    if (/[\s;]/.test(text)) {
+      throw new Error('Session ID tidak boleh mengandung spasi atau titik koma. Tempel langsung nilai sessionid saja.')
+    }
+    pairs.push(['sessionid', text])
+    rows.push(`${defaultDomain}\tTRUE\t/\tTRUE\t2147483647\tsessionid\t${text}`)
+  } else {
+    // Raw Cookie header (`sessionid=...; ds_user_id=...`) or line-separated key=value
+    const sanitized = text.replace(/^cookie:\s*/i, '')
+    for (const part of sanitized.split(/[;\r\n]+/).map((p) => p.trim()).filter(Boolean)) {
+      const eqIdx = part.indexOf('=')
+      if (eqIdx <= 0) continue
+      const name = part.slice(0, eqIdx).trim()
+      const value = part.slice(eqIdx + 1).trim().replace(/^["']+|["']+$/g, '')
+      if (!name || !value || /[\s;]/.test(name) || /[\s;]/.test(value)) continue
+      pairs.push([name, value])
+      rows.push(`${defaultDomain}\tTRUE\t/\tTRUE\t2147483647\t${name}\t${value}`)
+    }
+  }
+
+  const sessPair = pairs.find(([k]) => k.toLowerCase() === 'sessionid')
+  if (!sessPair || !sessPair[1]) {
+    throw new Error('Session ID Instagram tidak valid. Tempel langsung nilai sessionid (tanpa perlu mengetik sessionid=).')
+  }
+
+  const sessVal = sessPair[1]
+  let userPair = pairs.find(([k]) => k.toLowerCase() === 'ds_user_id')
+  if (!userPair) {
+    let decoded = sessVal
+    try {
+      decoded = decodeURIComponent(sessVal)
+    } catch {
+      decoded = sessVal
+    }
+    const derivedUid = decoded.split(':')[0]
+    if (/^\d+$/.test(derivedUid)) {
+      userPair = ['ds_user_id', derivedUid]
+      pairs.push(userPair)
+      rows.push(`${defaultDomain}\tTRUE\t/\tTRUE\t2147483647\tds_user_id\t${derivedUid}`)
+    }
+  }
+
+  const header = pairs.map(([k, v]) => `${k}=${v}`).join('; ')
+  const masked = sessVal.length > 10
+    ? `${sessVal.slice(0, 6)}••••${sessVal.slice(-4)}`
+    : '••••'
+
+  return {
+    netscape: `# Netscape HTTP Cookie File\n${rows.join('\n')}\n`,
+    header,
+    userId: userPair?.[1] || '',
+    masked,
+  }
+}

@@ -33,6 +33,10 @@ export interface DownloaderResult {
 export interface DownloaderStatus {
   ytDlpAvailable: boolean
   ffmpegAvailable: boolean
+  hasInstagramSession: boolean
+  instagramSessionPreview?: string
+  instagramUserId?: string
+  canManageSession: boolean
 }
 
 export interface DownloaderHistoryItem {

@@ -36,3 +36,9 @@ export function normalizeAndValidateUrl(
 export function isAllowedMediaProxyHost(hostname: string): boolean
 export function sanitizeDownloadFilename(name: string, ext?: string): string
 export function shortcodeToInstagramMediaId(shortcode: string): string
+export function normalizeInstagramSessionInput(raw: string): {
+  netscape: string
+  header: string
+  userId: string
+  masked: string
+}

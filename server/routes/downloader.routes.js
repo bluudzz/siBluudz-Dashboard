@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { db } from '../db.js'
-import { requireSameOrigin, requireUser } from '../middleware/auth.js'
+import { requireAdmin, requireSameOrigin, requireUser } from '../middleware/auth.js'
 import {
   isAllowedMediaProxyHost,
   normalizeAndValidateUrl,
@@ -14,6 +14,8 @@ import {
   extractInstagramMedia,
   extractTikTokMedia,
   fetchAllowedUpstream,
+  getStoredInstagramSession,
+  saveStoredInstagramSession,
 } from '../downloader-service.js'
 
 const RATE_WINDOW_MS = 60 * 1000
@@ -35,14 +37,46 @@ export function createDownloaderRouter(deps = {}) {
     return true
   }
 
-  router.get('/status', requireUser, async (_req, res) => {
+  router.get('/status', requireUser, async (req, res) => {
     const binaries = deps.detectBinaries
       ? await deps.detectBinaries()
       : await detectDownloaderBinaries()
+    const igSession = getStoredInstagramSession()
 
     res.json({
       ytDlpAvailable: Boolean(binaries.ytDlpAvailable),
       ffmpegAvailable: Boolean(binaries.ffmpegAvailable),
+      hasInstagramSession: Boolean(igSession.configured),
+      instagramSessionPreview: igSession.masked || '',
+      instagramUserId: igSession.userId || '',
+      canManageSession: req.user.role === 'admin',
+    })
+  })
+
+  router.put('/session', requireSameOrigin, requireAdmin, (req, res) => {
+    try {
+      const { sessionId } = req.body || {}
+      if (typeof sessionId !== 'string') {
+        return res.status(400).json({ error: 'Format Session ID harus berupa teks.' })
+      }
+      const saved = saveStoredInstagramSession(sessionId)
+      res.json({
+        hasInstagramSession: Boolean(saved.configured),
+        instagramSessionPreview: saved.masked || '',
+        instagramUserId: saved.userId || '',
+      })
+    } catch (error) {
+      const status = error instanceof DownloaderHttpError ? error.status : 400
+      res.status(status).json({ error: error.message || 'Gagal menyimpan Session ID.' })
+    }
+  })
+
+  router.delete('/session', requireSameOrigin, requireAdmin, (_req, res) => {
+    saveStoredInstagramSession('')
+    res.json({
+      hasInstagramSession: false,
+      instagramSessionPreview: '',
+      instagramUserId: '',
     })
   })
 

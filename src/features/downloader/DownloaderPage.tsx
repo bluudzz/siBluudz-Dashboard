@@ -6,6 +6,7 @@ import {
   ExternalLink,
   History,
   Info,
+  KeyRound,
   Loader2,
   Music,
   Share2,
@@ -47,10 +48,28 @@ export function DownloaderPage() {
   const [historyLoading, setHistoryLoading] = React.useState(false)
   const historyDialogRef = React.useRef<HTMLDialogElement>(null)
 
+  // Admin Instagram Session ID dialog
+  const [sessionOpen, setSessionOpen] = React.useState(false)
+  const [sessionDraft, setSessionDraft] = React.useState('')
+  const [sessionSaving, setSessionSaving] = React.useState(false)
+  const [sessionMessage, setSessionMessage] = React.useState('')
+  const sessionDialogRef = React.useRef<HTMLDialogElement>(null)
+
   // iOS save sheet fallback
   const [iosPending, setIosPending] = React.useState<IosPendingSave | null>(null)
 
   const activeTool = getDownloaderTool(mode)
+
+  const refreshStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/downloader/status')
+      if (!res.ok) return
+      const json = (await res.json()) as DownloaderStatus
+      setStatus(json)
+    } catch {
+      // ignore transient network errors
+    }
+  }, [])
 
   const loadHistory = React.useCallback(async () => {
     setHistoryLoading(true)
@@ -85,6 +104,14 @@ export function DownloaderPage() {
     }
     if (!historyOpen && dialog?.open) dialog.close()
   }, [historyOpen, loadHistory])
+
+  React.useEffect(() => {
+    const dialog = sessionDialogRef.current
+    if (sessionOpen && dialog && !dialog.open) {
+      dialog.showModal()
+    }
+    if (!sessionOpen && dialog?.open) dialog.close()
+  }, [sessionOpen])
 
   React.useEffect(() => {
     return () => {
@@ -250,6 +277,59 @@ export function DownloaderPage() {
     setHistoryItems([])
   }
 
+  const handleSaveSession = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sessionDraft.trim()) return
+    setSessionSaving(true)
+    setSessionMessage('')
+    try {
+      const res = await fetch('/api/downloader/session', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionDraft.trim() }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(json?.error || 'Gagal menyimpan Session ID Instagram.')
+      }
+      setSessionDraft('')
+      await refreshStatus()
+      setSessionMessage('Session ID berhasil disimpan dan siap dipakai untuk IG Story.')
+    } catch (err) {
+      setSessionMessage(err instanceof Error ? err.message : 'Gagal menyimpan Session ID.')
+    } finally {
+      setSessionSaving(false)
+    }
+  }
+
+  const handleDeleteSession = async () => {
+    setSessionSaving(true)
+    setSessionMessage('')
+    try {
+      const res = await fetch('/api/downloader/session', { method: 'DELETE' })
+      if (!res.ok) throw new Error('Gagal menghapus Session ID.')
+      setSessionDraft('')
+      await refreshStatus()
+      setSessionMessage('Session ID Instagram dihapus.')
+    } catch (err) {
+      setSessionMessage(err instanceof Error ? err.message : 'Gagal menghapus Session ID.')
+    } finally {
+      setSessionSaving(false)
+    }
+  }
+
+  const handlePasteSession = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        setSessionDraft(text.trim())
+        setSessionMessage('')
+      }
+    } catch {
+      setSessionMessage('Akses clipboard ditolak browser. Tempel manual ke kolom di bawah.')
+    }
+  }
+
   const downloadableVisualCount = result
     ? result.items.filter((i) => i.kind === 'image' || i.kind === 'video').length
     : 0
@@ -267,6 +347,10 @@ export function DownloaderPage() {
             setNotice('')
           }}
           onOpenHistory={() => setHistoryOpen(true)}
+          onOpenSession={() => {
+            setSessionMessage('')
+            setSessionOpen(true)
+          }}
         />
 
         <main className="dl-stage">
@@ -282,6 +366,23 @@ export function DownloaderPage() {
                 </div>
               </div>
               <div className="dl-header-controls">
+                {mode === 'instagram_story' && status && !status.hasInstagramSession && (
+                  <button
+                    type="button"
+                    className="dl-warning-pill"
+                    onClick={() => {
+                      if (status.canManageSession) {
+                        setSessionMessage('')
+                        setSessionOpen(true)
+                      }
+                    }}
+                    disabled={!status.canManageSession}
+                    title="IG Story memerlukan Session ID Instagram"
+                  >
+                    <KeyRound size={13} aria-hidden="true" />
+                    <span>{status.canManageSession ? 'Atur Sesi IG' : 'IG Story butuh Sesi Admin'}</span>
+                  </button>
+                )}
                 <span className="dl-kind-pill">{activeTool.kindLabel}</span>
               </div>
             </header>
@@ -372,9 +473,9 @@ export function DownloaderPage() {
                       </>
                     ) : (
                       <>
-                        <span>Reel &amp; video HD</span>
-                        <span>Postingan &amp; carousel multi-slide</span>
-                        <span>Tanpa login &amp; tanpa cookie</span>
+                        <span>Reel &amp; video HD (tanpa sesi)</span>
+                        <span>Postingan &amp; carousel (tanpa sesi)</span>
+                        <span>IG Story (via Sesi IG)</span>
                       </>
                     )}
                   </div>
@@ -583,6 +684,121 @@ export function DownloaderPage() {
             )
           })}
         </div>
+      </dialog>
+
+      {/* Admin Instagram Session ID Dialog */}
+      <dialog
+        ref={sessionDialogRef}
+        className="dl-dialog dl-session-dialog"
+        aria-labelledby="dl-session-title"
+        onCancel={() => setSessionOpen(false)}
+        onClose={() => setSessionOpen(false)}
+      >
+        <div className="dl-dialog-head">
+          <div>
+            <h2 id="dl-session-title" className="dl-dialog-title-row">
+              <KeyRound size={18} aria-hidden="true" />
+              <span>Pengaturan Sesi IG (Admin)</span>
+            </h2>
+            <p className="dl-muted">
+              Tempel langsung nilai <strong>Session ID</strong> dari browser (tanpa perlu menulis <code>sessionid=</code>). Khusus dipakai untuk mengambil <strong>IG Story</strong>; Reel &amp; Foto publik tetap berjalan tanpa sesi.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="dl-icon-btn"
+            aria-label="Tutup pengaturan Sesi IG"
+            onClick={() => setSessionOpen(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="dl-session-status-card">
+          <div className="dl-session-status-info">
+            <span className="dl-session-status-label">Status Sesi IG Story</span>
+            {status?.hasInstagramSession ? (
+              <p className="dl-session-preview">
+                <code>{status.instagramSessionPreview || '••••'}</code>
+                {status.instagramUserId && <span> · UID {status.instagramUserId}</span>}
+              </p>
+            ) : (
+              <p className="dl-session-preview">Belum ada Session ID tersimpan</p>
+            )}
+          </div>
+          <span className={`dl-session-badge${status?.hasInstagramSession ? ' is-ready' : ''}`}>
+            {status?.hasInstagramSession ? 'Aktif' : 'Kosong'}
+          </span>
+        </div>
+
+        <form className="dl-session-form" onSubmit={(e) => void handleSaveSession(e)}>
+          <div className="dl-session-field">
+            <div className="dl-session-field-head">
+              <label htmlFor="dl-ig-session-input">
+                {status?.hasInstagramSession ? 'Ganti / Perbarui Session ID' : 'Session ID Instagram'}
+              </label>
+              <button
+                type="button"
+                className="dl-paste-btn"
+                onClick={() => void handlePasteSession()}
+                disabled={sessionSaving}
+              >
+                <ClipboardPaste size={13} aria-hidden="true" />
+                <span>Tempel</span>
+              </button>
+            </div>
+            <textarea
+              id="dl-ig-session-input"
+              rows={3}
+              value={sessionDraft}
+              onChange={(e) => setSessionDraft(e.target.value)}
+              placeholder="Langsung tempel nilai sessionid di sini (contoh: 55123456%3Aabcd...%3A27)"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          </div>
+
+          {sessionMessage && (
+            <p className="dl-session-feedback" role="status">
+              {sessionMessage}
+            </p>
+          )}
+
+          <div className="dl-session-actions">
+            {status?.hasInstagramSession && (
+              <button
+                type="button"
+                className="dl-danger-text-btn"
+                onClick={() => void handleDeleteSession()}
+                disabled={sessionSaving}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span>Hapus Sesi</span>
+              </button>
+            )}
+            <div className="dl-session-actions-right">
+              <button
+                type="button"
+                className="dl-secondary-btn"
+                onClick={() => setSessionOpen(false)}
+              >
+                Tutup
+              </button>
+              <button
+                type="submit"
+                className="dl-primary-btn"
+                disabled={sessionSaving || !sessionDraft.trim()}
+              >
+                {sessionSaving
+                  ? 'Menyimpan...'
+                  : status?.hasInstagramSession
+                    ? 'Perbarui Sesi'
+                    : 'Simpan Sesi'}
+              </button>
+            </div>
+          </div>
+        </form>
       </dialog>
 
       {/* iOS Save Modal Fallback */}
