@@ -1804,7 +1804,7 @@
   .ag-rail {
     position: relative;
     z-index: 20;
-    padding: 8px 12px;
+    padding: 6px 10px;
     gap: 0;
   }
 
@@ -1845,28 +1845,19 @@
     border-radius: 0;
   }
 
-  .ag-sheet-header {
+  .ag-sheet-title {
+    display: none;
+  }
+
+  .ag-sheet-header[data-has-picker='false'] {
+    display: none;
+  }
+
+  .ag-sheet-header[data-has-picker='true'] {
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
-    padding: 8px 12px;
-  }
-
-  .ag-tool-badge {
-    width: 28px;
-    height: 28px;
-  }
-
-  .ag-sheet-header h1 {
-    font-size: 15px;
-  }
-
-  .ag-sheet-header p {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11.5px;
-    line-height: 1.3;
+    gap: 6px;
+    padding: 6px 10px;
   }
 
   .ag-kind-pill {

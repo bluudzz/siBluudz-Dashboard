@@ -988,7 +988,7 @@ export function AiGeneratorPage({ initialMode = 'prompt_checker' }: { initialMod
 
         <div className="ag-stage">
         <div className="ag-sheet">
-          <header className="ag-sheet-header">
+          <header className="ag-sheet-header" data-has-picker={showModelPicker}>
             <div className="ag-sheet-title">
               <span className="ag-tool-badge" aria-hidden="true">
                 <AiToolIcon mode={mode} size={16} />

@@ -151,7 +151,9 @@ export function ToolNavigation({
                 <span className="ag-mobile-tool-icon" aria-hidden="true">
                   <AiToolIcon mode={mode} size={15} />
                 </span>
-                <span className="ag-mobile-tool-label">{activeTool.title}</span>
+                <span className="ag-mobile-tool-label">
+                  {activeTool.headerTitle || activeTool.title}
+                </span>
               </span>
               <ChevronDown
                 size={15}
