@@ -208,7 +208,6 @@ export function RelightStudio({
   const [comparePosition, setComparePosition] = React.useState(50)
   const [strength, setStrength] = React.useState(100)
   const [exporting, setExporting] = React.useState(false)
-  const [lastExport, setLastExport] = React.useState<{ bytes: number; ext: string } | null>(null)
   const [iosSaveSheet, setIosSaveSheet] = React.useState<{
     url: string
     filename: string
@@ -379,7 +378,6 @@ export function RelightStudio({
         strength >= 100
           ? `sibluudz-relight.${syncExported.ext}`
           : `sibluudz-relight-${strength}pct.${syncExported.ext}`
-      setLastExport({ bytes: syncExported.blob.size, ext: syncExported.ext })
       setError('')
 
       if (ios) {
@@ -421,7 +419,6 @@ export function RelightStudio({
         strength >= 100
           ? `sibluudz-relight.${exported.ext}`
           : `sibluudz-relight-${strength}pct.${exported.ext}`
-      setLastExport({ bytes: exported.blob.size, ext: exported.ext })
 
       if (ios) {
         openIosSaveSheet(exported.blob, filename, exported.ext)
@@ -531,7 +528,6 @@ export function RelightStudio({
       setNaturalSize({ width: 0, height: 0 })
       setComparePosition(50)
       setStrength(100)
-      setLastExport(null)
       setIosSaveSheet(null)
       resetView()
     } catch (reason) {
@@ -591,7 +587,6 @@ export function RelightStudio({
       })
       setComparePosition(50)
       setStrength(100)
-      setLastExport(null)
       setIosSaveSheet(null)
       resetView()
       onResult?.()
@@ -894,7 +889,7 @@ export function RelightStudio({
           </label>
         </div>
 
-        <div className="relight-controls-footer">{submitAction}</div>
+        {!result && <div className="relight-controls-footer">{submitAction}</div>}
       </section>
 
       <section className="relight-result" aria-labelledby="relight-result-heading" aria-busy={busy}>
@@ -955,8 +950,7 @@ export function RelightStudio({
                   setSource(null)
                   setResult(null)
                   setNaturalSize({ width: 0, height: 0 })
-                  setLastExport(null)
-      setIosSaveSheet(null)
+                  setIosSaveSheet(null)
                   setError('')
                   resetView()
                 }}
@@ -1180,7 +1174,7 @@ export function RelightStudio({
           )}
         </div>
 
-        <div className="relight-mobile-submit">{submitAction}</div>
+        {!result && <div className="relight-mobile-submit">{submitAction}</div>}
 
         {result && (
           <div className="relight-strength-bar" role="group" aria-label="Pengaturan kekuatan pencahayaan">
@@ -1200,26 +1194,9 @@ export function RelightStudio({
                 aria-valuetext={`${strength}% kekuatan efek lighting`}
                 onChange={(event) => {
                   setStrength(Number(event.target.value))
-                  setLastExport(null)
-      setIosSaveSheet(null)
+                  setIosSaveSheet(null)
                 }}
               />
-              <div className="relight-strength-presets" role="group" aria-label="Preset kekuatan lighting">
-                {[25, 50, 75, 100].map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    aria-pressed={strength === preset}
-                    onClick={() => {
-                      setStrength(preset)
-                      setLastExport(null)
-      setIosSaveSheet(null)
-                    }}
-                  >
-                    {preset}%
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         )}
@@ -1227,33 +1204,6 @@ export function RelightStudio({
         <div className="relight-canvas-footer">
           {result ? (
             <>
-              <div className="relight-result-info">
-                <p className="relight-caption">
-                  {isTransformed
-                    ? 'Tarik foto untuk geser · tarik garis tengah untuk bandingkan · klik 2x untuk reset'
-                    : 'Tarik foto untuk geser · scroll untuk zoom · tarik garis tengah untuk bandingkan'}
-                </p>
-                {result.output && (
-                  <p className="relight-output-meta">
-                    {result.output.width} x {result.output.height} px ·{' '}
-                    {result.output.format.toUpperCase()} ·{' '}
-                    {result.output.bytes >= 1024 * 1024
-                      ? `${(result.output.bytes / (1024 * 1024)).toFixed(2)} MB`
-                      : `${Math.ceil(result.output.bytes / 1024)} KB`}
-                    {strength < 100 &&
-                    naturalSize.width * naturalSize.height > result.output.width * result.output.height
-                      ? ` · Ekspor ${naturalSize.width} x ${naturalSize.height} px`
-                      : ''}
-                    {lastExport
-                      ? ` · Diunduh ${lastExport.ext.toUpperCase()} ${
-                          lastExport.bytes >= 1024 * 1024
-                            ? `${(lastExport.bytes / (1024 * 1024)).toFixed(2)} MB`
-                            : `${Math.ceil(lastExport.bytes / 1024)} KB`
-                        }`
-                      : ''}
-                  </p>
-                )}
-              </div>
               {result.warning && (
                 <p className="ag-alert is-warning relight-footer-alert" role="status">
                   <AlertTriangle size={14} aria-hidden="true" />
@@ -1268,15 +1218,7 @@ export function RelightStudio({
                   onClick={() => void handleDownloadResult()}
                 >
                   <Download size={15} aria-hidden="true" />
-                  <span>
-                    {exporting
-                      ? 'Menyiapkan...'
-                      : result.image.startsWith('http') && strength === 100
-                        ? 'Buka / unduh hasil'
-                        : strength < 100
-                          ? `Unduh (${strength}%)`
-                          : 'Unduh hasil'}
-                  </span>
+                  <span>{exporting ? 'Menyiapkan...' : 'Unduh'}</span>
                 </button>
               </div>
             </>
