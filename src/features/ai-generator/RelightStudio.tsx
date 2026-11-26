@@ -1,6 +1,7 @@
 import * as React from 'react'
 import {
   AlertTriangle,
+  Aperture,
   ArrowLeftRight,
   Camera,
   Check,
@@ -16,6 +17,7 @@ import {
   Square,
   Sun,
   X,
+  Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
@@ -86,6 +88,8 @@ const presetIcons = {
   film_flash: Film,
   softbox: Square,
   backlit_rim: Eclipse,
+  slow_shutter: Zap,
+  smart_hdr: Aperture,
 }
 
 type ResolutionChoice = 'auto' | Exclude<RelightResolution, '1K'>
@@ -439,7 +443,6 @@ export function RelightStudio({
     }
   }, [result, strength, openIosSaveSheet, sharePreparedFile])
 
-  const activePreset = relightPresets.find((preset) => preset.id === settings.preset)!
   const curatedCatalog = React.useMemo(() => curateImageModels(catalog.models), [catalog.models])
   const selectedModel = curatedCatalog.all.includes(model) ? model : ''
   const visibleModels = React.useMemo(
@@ -821,7 +824,6 @@ export function RelightStudio({
                 )
               })}
             </div>
-            <p className="relight-preset-desc">{activePreset.description}</p>
           </fieldset>
 
           <div className="relight-settings-grid">

@@ -8,6 +8,8 @@ export const relightPresets = [
   { id: 'film_flash', label: 'Film Flash', description: 'Karakter flash film, dengan tekstur foto asli.', prompt: 'Film-camera flash lighting with restrained warm highlights, gentle highlight rolloff and natural contrast. Preserve the original grain; do not add film grain, blur, vintage filters or synthetic texture.' },
   { id: 'softbox', label: 'Softbox', description: 'Cahaya luas dan lembut untuk potret atau produk.', prompt: 'Large softbox lighting: broad diffused directional light, smooth transitions and controlled specular highlights. Retain depth and original surface texture without smoothing skin or flattening the scene.' },
   { id: 'backlit_rim', label: 'Backlit Rim', description: 'Cahaya tepi dari belakang untuk pemisahan subjek.', prompt: 'Backlit rim lighting: light from behind the subject, restrained edge highlights and sufficient natural fill to retain face and material detail. No glowing outlines, halos or invented background light fixtures.' },
+  { id: 'slow_shutter', label: 'Slow Shutter', description: 'Flash langsung dengan efek slow shutter dan jejak gerak dinamis.', prompt: "Turn the uploaded photo into a hyper-realistic experimental fashion, photograph captured with a slow shutter and direct camera flash. Create strong, dynamic motion trails but still preserve the body's natural shape and details without altering the face." },
+  { id: 'smart_hdr', label: 'Smart HDR', description: 'Dynamic range luas, warna natural kaya, detail tajam ala iPhone 17 Pro Smart HDR.', prompt: 'Apply a rich, natural color grade with deep greens, warm golden-hour highlights, a clean blue sky, accurate skin tones, and soft neutral shadows without an orange or yellow cast. Enhance dynamic range, local contrast, texture, and detail to an iPhone 17 Pro Smart HDR look while keeping it fully photorealistic. Give that image as it is, not AI-generated artwork.' },
 ]
 
 export const relightOptions = {
@@ -69,6 +71,8 @@ const lightingTargets = {
   film_flash: 'Karakter flash kamera film terlihat melalui sorotan subjek, highlight dengan rolloff lembut dan kontras spontan. Grain asli tetap utuh, tanpa filter vintage atau grain tambahan.',
   softbox: 'Cahaya luas membungkus subjek dari arah terpilih, menghasilkan highlight lembut, bayangan berdimensi dan transisi yang jelas berbeda dari sumber. Background tidak wajib digelapkan.',
   backlit_rim: 'Cahaya belakang menghasilkan rim highlight yang terlihat pada rambut dan tepi subjek sesuai bentuk aslinya, dengan fill cukup untuk mempertahankan detail wajah. Tanpa halo buatan.',
+  slow_shutter: 'Flash langsung kamera dikombinasikan dengan efek slow shutter dan jejak gerak (motion trails) dinamis bergaya fashion eksperimental. Bentuk tubuh alami, detail subjek, dan wajah tetap dipertahankan secara fotorealistik tanpa mengubah identitas.',
+  smart_hdr: 'Color grade natural kaya dengan hijau mendalam, highlight hangat golden-hour yang lembut, langit biru bersih, warna kulit akurat, bayangan netral tanpa cast oranye/kuning, serta dynamic range, kontras lokal, tekstur, dan detail fotorealistik khas iPhone 17 Pro Smart HDR.',
 }
 
 export function buildRelightPrompt(input = {}, instructions = '', resolution) {

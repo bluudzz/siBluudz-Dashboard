@@ -12,7 +12,7 @@ test('relight settings reject unknown values and keep a usable default', () => {
   for (const removed of ['golden_hour', 'low_key', 'hard_sun', 'neon_gel']) {
     assert.throws(() => normalizeRelightSettings({ preset: removed }), /preset/i)
   }
-  assert.deepEqual(relightPresets.map((p) => p.id), ['strobist', 'direct_flash', 'film_flash', 'softbox', 'backlit_rim'])
+  assert.deepEqual(relightPresets.map((p) => p.id), ['strobist', 'direct_flash', 'film_flash', 'softbox', 'backlit_rim', 'slow_shutter', 'smart_hdr'])
   assert.throws(() => normalizeRelightSettings({ intensity: 'extreme' }), /intensity/i)
   assert.throws(() => normalizeRelightSettings(null), /pengaturan/i)
   assert.equal(normalizeRelightSettings({}).preset, 'strobist')

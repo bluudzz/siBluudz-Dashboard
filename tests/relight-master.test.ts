@@ -15,7 +15,7 @@ test('the embedded master is the complete supplied V3 document', () => {
   assert.match(buildRelightPrompt(), /Jangan menjadikan aturan preservasi sebagai alasan untuk tidak melakukan perubahan pencahayaan sama sekali/)
 })
 
-test('all five styles keep the full preservation rules and replace conflicting strobist defaults', () => {
+test('all seven styles keep the full preservation rules and replace conflicting strobist defaults', () => {
   for (const preset of relightPresets) {
     const prompt = buildRelightPrompt({ preset: preset.id })
     assert.ok(prompt.includes(preset.prompt), preset.id)
@@ -24,6 +24,8 @@ test('all five styles keep the full preservation rules and replace conflicting s
     assert.match(prompt, /HASIL WAJIB MENUNJUKKAN PERUBAHAN PENCAHAYAAN YANG JELAS/)
     if (preset.id !== 'strobist') assert.doesNotMatch(prompt, /PROFESSIONAL OFF-CAMERA STROBIST FLASH|Professional Off-Camera Strobist Flash|BACKGROUND HARUS RELATIF LEBIH GELAP/)
   }
+  assert.match(buildRelightPrompt({ preset: 'slow_shutter' }), /slow shutter and direct camera flash.*dynamic motion trails/)
+  assert.match(buildRelightPrompt({ preset: 'smart_hdr' }), /iPhone 17 Pro Smart HDR.*not AI-generated artwork/)
 })
 
 test('every lighting control reaches the active recipe without contradictory option defaults', () => {
