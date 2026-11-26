@@ -2,12 +2,22 @@ import { useState } from 'react'
 import { Check, Copy, ExternalLink, Image as ImageIcon } from 'lucide-react'
 import type { DataItem } from '../../../shared/workflow-engine'
 import { dataLabel } from './SimpleDataEditor'
+import { workflowImagePreview } from './workflow-model'
 
 const imageKeys=new Set(['imageUrl','imagePreviewUrl','imageMime','imageModel'])
-const contractFields:Record<string,string[]>={searchContent:['query','queries','followUpQueries','coverage','sources','pages','sourceCount','readCount','note'],aiAgent:['output','summary','facts','recommendations','agentModel','toolSteps'],imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','prompt'],instagram:['instagramStatus','mediaId','containerId','permalink','instagramPosts','instagramPost'],googleDrive:['driveFile','driveFiles','driveSelection','imageUrl','imagePreviewUrl','imageMime'],approval:['approved','reviewStatus','output','content']}
-const previewUrl=(json:Record<string,unknown>)=>{
-  const candidate=json.imagePreviewUrl||json.imageUrl
-  return typeof candidate==='string'&&(candidate.startsWith('/api/workflow-media/')||candidate.startsWith('https://'))?candidate:''
+const contractFields:Record<string,string[]>={
+  searchContent:['query','queries','followUpQueries','coverage','sources','pages','sourceCount','readCount','note'],
+  aiAgent:['output','summary','facts','recommendations','agentModel','toolSteps'],
+  imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','prompt'],
+  imageEdit:['imageUrl','imagePreviewUrl','imageMime','editMode','editedWidth','editedHeight','imageModel','imagePrompt'],
+  aiVision:['visionPassed','visionScore','visionSummary','visionIssues','visionModel','output'],
+  apiRequest:['statusCode','method','url','responseBody','output'],
+  notify:['notificationStatus','notificationChannel','notificationMessage'],
+  jsonParse:['parsedJson','items','count','output'],
+  merge:['items','imageUrls','outputs','count','output'],
+  instagram:['instagramStatus','instagramMediaId','instagramMediaType','instagramImageCount','instagramPosts','instagramPost','instagramComments','instagramInsights'],
+  googleDrive:['driveFile','driveFiles','driveSelection','imageUrl','imagePreviewUrl','imageMime','videoUrl','videoPreviewUrl','videoMime'],
+  approval:['approved','reviewStatus','output','content'],
 }
 
 function ResultValue({name,value}:{name:string;value:unknown}) {
@@ -32,7 +42,7 @@ export function WorkflowDataViewer({items,nodeType}:{items:DataItem[];nodeType?:
     {copyError&&<p role="status" className="wf-muted">{copyError}</p>}
     {!items.length?<div className="wf-result-empty">Belum ada hasil. Jalankan langkah ini untuk melihat datanya.</div>:technical?<pre tabIndex={0}>{JSON.stringify(items,null,2)}</pre>:<div className="wf-readable-results">{items.slice(0,20).map((item,index)=>{
       const json=item.json||{}
-      const image=previewUrl(json)
+      const image=workflowImagePreview(json)
       const preferred=contractFields[nodeType||'']
       const entries=Object.entries(json).filter(([key])=>!imageKeys.has(key)&&!key.startsWith('_')).sort(([a],[b])=>{if(!preferred)return 0;const ai=preferred.indexOf(a),bi=preferred.indexOf(b);return (ai<0?999:ai)-(bi<0?999:bi)})
       const shown=entries.slice(0,5)

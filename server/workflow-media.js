@@ -7,6 +7,7 @@ import { db, dataDirectory } from './db.js'
 
 const mediaDirectory = path.join(dataDirectory, 'workflow-media')
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
+const MAX_VIDEO_BYTES = 30 * 1024 * 1024
 
 export function mediaPublicBase() {
   const candidates = [process.env.PUBLIC_BASE_URL, process.env.APP_ORIGIN]
@@ -43,6 +44,41 @@ export async function storeWorkflowImage(userId, encoded, mimeHint = '') {
   return {previewUrl,imageUrl:publicBase ? publicBase + previewUrl : '',mimeType,token}
 }
 
+export async function storeWorkflowVideo(userId, buffer, mimeType) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_VIDEO_BYTES) throw new Error('Ukuran video maksimal 30 MB.')
+  if (!['video/mp4', 'video/quicktime'].includes(mimeType)) throw new Error('Format video harus MP4 atau MOV.')
+  if (buffer.length < 12 || buffer.subarray(4, 8).toString('ascii') !== 'ftyp') throw new Error('Berkas video bukan MP4/MOV yang valid.')
+  const publicBase = mediaPublicBase()
+  const token = randomBytes(24).toString('hex')
+  const ext = mimeType === 'video/quicktime' ? 'mov' : 'mp4'
+  const filename = `${token}.${ext}`
+  await mkdir(mediaDirectory, { recursive: true })
+  await writeFile(path.join(mediaDirectory, filename), buffer, { flag: 'wx' })
+  db.prepare('insert into workflow_media (token,user_id,filename,mime_type) values (?,?,?,?)').run(token, userId, filename, mimeType)
+  const previewUrl = `/api/workflow-media/${token}`
+  return { previewUrl, videoUrl: publicBase ? publicBase + previewUrl : '', mimeType, token }
+}
+
+export async function readWorkflowMedia(userId, urlOrPreview) {
+  const raw = String(urlOrPreview || '').trim()
+  let token = ''
+  const relative = raw.match(/^\/api\/workflow-media\/([a-f0-9]{48})(?:[?#].*)?$/i)
+  if (relative) token = relative[1].toLowerCase()
+  else {
+    try {
+      const parsed = new URL(raw)
+      const match = parsed.pathname.match(/^\/api\/workflow-media\/([a-f0-9]{48})$/i)
+      const base = mediaPublicBase()
+      if (match && (!base || parsed.origin === base)) token = match[1].toLowerCase()
+    } catch { return null }
+  }
+  if (!token) return null
+  const row = db.prepare('select filename,mime_type from workflow_media where token=? and user_id=?').get(token, userId)
+  if (!row) throw new Error('Media workflow tidak ditemukan atau bukan milik akun Anda.')
+  const buffer = await readFile(path.join(mediaDirectory, row.filename))
+  return { buffer, mimeType: row.mime_type, token }
+}
+
 export const workflowMediaRouter = Router()
 workflowMediaRouter.get('/:token',async(req,res)=>{
   if (!/^[a-f0-9]{48}$/.test(req.params.token)) return res.status(404).end()
@@ -50,7 +86,26 @@ workflowMediaRouter.get('/:token',async(req,res)=>{
   if (!row) return res.status(404).end()
   try {
     const content = await readFile(path.join(mediaDirectory,row.filename))
-    res.set({'Content-Type':row.mime_type,'Content-Length':String(content.length),'X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=3600'})
+    const total = content.length
+    const range = req.headers.range
+    if (range) {
+      const match = String(range).match(/^bytes=(\d+)-(\d*)$/)
+      if (!match) return res.status(416).set({ 'Content-Range': `bytes */${total}` }).end()
+      const start = Number(match[1])
+      const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1
+      if (start >= total || start > end) return res.status(416).set({ 'Content-Range': `bytes */${total}` }).end()
+      const slice = content.subarray(start, end + 1)
+      res.status(206).set({
+        'Content-Type': row.mime_type,
+        'Content-Length': String(slice.length),
+        'Content-Range': `bytes ${start}-${end}/${total}`,
+        'Accept-Ranges': 'bytes',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=3600',
+      })
+      return res.end(slice)
+    }
+    res.set({'Content-Type':row.mime_type,'Content-Length':String(total),'Accept-Ranges':'bytes','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=3600'})
     res.end(content)
   } catch { res.status(404).end() }
 })

@@ -8,9 +8,76 @@ export interface DesignBrief {
   detail: string
 }
 
+export const PROMPT_STUDIO_SCOPES = [
+  'Tampilan dan struktur navigasi',
+  'Tampilan saja',
+  'Struktur navigasi saja',
+  'Halaman atau komponen tertentu',
+] as const
+
+export const PROMPT_STUDIO_DETAILS = ['Ringkas', 'Seimbang', 'Sangat detail'] as const
+
+export interface PromptStudioTemplate {
+  id: string
+  label: string
+  brief: Partial<DesignBrief>
+}
+
+export const PROMPT_STUDIO_TEMPLATES: PromptStudioTemplate[] = [
+  {
+    id: 'redesign',
+    label: 'Redesign Tampilan',
+    brief: {
+      scope: 'Tampilan dan struktur navigasi',
+      detail: 'Seimbang',
+      request:
+        'Rapikan tampilan halaman utama agar hirarki informasi lebih jelas, sederhanakan navigasi yang terlalu padat, dan pastikan nyaman dipakai di desktop maupun mobile.',
+      constraints: 'Pertahankan seluruh fungsi, autentikasi, dan endpoint API yang sudah berjalan.',
+    },
+  },
+  {
+    id: 'feature',
+    label: 'Tambah Fitur',
+    brief: {
+      scope: 'Halaman atau komponen tertentu',
+      detail: 'Sangat detail',
+      request:
+        'Tambahkan fitur filter, pencarian cepat, dan ringkasan status real-time pada workspace tanpa mengganggu alur kerja yang sudah ada.',
+      constraints: 'Gunakan komponen UI dan token desain yang sudah tersedia di proyek.',
+    },
+  },
+  {
+    id: 'responsive',
+    label: 'Rapikan Mobile',
+    brief: {
+      scope: 'Tampilan saja',
+      detail: 'Seimbang',
+      request:
+        'Perbaiki tata letak tablet dan ponsel agar tidak ada overflow horizontal, tombol memenuhi ukuran sentuh 44px, dan panel konten mudah dipindai dengan satu tangan.',
+      constraints: 'Jangan mengubah tampilan desktop yang sudah rapi atau menghapus kontrol penting.',
+    },
+  },
+  {
+    id: 'refactor',
+    label: 'Audit & Rapikan UI',
+    brief: {
+      scope: 'Halaman atau komponen tertentu',
+      detail: 'Ringkas',
+      request:
+        'Audit komponen yang terasa berantakan, seragamkan jarak dan kontras warna untuk light/dark mode, serta pastikan kondisi kosong, loading, dan error tertangani jelas.',
+      constraints: 'Hindari dependensi baru dan pertahankan perilaku state yang ada.',
+    },
+  },
+]
+
 export const initialBrief: DesignBrief = {
-  project: 'siBluudz Dashboard', request: '', context: '', references: '', constraints: '',
-  scope: 'Tampilan dan struktur navigasi', detail: 'Seimbang',
+  project: 'siBluudz Dashboard',
+  request: '',
+  context: '',
+  references: '',
+  constraints: '',
+  scope: 'Tampilan dan struktur navigasi',
+  detail: 'Seimbang',
 }
 
 function briefText(brief: DesignBrief): string {
@@ -75,4 +142,53 @@ RANCANGAN DARI AI PERANCANG
 ${plan.trim()}
 
 Mulai dengan memeriksa file relevan dan melaksanakan batch pertama yang dependensinya sudah terpenuhi.`
+}
+
+export function estimatePromptMetrics(text = ''): {
+  chars: number
+  words: number
+  approxTokens: number
+} {
+  const source = typeof text === 'string' ? text : ''
+  const trimmed = source.trim()
+  const words = trimmed ? trimmed.split(/\s+/).length : 0
+  const approxTokens = words ? Math.max(1, Math.ceil(words * 1.35)) : 0
+  return { chars: source.length, words, approxTokens }
+}
+
+const KNOWN_SECTION_HEADERS = new Set([
+  'BRIEF PENGGUNA',
+  'CARA BEKERJA',
+  'HASIL YANG HARUS ANDA BERIKAN',
+  'ATURAN UNTUK PROMPT IMPLEMENTASI FINAL',
+  'BRIEF ASLI',
+  'BATAS PELAKSANAAN',
+  'RANCANGAN DARI AI PERANCANG',
+])
+
+export function parseStudioPromptSections(prompt = ''): { heading: string; body: string }[] {
+  const trimmed = typeof prompt === 'string' ? prompt.trim() : ''
+  if (!trimmed) return []
+
+  const lines = trimmed.split('\n')
+  const sections: { heading: string; body: string }[] = []
+  let currentHeading = 'Peran & tujuan'
+  let buffer: string[] = []
+
+  for (const line of lines) {
+    const clean = line.trim()
+    if (KNOWN_SECTION_HEADERS.has(clean)) {
+      const body = buffer.join('\n').trim()
+      if (body) sections.push({ heading: currentHeading, body })
+      currentHeading = clean
+      buffer = []
+    } else {
+      buffer.push(line)
+    }
+  }
+
+  const tail = buffer.join('\n').trim()
+  if (tail) sections.push({ heading: currentHeading, body: tail })
+
+  return sections
 }

@@ -21,6 +21,7 @@ import { PROVIDER_CONFIGS } from '../utils'
 
 interface AddAccountModalProps {
   open: boolean
+  error: string
   profileEmail: string | undefined
   provider: EmailProvider
   showAdvanced: boolean
@@ -71,6 +72,7 @@ interface AddAccountModalProps {
 
 export function AddAccountModal({
   open,
+  error,
   profileEmail,
   provider,
   showAdvanced,
@@ -150,6 +152,8 @@ export function AddAccountModal({
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {error && <div className="em-notice is-error" role="alert">{error}</div>}
 
             {/* Email Input */}
             <div className="space-y-1.5">

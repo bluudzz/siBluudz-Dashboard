@@ -771,16 +771,20 @@ function setupDatePickers() {
     // Format typing in text input (e.g. DD/MM/YYYY)
     textInput.addEventListener('input', (e) => {
       let val = textInput.value.replace(/[^\d/]/g, '');
-      if (e.inputType !== 'deleteContentBackward') {
-        if (/^\d+$/.test(val)) {
-          if (val.length > 4) {
-            val = `${val.slice(0, 2)}/${val.slice(2, 4)}/${val.slice(4, 8)}`;
-          } else if (val.length > 2) {
-            val = `${val.slice(0, 2)}/${val.slice(2, 4)}`;
+      if (e.inputType !== 'deleteContentBackward' && e.inputType !== 'deleteContentForward') {
+        if (!/^\d\/\d/.test(val) && !/^\d{1,2}\/\d\//.test(val)) {
+          const digits = val.replace(/\D/g, '').slice(0, 8);
+          if (digits.length > 4) {
+            val = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+          } else if (digits.length > 2) {
+            val = `${digits.slice(0, 2)}/${digits.slice(2)}`;
           }
         }
       }
-      textInput.value = val.slice(0, 10);
+      const nextVal = val.slice(0, 10);
+      if (textInput.value !== nextVal) {
+        textInput.value = nextVal;
+      }
 
       // If full date entered, sync native and state
       if (/^\d{2}\/\d{2}\/\d{4}$/.test(textInput.value)) {
@@ -1053,7 +1057,7 @@ function undoItemAction() {
   _isRestoringHistory = false;
 
   _lastKnownBaseline = JSON.parse(JSON.stringify(prevEntry.state));
-  saveDraftToStorage();
+  saveDraftToStorage(true);
   updateUndoRedoButtons();
 
   const isEn = invoiceState.docLang === 'en';
@@ -1082,7 +1086,7 @@ function redoItemAction() {
   _isRestoringHistory = false;
 
   _lastKnownBaseline = JSON.parse(JSON.stringify(nextEntry.state));
-  saveDraftToStorage();
+  saveDraftToStorage(true);
   updateUndoRedoButtons();
 
   const isEn = invoiceState.docLang === 'en';
@@ -1104,7 +1108,8 @@ function addItem() {
     tax: 0
   });
   renderItems();
-  saveDraftToStorage();
+  _updateBaseline();
+  saveDraftToStorage(true);
 
   // Auto-focus new item input
   const lastRow = DOM.itemsList.lastElementChild;
@@ -1131,7 +1136,8 @@ function deleteItem(itemId) {
 
   invoiceState.items = invoiceState.items.filter(item => item.id !== itemId);
   renderItems();
-  saveDraftToStorage();
+  _updateBaseline();
+  saveDraftToStorage(true);
 }
 
 // Calculate Totals
@@ -1267,7 +1273,7 @@ function setupLogoUploader() {
       const reader = new FileReader();
       reader.onload = (event) => {
         setLogo(event.target.result);
-        saveDraftToStorage();
+        saveDraftToStorage(true);
         showToast('Logo berhasil diunggah!');
       };
       reader.readAsDataURL(file);
@@ -1297,7 +1303,7 @@ function setupLogoUploader() {
       const reader = new FileReader();
       reader.onload = (event) => {
         setLogo(event.target.result);
-        saveDraftToStorage();
+        saveDraftToStorage(true);
         showToast('Logo berhasil diunggah!');
       };
       reader.readAsDataURL(files[0]);
@@ -1315,6 +1321,7 @@ function setLogo(src, silent = false) {
     DOM.logoPlaceholder.classList.add('hidden');
     DOM.logoActions.classList.remove('hidden');
     if (DOM.logoPreviewWrapper) DOM.logoPreviewWrapper.classList.add('has-logo');
+    if (!silent) _updateBaseline();
   } else {
     removeLogo(silent);
   }
@@ -1330,7 +1337,10 @@ function removeLogo(silent = false) {
   DOM.logoActions.classList.add('hidden');
   if (DOM.logoPreviewWrapper) DOM.logoPreviewWrapper.classList.remove('has-logo');
   DOM.logoInput.value = '';
-  if (!silent) saveDraftToStorage();
+  if (!silent) {
+    _updateBaseline();
+    saveDraftToStorage(true);
+  }
 }
 
 // Synchronize DOM inputs with invoiceState
@@ -1465,7 +1475,7 @@ function readInputsToState() {
     invoiceState.docType = DOM.docTypeSelect.value;
   }
   if (DOM.docSubjectInput) {
-    invoiceState.subject = DOM.docSubjectInput.value.trim();
+    invoiceState.subject = DOM.docSubjectInput.value;
   }
   if (DOM.greetingContent) {
     let cleanGreeting = DOM.greetingContent.innerHTML ? sanitizeGreetingHtml(DOM.greetingContent.innerHTML) : '';
@@ -1479,13 +1489,13 @@ function readInputsToState() {
     invoiceState.taxMode = DOM.invoiceTypeSelect.value;
   }
   if (DOM.invoiceTitleInput) {
-    invoiceState.title = DOM.invoiceTitleInput.value.trim() || (invoiceState.docType === 'quotation' ? 'SURAT PENAWARAN HARGA' : 'INVOICE');
+    invoiceState.title = DOM.invoiceTitleInput.value || (invoiceState.docType === 'quotation' ? 'SURAT PENAWARAN HARGA' : 'INVOICE');
   }
   if (DOM.topInvoiceTitleInput) {
-    invoiceState.invoiceName = DOM.topInvoiceTitleInput.value.trim();
+    invoiceState.invoiceName = DOM.topInvoiceTitleInput.value;
   }
   if (DOM.invoiceSubtitleInput) {
-    invoiceState.subtitle = DOM.invoiceSubtitleInput.value.trim();
+    invoiceState.subtitle = DOM.invoiceSubtitleInput.value;
   }
   if (DOM.invoiceNumber) {
     invoiceState.invoiceNumber = DOM.invoiceNumber.value;
@@ -1564,8 +1574,45 @@ function updateCardInListWithoutDisruptingFocus() {
 }
 
 // Save Current State to LocalStorage (debounced auto-save)
-let saveTimeout;
-function saveDraftToStorage() {
+let saveTimeout = null;
+
+function isEditingInvoiceField() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const isEditable = ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable;
+  if (!isEditable) return false;
+  return Boolean(ae.closest('#invoice-sheet, .invoice-editor, .top-nav-title-box, .top-bar') || ae.id === 'top-invoice-title-input');
+}
+
+function commitDraftAutoSave() {
+  readInputsToState();
+  StorageManager.saveDraft(invoiceState);
+
+  // Auto-save active invoice to saved invoices list ONLY if it already exists in the saved list
+  let savedToList = false;
+  if (invoiceState.id) {
+    const invoices = StorageManager.getSavedInvoices();
+    if (invoices.some(inv => inv.id === invoiceState.id)) {
+      savedToList = StorageManager.saveInvoice(invoiceState);
+      updateCardInListWithoutDisruptingFocus();
+    }
+  }
+
+  if (DOM.autoSaveBadge) {
+    DOM.autoSaveBadge.classList.remove('saving');
+    const span = DOM.autoSaveBadge.querySelector('span');
+    if (span) span.textContent = savedToList ? 'Tersimpan' : 'Draft lokal';
+  }
+}
+
+function flushPendingAutoSave() {
+  if (!saveTimeout) return;
+  clearTimeout(saveTimeout);
+  saveTimeout = null;
+  commitDraftAutoSave();
+}
+
+function saveDraftToStorage(skipHistory = false) {
   if (DOM.autoSaveBadge) {
     DOM.autoSaveBadge.classList.add('saving');
     const span = DOM.autoSaveBadge.querySelector('span');
@@ -1573,31 +1620,16 @@ function saveDraftToStorage() {
   }
 
   // Record a debounced undo snapshot for field-level edits
-  if (!_isRestoringHistory) {
+  if (!_isRestoringHistory && skipHistory !== true) {
     const isEn = invoiceState.docLang === 'en';
     pushHistoryStateDebounced(isEn ? 'Edit field' : 'Edit kolom');
   }
 
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    readInputsToState();
-    StorageManager.saveDraft(invoiceState);
-    
-    // Auto-save active invoice to saved invoices list ONLY if it already exists in the saved list
-    if (invoiceState.id) {
-      const invoices = StorageManager.getSavedInvoices();
-      if (invoices.some(inv => inv.id === invoiceState.id)) {
-        StorageManager.saveInvoice(invoiceState);
-        updateCardInListWithoutDisruptingFocus();
-      }
-    }
-
-    if (DOM.autoSaveBadge) {
-      DOM.autoSaveBadge.classList.remove('saving');
-      const span = DOM.autoSaveBadge.querySelector('span');
-      if (span) span.textContent = 'Tersimpan';
-    }
-  }, 350);
+    saveTimeout = null;
+    commitDraftAutoSave();
+  }, 1000);
 }
 
 // Alias for triggerAutoSave (used by date pickers, rich text toolbars, etc.)
@@ -1626,7 +1658,6 @@ function setupNotesToolbar() {
     updateToolbarActiveState();
     readInputsToState();
     saveDraftToStorage();
-    triggerAutoSave();
   }
 
   // Prevent toolbar buttons from stealing focus / losing text selection on mousedown
@@ -1682,7 +1713,6 @@ function setupNotesToolbar() {
       updateToolbarActiveState();
       readInputsToState();
       saveDraftToStorage();
-      triggerAutoSave();
     });
   }
 
@@ -1694,7 +1724,6 @@ function setupNotesToolbar() {
       invoiceState.paymentNotesFontSize = size;
       readInputsToState();
       saveDraftToStorage();
-      triggerAutoSave();
     });
   }
 
@@ -1703,7 +1732,7 @@ function setupNotesToolbar() {
   DOM.paymentNotes.addEventListener('mouseup', updateToolbarActiveState);
   DOM.paymentNotes.addEventListener('input', () => {
     updateToolbarActiveState();
-    if (DOM.paymentNotes.innerHTML === '<br>' || !DOM.paymentNotes.textContent.trim()) {
+    if (DOM.paymentNotes.innerHTML === '<br>') {
       DOM.paymentNotes.innerHTML = '';
     }
   });
@@ -1758,7 +1787,6 @@ function setupGreetingToolbar() {
     updateGreetingToolbarActiveState();
     readInputsToState();
     saveDraftToStorage();
-    triggerAutoSave();
   }
 
   // Prevent toolbar buttons from stealing focus / losing text selection
@@ -1794,7 +1822,6 @@ function setupGreetingToolbar() {
       updateGreetingToolbarActiveState();
       readInputsToState();
       saveDraftToStorage();
-      triggerAutoSave();
       showToast('Format surat pengantar dinormalkan!', 'info');
     });
   }
@@ -1807,7 +1834,6 @@ function setupGreetingToolbar() {
       invoiceState.greetingFontSize = size;
       readInputsToState();
       saveDraftToStorage();
-      triggerAutoSave();
     });
   }
 
@@ -1816,12 +1842,11 @@ function setupGreetingToolbar() {
   DOM.greetingContent.addEventListener('mouseup', updateGreetingToolbarActiveState);
   DOM.greetingContent.addEventListener('input', () => {
     updateGreetingToolbarActiveState();
-    if (DOM.greetingContent.innerHTML === '<br>' || !DOM.greetingContent.textContent.trim()) {
+    if (DOM.greetingContent.innerHTML === '<br>') {
       DOM.greetingContent.innerHTML = '';
     }
     readInputsToState();
     saveDraftToStorage();
-    triggerAutoSave();
   });
 
   document.addEventListener('selectionchange', () => {
@@ -1837,7 +1862,6 @@ function setupGreetingToolbar() {
     document.execCommand('insertText', false, text);
     readInputsToState();
     saveDraftToStorage();
-    triggerAutoSave();
   });
 }
 
@@ -1862,7 +1886,7 @@ function attachInputListeners() {
         DOM.invoiceProjectTitleWrap.classList.toggle('is-empty', !input.value.trim());
       }
       if (input === DOM.topInvoiceTitleInput) {
-        const val = input.value.trim();
+        const val = input.value;
         invoiceState.invoiceName = val;
         
         // Update active card title in left panel live
@@ -1871,13 +1895,14 @@ function attachInputListeners() {
           const titleTextEl = activeCard.querySelector('.card-invoice-title-text');
           const titleEl = activeCard.querySelector('.card-invoice-title');
           const clientName = (invoiceState.to && (invoiceState.to.company || invoiceState.to.name)) || 'Tanpa Klien';
+          const displayTitle = val.trim() || clientName;
           if (titleTextEl) {
-            titleTextEl.textContent = val || clientName;
+            titleTextEl.textContent = displayTitle;
           } else if (titleEl) {
-            titleEl.textContent = val || clientName;
+            titleEl.textContent = displayTitle;
           }
           if (titleEl) {
-            titleEl.title = `Klik untuk edit judul: ${val || clientName}`;
+            titleEl.title = `Klik untuk edit judul: ${displayTitle}`;
           }
         }
       }
@@ -1887,15 +1912,9 @@ function attachInputListeners() {
 
   if (DOM.topInvoiceTitleInput) {
     DOM.topInvoiceTitleInput.addEventListener('change', () => {
-      readInputsToState();
-      StorageManager.saveDraft(invoiceState);
-      if (invoiceState.id) {
-        const invoices = StorageManager.getSavedInvoices();
-        if (invoices.some(inv => inv.id === invoiceState.id)) {
-          StorageManager.saveInvoice(invoiceState);
-          updateCardInListWithoutDisruptingFocus();
-        }
-      }
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+      commitDraftAutoSave();
     });
 
     DOM.topInvoiceTitleInput.addEventListener('blur', () => {
@@ -1908,7 +1927,8 @@ function attachInputListeners() {
     pushHistoryState(isEn ? 'Change currency' : 'Ubah mata uang');
     invoiceState.currency = DOM.currencySelect.value;
     renderItems();
-    saveDraftToStorage();
+    _updateBaseline();
+    saveDraftToStorage(true);
   });
 
   DOM.itemsList.addEventListener('input', handleItemInput);
@@ -2006,12 +2026,20 @@ function attachInputListeners() {
 
   // Save Current Invoice to Invoices List
   DOM.btnSaveCurrent.addEventListener('click', () => {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
     readInputsToState();
     const isQuo = invoiceState.docType === 'quotation';
     if (!invoiceState.id) {
       invoiceState.id = (isQuo ? 'quo-' : 'inv-') + Date.now();
     }
     const success = StorageManager.saveInvoice(invoiceState);
+    StorageManager.saveDraft(invoiceState);
+    if (DOM.autoSaveBadge) {
+      DOM.autoSaveBadge.classList.remove('saving');
+      const span = DOM.autoSaveBadge.querySelector('span');
+      if (span) span.textContent = 'Tersimpan';
+    }
     const docLabel = isQuo ? 'Quotation' : 'Invoice';
     if (success) {
       renderSavedInvoicesList();
@@ -2045,7 +2073,7 @@ function attachInputListeners() {
   // Quotation Subject Input Listener
   if (DOM.docSubjectInput) {
     DOM.docSubjectInput.addEventListener('input', () => {
-      invoiceState.subject = DOM.docSubjectInput.value.trim();
+      invoiceState.subject = DOM.docSubjectInput.value;
       saveDraftToStorage();
     });
   }
@@ -2055,20 +2083,21 @@ function attachInputListeners() {
     inputEl.addEventListener('input', updateSignaturesView);
   });
 
-  // Invoice Title Input Listener
-  if (DOM.invoiceTitleInput) {
-    DOM.invoiceTitleInput.addEventListener('input', saveDraftToStorage);
-  }
+  window.addEventListener('pagehide', flushPendingAutoSave);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingAutoSave();
+  });
 
   // Print Action
   function triggerPrint() {
+    flushPendingAutoSave();
     window.focus();
     try {
       window.print();
     } catch (e) {
       console.warn('Direct window.print() failed, alerting parent window:', e);
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'PRINT_INVOICE_REQUEST' }, '*');
+        window.parent.postMessage({ type: 'PRINT_INVOICE_REQUEST' }, window.location.origin);
       }
     }
   }
@@ -2123,6 +2152,7 @@ function resetToNewBlankDocument(type = 'invoice', askConfirm = false, autoSaveC
   }
 
   clearTimeout(saveTimeout);
+  saveTimeout = null;
 
   // Auto-save current invoice ONLY if requested AND it exists in saved list
   if (autoSaveCurrent && invoiceState.id) {
@@ -2201,7 +2231,13 @@ function resetToNewBlankDocument(type = 'invoice', askConfirm = false, autoSaveC
   initDates();
   syncInputsWithState();
   renderItems();
+  _updateBaseline();
   StorageManager.saveDraft(invoiceState);
+  if (DOM.autoSaveBadge) {
+    DOM.autoSaveBadge.classList.remove('saving');
+    const span = DOM.autoSaveBadge.querySelector('span');
+    if (span) span.textContent = 'Draft lokal';
+  }
   renderSavedInvoicesList();
 
   showToast(isQuo ? 'Lembaran Surat Penawaran baru siap digunakan!' : 'Lembaran Invoice baru kosong siap digunakan!');
@@ -2254,6 +2290,7 @@ async function downloadPDF() {
   }
 
   // Ensure state is completely up-to-date from all live inputs
+  flushPendingAutoSave();
   readInputsToState();
 
   // Helper to sanitize text for safe cross-platform filenames
@@ -2640,9 +2677,6 @@ async function downloadPDF() {
     }
 
     console.log('PDF Canvas exported successfully:', canvas.width, 'x', canvas.height, 'Data length:', imgData.length);
-    try {
-      fetch('/api/save-preview', { method: 'POST', body: imgData });
-    } catch (e) {}
     pdf.save(filename);
     showToast(`Berhasil diunduh: ${filename}`);
   } catch (err) {
@@ -2727,7 +2761,8 @@ function setTaxMode(mode, silent = false) {
 
   calculateTotals();
   if (!silent) {
-    saveDraftToStorage();
+    _updateBaseline();
+    saveDraftToStorage(true);
     showToast(isNoTax 
       ? (isEn ? 'Document set to Non-Tax (0%)' : 'Tipe Invoice diubah: Tanpa Pajak (Non-Tax)') 
       : (isEn ? 'Document set to Taxable (VAT)' : 'Tipe Invoice diubah: Dengan Pajak (PPN)'));
@@ -2952,7 +2987,8 @@ function setDocumentLanguage(lang, silent = false) {
   if (DOM.invoiceNumber) setTimeout(() => autoResizeInput(DOM.invoiceNumber), 0);
 
   if (!silent) {
-    saveDraftToStorage();
+    _updateBaseline();
+    saveDraftToStorage(true);
     showToast(isEn ? 'Language switched to English' : 'Bahasa dokumen: Bahasa Indonesia');
   }
 }
@@ -3053,7 +3089,8 @@ function setDocumentType(type, silent = false) {
   updateGreetingToggleState();
 
   if (!silent) {
-    saveDraftToStorage();
+    _updateBaseline();
+    saveDraftToStorage(true);
     showToast(isQuotation
       ? (isEn ? 'Document type: Quotation Letter' : 'Tipe dokumen diubah: Quotation Letter')
       : (isEn ? 'Document type: Invoice' : 'Tipe dokumen diubah: Invoice'));
@@ -3062,15 +3099,15 @@ function setDocumentType(type, silent = false) {
 
 // Live update signatures content
 function updateSignaturesView() {
-  const vendorComp = (DOM.fromCompany ? DOM.fromCompany.value.trim() : '') || (invoiceState.from && invoiceState.from.company) || 'Bluudz Creative';
-  const vendorName = (DOM.fromName ? DOM.fromName.value.trim() : '') || (invoiceState.from && invoiceState.from.name) || 'Johan Habibie';
-  const clientComp = (DOM.toCompany ? DOM.toCompany.value.trim() : '') || (invoiceState.to && invoiceState.to.company) || 'PT Paragon Technology and Innovation';
-  const clientName = (DOM.toName ? DOM.toName.value.trim() : '') || (invoiceState.to && invoiceState.to.name) || 'Pak Candra Kisaditiyanto';
+  const vendorComp = DOM.fromCompany ? DOM.fromCompany.value.trim() : ((invoiceState.from && invoiceState.from.company) || '').trim();
+  const vendorName = DOM.fromName ? DOM.fromName.value.trim() : ((invoiceState.from && invoiceState.from.name) || '').trim();
+  const clientComp = DOM.toCompany ? DOM.toCompany.value.trim() : ((invoiceState.to && invoiceState.to.company) || '').trim();
+  const clientName = DOM.toName ? DOM.toName.value.trim() : ((invoiceState.to && invoiceState.to.name) || '').trim();
 
   if (DOM.sigVendorCompany) DOM.sigVendorCompany.textContent = vendorComp;
-  if (DOM.sigVendorName) DOM.sigVendorName.textContent = `( ${vendorName} )`;
+  if (DOM.sigVendorName) DOM.sigVendorName.textContent = vendorName ? `( ${vendorName} )` : '';
   if (DOM.sigClientCompany) DOM.sigClientCompany.textContent = clientComp;
-  if (DOM.sigClientName) DOM.sigClientName.textContent = `( ${clientName} )`;
+  if (DOM.sigClientName) DOM.sigClientName.textContent = clientName ? `( ${clientName} )` : '';
 }
 
 // Setup Vendor Quick Presets Toolbar
@@ -3118,7 +3155,8 @@ function applyVendorPreset(presetKey) {
   }
 
   renderItems();
-  saveDraftToStorage();
+  _updateBaseline();
+  saveDraftToStorage(true);
   showToast(isEn ? `${preset.name} added successfully!` : `${preset.name} berhasil ditambahkan!`);
 
   const lastRow = DOM.itemsList.lastElementChild;
@@ -3464,6 +3502,7 @@ function loadInvoiceIntoEditor(invoiceId, skipAutoSave = false) {
   }
 
   clearTimeout(saveTimeout);
+  saveTimeout = null;
 
   // Auto-save currently active invoice before switching (ONLY if not skipped and it exists in saved list)
   if (!skipAutoSave && invoiceState.id && invoiceState.id !== invoiceId) {
@@ -3480,7 +3519,13 @@ function loadInvoiceIntoEditor(invoiceId, skipAutoSave = false) {
   
   syncInputsWithState();
   renderItems();
+  _updateBaseline();
   StorageManager.saveDraft(invoiceState);
+  if (DOM.autoSaveBadge) {
+    DOM.autoSaveBadge.classList.remove('saving');
+    const span = DOM.autoSaveBadge.querySelector('span');
+    if (span) span.textContent = 'Tersimpan';
+  }
   renderSavedInvoicesList();
 
   const docTypeLabel = invoiceState.docType === 'quotation' ? 'Quotation' : 'Invoice';
@@ -3517,6 +3562,7 @@ function deleteSavedInvoice(invoiceId, invoiceNumber) {
 
   if (confirm(`Apakah Anda yakin ingin menghapus ${docLabel.toLowerCase()} #${invoiceNumber || 'ini'}?`)) {
     clearTimeout(saveTimeout);
+    saveTimeout = null;
     StorageManager.deleteInvoice(invoiceId);
     
     // If the deleted invoice was the active one in the editor
@@ -3535,6 +3581,9 @@ function deleteSavedInvoice(invoiceId, invoiceNumber) {
     showToast(`${docLabel} telah dihapus`, 'danger');
   }
 }
+
+let hasCompletedInitialInvoiceSync = false;
+let loadedFromDraft = false;
 
 // Application Initialization
 function initApp() {
@@ -3556,6 +3605,7 @@ function initApp() {
   const draft = StorageManager.loadDraft();
   if (draft && draft.items && draft.items.length > 0) {
     invoiceState = draft;
+    loadedFromDraft = true;
     if (invoiceState.issueDate) invoiceState.issueDate = formatToDMY(invoiceState.issueDate);
     if (invoiceState.dueDate) invoiceState.dueDate = formatToDMY(invoiceState.dueDate);
   } else {
@@ -3636,44 +3686,84 @@ function initApp() {
     if (event.data.type === 'SYNC_USER_PROFILE') {
       const parentProfile = event.data.profile;
       if (parentProfile) {
+        const isExistingSavedInvoice = Boolean(
+          invoiceState.id && StorageManager.getSavedInvoices().some(inv => inv.id === invoiceState.id)
+        );
+        if (isExistingSavedInvoice) {
+          return;
+        }
+
         if (!invoiceState.from) invoiceState.from = {};
-        invoiceState.from.name = parentProfile.name || '';
-        invoiceState.from.company = parentProfile.company || '';
-        invoiceState.from.email = parentProfile.email || '';
-        invoiceState.from.phone = parentProfile.phone || '';
-        invoiceState.from.address = parentProfile.address || '';
+        const fromFields = [
+          ['name', DOM.fromName],
+          ['company', DOM.fromCompany],
+          ['email', DOM.fromEmail],
+          ['phone', DOM.fromPhone],
+          ['address', DOM.fromAddress],
+        ];
+        let changed = false;
+        for (const [key, domEl] of fromFields) {
+          const incomingVal = typeof parentProfile[key] === 'string' ? parentProfile[key].trim() : '';
+          const currentVal = typeof invoiceState.from[key] === 'string' ? invoiceState.from[key].trim() : '';
+          if (incomingVal && !currentVal) {
+            invoiceState.from[key] = parentProfile[key];
+            if (domEl && document.activeElement !== domEl) {
+              domEl.value = parentProfile[key];
+            }
+            changed = true;
+          }
+        }
 
-        if (DOM.fromName) DOM.fromName.value = invoiceState.from.name;
-        if (DOM.fromCompany) DOM.fromCompany.value = invoiceState.from.company;
-        if (DOM.fromEmail) DOM.fromEmail.value = invoiceState.from.email;
-        if (DOM.fromPhone) DOM.fromPhone.value = invoiceState.from.phone;
-        if (DOM.fromAddress) DOM.fromAddress.value = invoiceState.from.address;
-
-        updateSignaturesView();
-        // Silent save without triggering parent notifications or debounce save loop
-        StorageManager.saveDraft(invoiceState);
+        if (changed) {
+          updateSignaturesView();
+          // Silent save without triggering parent notifications or debounce save loop
+          if (!saveTimeout && !isEditingInvoiceField()) {
+            StorageManager.saveDraft(invoiceState);
+          }
+        }
       }
     } else if (event.data.type === 'LOAD_INVOICE' && event.data.invoiceId) {
       loadInvoiceIntoEditor(event.data.invoiceId, true);
     } else if (event.data.type === 'SYNC_INVOICES' && Array.isArray(event.data.invoices)) {
       const syncedInvoices = event.data.invoices;
-      StorageManager.saveAllInvoices(syncedInvoices, false);
-      renderSavedInvoicesList();
+      const incomingSig = StorageManager.listSignature(syncedInvoices);
+      const isInitialSync = !hasCompletedInitialInvoiceSync;
+      hasCompletedInitialInvoiceSync = true;
+      const localSig = StorageManager.listSignature(StorageManager.getSavedInvoices());
+
+      if (
+        !isInitialSync &&
+        (incomingSig === StorageManager.lastNotifiedSignature || incomingSig === localSig)
+      ) {
+        return;
+      }
+
+      if (incomingSig !== localSig) {
+        StorageManager.saveAllInvoices(syncedInvoices, false);
+        if (!DOM.savedInvoicesList || !DOM.savedInvoicesList.querySelector('.card-inline-edit')) {
+          renderSavedInvoicesList(DOM.invoiceSearchInput ? DOM.invoiceSearchInput.value.trim().toLowerCase() : '');
+        }
+      }
+
+      if (saveTimeout !== null || isEditingInvoiceField()) {
+        return;
+      }
 
       const activeInvoice = syncedInvoices.find(inv => inv.id === invoiceState.id);
       if (activeInvoice) {
-        // Bandingkan isi invoice tanpa memicu auto-save ke parent dan abaikan perbedaan timestamp semata
+        // Bandingkan isi invoice tanpa memicu auto-save ke parent dan abaikan perbedaan timestamp & urutan key
         const isContentEqual = (a, b) => {
           if (!a || !b) return a === b;
           const { updatedAt: _aU, createdAt: _aC, ...restA } = a;
           const { updatedAt: _bU, createdAt: _bC, ...restB } = b;
-          return JSON.stringify(restA) === JSON.stringify(restB);
+          return JSON.stringify(StorageManager.canonicalize(restA)) === JSON.stringify(StorageManager.canonicalize(restB));
         };
 
         if (!isContentEqual(activeInvoice, invoiceState)) {
           invoiceState = JSON.parse(JSON.stringify(activeInvoice));
           syncInputsWithState();
           renderItems();
+          _updateBaseline();
           StorageManager.saveDraft(invoiceState);
           // AutoSave badge status update
           if (DOM.autoSaveBadge) {
@@ -3681,12 +3771,15 @@ function initApp() {
             const span = DOM.autoSaveBadge.querySelector('span');
             if (span) span.textContent = 'Tersimpan';
           }
+          if (!DOM.savedInvoicesList || !DOM.savedInvoicesList.querySelector('.card-inline-edit')) {
+            renderSavedInvoicesList(DOM.invoiceSearchInput ? DOM.invoiceSearchInput.value.trim().toLowerCase() : '');
+          }
         }
       } else if (syncedInvoices.length > 0) {
-        if (!invoiceState.id) {
+        if (!invoiceState.id || (isInitialSync && !loadedFromDraft)) {
           loadInvoiceIntoEditor(syncedInvoices[0].id, true);
         }
-      } else {
+      } else if (!loadedFromDraft) {
         // Jika akun baru dan belum punya invoice apa pun, buka template lembaran baru yang bersih
         resetToNewBlankDocument('invoice', false, false);
       }

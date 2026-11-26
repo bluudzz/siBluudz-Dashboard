@@ -81,20 +81,25 @@ npm run build
 
 ## AI Generator workspace
 
-- Navigasi 12 tool dikelompokkan; cari tool tanpa menghapus draf yang sedang dikerjakan.
-- Desktop menampilkan editor dan hasil berdampingan; layar lebih sempit menumpuk panel, dengan pilihan tool bergulir pada ponsel.
+- AI Generator langsung membuka studio setinggi area konten aplikasi. Tujuh tool berada dalam satu navigasi tanpa kategori, dengan pencarian dan judul mode yang ringkas. Tombol Riwayat ada di kanan Cari tool; header judul studio terpisah dihapus. AI Humanizer dan Video Prompt dihapus, termasuk dukungan generasi API untuk klien lama.
+- Desktop menampilkan arahan dan hasil berdampingan. Pada area sempit, pilih tool dari dropdown lalu gunakan tab **Arahan / Hasil**; generasi berhasil otomatis membuka hasil.
+- Draf tetap terpisah per tool. Tombol proses berada pada header editor, sementara koneksi dan kuota ditampilkan di bilah bawah.
 - Enter membuat baris baru. Gunakan **Ctrl + Enter** atau **⌘ + Enter** untuk menjalankan generasi.
 - Hasil teks dapat diedit dan disalin. Model dapat dicari, difilter menurut provider, serta disinkronkan dari katalog 9router.
 - Riwayat dapat dimuat kembali ke tool asal. Draf tiap tool hanya bertahan selama halaman terbuka; riwayat generasi disimpan melalui API.
 - Ganti Produk menerima dua gambar PNG/JPG/WEBP, maksimal 6 MB per gambar. Koneksi dan kuota harus tersedia sebelum generasi.
+- **Relight Studio** menerima satu foto (PNG/JPG/WEBP, maks. 6 MB / 40 MP). Pilih model editor gambar, lalu atur sembilan preset termasuk Strobist Flash, intensitas, warna, bayangan, pola dan arah cahaya. Hasil terakhir dapat dibandingkan dengan foto sumber dan diunduh. Aturan identitas, pose, teks/logo dan detail selalu disertakan. Edit dikirim melalui endpoint native 9router `/images/generations` dengan foto sumber pada `image` (atau dua referensi pada `images` untuk Ganti Produk). Respons JSON dan SSE didukung; tidak ada permintaan tanpa foto referensi atau ukuran persegi yang dipaksakan. Preservasi piksel identik tetap memerlukan editor berbasis piksel.
+
+- Kualitas Relight Studio diatur otomatis di server: Antigravity Gemini Image meminta **2K**, sedangkan model GPT melalui Codex meminta **quality: high**. Hasil menampilkan dimensi piksel, format dan ukuran file aktual, dengan pemberitahuan jika provider mengabaikan resolusi. Tidak ada upscale otomatis atau ukuran minimum 2 MB. Dukungan native 2K/4K memerlukan [patch 9router di VPS](docs/patches/9router-image-resolution.md); perubahan dashboard saja tidak memperbaiki adapter gateway atau akun provider yang dinonaktifkan.
+- Relight Studio menggunakan **Universal Master Prompt V3** dari pengguna sebagai sumber lengkap di `shared/relight-master-prompt.js`. Builder di server menyesuaikan bagian lighting untuk sembilan gaya dan semua kontrol, sambil mempertahankan aturan identitas, informasi dan detail. Prompt tidak dikirim ke browser atau ditampilkan dalam antarmuka; respons hanya menyertakan versi `universal-master-v3` untuk pelacakan.
+
+- Relight Studio memakai panel tetap tanpa scroll: model dan kontrol pencahayaan di kiri, unggah/foto sumber dan hasil di kanvas kanan. Pada jendela pendek, kontrol dibagi menjadi **Lighting / Detail / Arahan** agar tetap bisa diakses; pada mobile, gunakan **Arahan / Foto & hasil**. Tombol Terapkan tetap terlihat. Foto dapat diseret ke kanvas; mengganti atau menghapus sumber juga menghapus hasil sebelumnya agar perbandingan tidak memakai foto yang keliru. Hasil langsung memakai pembanding geser sebelum/sesudah yang dapat dioperasikan dengan keyboard, tanpa tombol pergantian tampilan. Gambar menyesuaikan ruang kanvas dengan `object-fit: contain`.
 
 ## Invoice workspace
 
-- Rail kiri memuat halaman (Daftar dokumen, Invoice Builder) dan filter jenis dokumen; isinya hidup di panel kanan.
-- Daftar memakai baris ringkas dengan panel detail di samping pada desktop lebar; di bawah 1250px detail turun ke bawah daftar.
-- Cari nomor dokumen, klien, atau perihal langsung dari toolbar. Filter dan pencarian tidak mengubah data.
-- Tombol **Cetak** hanya mencetak panel detail. **Buka di Builder** meneruskan dokumen ke editor iframe dengan profil dan daftar invoice tersinkron.
-- **Reset editor** memuat ulang iframe setelah konfirmasi; perubahan yang belum disimpan akan hilang.
+- Menu **Invoice** langsung membuka InvoiceFlow di dalam dashboard, memenuhi area konten di bawah header aplikasi.
+- Daftar dokumen, pencarian, pembuatan invoice/quotation, simpan, cetak, dan unduh tersedia langsung di InvoiceFlow, tanpa halaman ruang kerja tambahan.
+- Profil dan dokumen akun tetap disinkronkan dengan editor; permintaan cetak hanya diterima dari iframe InvoiceFlow pada origin yang sama.
 - Perhitungan nominal memakai `src/features/invoices/invoice-utils.ts` (format ribuan Indonesia dan desimal koma). Uji: `npm test`.
 
 ## Email Manager workspace

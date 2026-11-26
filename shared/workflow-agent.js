@@ -1,4 +1,4 @@
-import { resolveValue } from './workflow-engine.js'
+import { resolveValue, workflowInput } from './workflow-engine.js'
 import { Agent, Runner, tool } from '@openai/agents'
 import { z } from 'zod'
 
@@ -12,26 +12,24 @@ export async function runWorkflowAgent({node,input,resources,createModel,loadMem
   const output=[]
   for(const item of input){
      const configuredPrompt=String(node.data.aiPrompt||'{{ $json.chatInput }}').trim()
-    // Keep the agent input contract stable even when an upstream node returns
-    // domain fields (topic, sources, content, etc.) instead of a literal
-    // `input` field. This lets older prompts using {{ $json.input }} continue
-    // to work without asking the assistant to rewrite the workflow.
-    const agentJson=Object.hasOwn(item.json,'input')?item.json:{...item.json,input:item.json}
-     let prompt
-    try { prompt=String(resolveValue(configuredPrompt,agentJson)) }
-     catch(error) {
-       if(configuredPrompt==='{{ $json.chatInput }}'&&!Object.hasOwn(item.json,'chatInput')) prompt=`Bantu saya mengolah data workflow berikut:\n${JSON.stringify(item.json)}`
-       else throw error
-     }
+    const latest=workflowInput(item.json)
+    if(latest==null||typeof latest==='string'&&!latest.trim())throw new Error('Hasil langkah sebelumnya kosong. Periksa node sebelumnya sebelum menjalankan AI Agent.')
+    const researchData=latest&&typeof latest==='object'?latest:{}
+    const researchPages=Array.isArray(researchData.pages)?researchData.pages:Array.isArray(researchData.sources)?researchData.sources:[]
+    const inputText=typeof latest==='string'?latest:JSON.stringify(researchPages.length?{query:researchData.query,sourceCount:researchPages.length}:latest)
+    // Legacy input expressions follow the latest result instead of inherited data.
+    const agentJson={...item.json,input:latest,...(typeof latest==='string'?{prompt:latest,chatInput:latest}:{})}
+    const automaticPrompt=/^\{\{\s*\$json\.(?:output|prompt|chatInput|topic|query|content|input)\s*\}\}$/.test(configuredPrompt)
+    let prompt=automaticPrompt?inputText:String(resolveValue(configuredPrompt,agentJson))
     // Research nodes carry their evidence in pages/sources. Attach a bounded
     // context block automatically so the agent can analyze it instead of
     // asking the user to paste the raw research again.
-    const researchPages=Array.isArray(item.json.pages)?item.json.pages:Array.isArray(item.json.sources)?item.json.sources:[]
+    if(!researchPages.length&&inputText&&!prompt.includes(inputText))prompt+=`\n\nHASIL LANGKAH SEBELUMNYA:\n${inputText}`
     if(researchPages.length){
       const evidence=researchPages.slice(0,20).map((page,index)=>({
         no:index+1,title:String(page?.title||''),url:String(page?.url||''),status:String(page?.status||''),publishedAt:String(page?.publishedAt||''),content:String(page?.content||page?.snippet||'').slice(0,3500),
       }))
-      prompt+=`\n\nDATA RISET DARI NODE SEBELUMNYA:\n${JSON.stringify({topic:item.json.query||item.json.topic||'',sourceCount:item.json.sourceCount||researchPages.length,pages:evidence})}\n\nGunakan data riset tersebut sebagai bahan utama. Bedakan fakta bersumber dan opini; jangan meminta pengguna mengirim ulang data yang sudah tersedia.`
+      prompt+=`\n\nDATA RISET DARI NODE SEBELUMNYA:\n${JSON.stringify({topic:researchData.query||researchData.topic||'',sourceCount:researchData.sourceCount||researchPages.length,pages:evidence})}\n\nGunakan data riset tersebut sebagai bahan utama. Bedakan fakta bersumber dan opini; jangan meminta pengguna mengirim ulang data yang sudah tersedia.`
     }
      if(prompt.length>16000)throw new Error('Prompt AI Agent maksimal 16.000 karakter.')
      const splitOutCount=Number(node.data.splitOutCount)
@@ -82,7 +80,7 @@ export async function runWorkflowAgent({node,input,resources,createModel,loadMem
     if(!reply.trim())throw new Error('Model mengembalikan jawaban kosong.')
     if(memory)await saveMemory(memory.id,session,[...history,{role:'user',content:prompt},{role:'assistant',content:reply}].slice(-window*2))
     const usage=run.runContext.usage
-    output.push({json:{...item.json,output:reply,agentModel:model,toolSteps:trace,agentRun:{runtime:'openai-agents-sdk',requests:usage.requests,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens}}})
+    output.push({json:{...item.json,prompt:reply,output:reply,agentModel:model,toolSteps:trace,agentRun:{runtime:'openai-agents-sdk',requests:usage.requests,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens}}})
   }
   return output
 }

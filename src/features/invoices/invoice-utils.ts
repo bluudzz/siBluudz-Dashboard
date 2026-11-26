@@ -43,3 +43,23 @@ export function formatMoney(amount: number, currency = 'IDR') {
 export function isQuotation(inv: InvoiceRecord) {
   return inv.docType?.toLowerCase() === 'quotation'
 }
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, canonicalize((value as Record<string, unknown>)[key])]),
+    )
+  }
+  return value
+}
+
+export function invoiceListSignature(invoices: InvoiceRecord[]): string {
+  const normalized = invoices.map((inv) => {
+    const { updatedAt: _updatedAt, createdAt: _createdAt, ...rest } = inv as InvoiceRecord & { createdAt?: string }
+    return canonicalize(rest)
+  })
+  return JSON.stringify(normalized)
+}

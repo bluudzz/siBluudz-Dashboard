@@ -10,6 +10,7 @@ export function useMailAccounts() {
 
   const [loadingAccounts, setLoadingAccounts] = React.useState(true)
   const [loadingInbox, setLoadingInbox] = React.useState(false)
+  const [inboxError, setInboxError] = React.useState('')
   const [error, setError] = React.useState('')
   const [notice, setNotice] = React.useState('')
 
@@ -54,6 +55,9 @@ export function useMailAccounts() {
 
   const loadInbox = React.useCallback(async (accountId: string) => {
     if (!accountId) return
+    setLoadingInbox(true)
+    setInboxError('')
+    setSelectedMessage(null)
     try {
       const result = await apiRequest<{ messages: MailMessage[] }>(
         `/api/mail/accounts/${encodeURIComponent(accountId)}/messages`
@@ -62,7 +66,9 @@ export function useMailAccounts() {
       setSelectedMessage(null)
       setMessages(result.messages)
     } catch (inboxError) {
-      setError(inboxError instanceof Error ? inboxError.message : 'Gagal mengambil inbox.')
+      const message = inboxError instanceof Error ? inboxError.message : 'Gagal mengambil inbox.'
+      setInboxError(message)
+      setError(message)
       setMessages([])
     } finally {
       setLoadingInbox(false)
@@ -257,6 +263,7 @@ export function useMailAccounts() {
     selectedMessage, setSelectedMessage,
     selectedAccount, isOutlookGraph, isGmailApi,
     loadingAccounts, loadingInbox, setLoadingInbox,
+    inboxError,
     error, setError,
     notice, setNotice,
     // Credentials

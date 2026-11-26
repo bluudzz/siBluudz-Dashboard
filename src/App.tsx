@@ -8,6 +8,7 @@ import { LaunchpadPage } from '@/features/dashboard/LaunchpadPage'
 import { SecurityPage } from '@/features/settings/SecurityPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { InvoicePage } from '@/features/invoices/InvoicePage'
+import { invoiceListSignature } from '@/features/invoices/invoice-utils'
 import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
@@ -59,14 +60,8 @@ function DashboardContent() {
       const updatedInvoices = event.data.invoices as InvoiceRecord[]
       if (!updatedInvoices.every((invoice) => invoice && typeof invoice.id === 'string')) return
       
-      // Prevent infinite feedback loop if incoming data identical to current state (ignoring updatedAt)
-      const stripTimestamps = (list: InvoiceRecord[]) =>
-        list.map((inv) => {
-          const { updatedAt: _updatedAt, ...rest } = inv
-          return rest
-        })
-
-      if (JSON.stringify(stripTimestamps(updatedInvoices)) === JSON.stringify(stripTimestamps(invoicesRef.current))) {
+      // Prevent infinite feedback loop if incoming data identical to current state (ignoring timestamps & key order)
+      if (invoiceListSignature(updatedInvoices) === invoiceListSignature(invoicesRef.current)) {
         return
       }
 
@@ -123,8 +118,10 @@ function DashboardContent() {
     }
   }
 
+  const isEmbeddedPage = ['automation', 'invoice', 'invoices-list', 'ai-generator', 'prompt-studio'].includes(activeTab)
+
   return (
-    <div className={`flex bg-background text-foreground ${activeTab === 'automation' ? 'h-dvh overflow-hidden' : 'min-h-screen'}`}>
+    <div className={`flex bg-background text-foreground ${isEmbeddedPage ? 'h-dvh overflow-hidden' : 'min-h-screen'}`}>
       {/* Sidebar */}
       <Sidebar
         activeTab={activeTab === 'prompt-studio' ? 'ai-generator' : activeTab}
@@ -144,7 +141,7 @@ function DashboardContent() {
           onOpenSearch={() => setSearchOpen(true)}
         />
 
-        <main className={`flex-1 min-w-0 animate-in fade-in duration-200 ${activeTab === 'automation' ? 'p-0 w-full min-h-0 flex flex-col overflow-hidden' : ['ai-generator', 'prompt-studio', 'email-manager', 'invoice', 'invoices-list'].includes(activeTab) ? 'p-4 sm:p-6 lg:p-8 w-full' : 'p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto'}`}>
+        <main className={`flex-1 min-w-0 ${isEmbeddedPage ? 'p-0 w-full min-h-0 flex flex-col overflow-hidden' : activeTab === 'email-manager' ? 'animate-in fade-in duration-200 p-4 sm:p-6 lg:p-8 w-full' : 'animate-in fade-in duration-200 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto'}`}>
           {dataError && (
             <div role="alert" className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {dataError}

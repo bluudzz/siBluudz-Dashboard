@@ -11,6 +11,22 @@ const node=(id:string,type:string,data:Record<string,unknown>)=>({id,type,positi
 const nodes=[node('chat','chatTrigger',{chatInput:'Halo',sessionId:'session-a'}),node('agent','aiAgent',{executionMode:'live',aiPrompt:'{{ $json.chatInput }}'}),node('model','chatModel',{model:'test-model'}),node('memory','memory',{sessionKey:'{{ $json.sessionId }}',windowSize:'1'}),node('tool','tool',{toolType:'textLength',description:'Hitung teks'})]
 const edges=[{id:'main',source:'chat',target:'agent'},...['model','memory','tool'].map((id,index)=>({id,source:id,target:'agent',sourceHandle:['ai_languageModel','ai_memory','ai_tool'][index],targetHandle:['ai_languageModel','ai_memory','ai_tool'][index]}))]
 
+test('agent consumes the latest result even with a static task or an inherited chatInput',async()=>{
+  for(const task of ['Ubah menjadi prompt gambar','{{ $json.chatInput }}','{{ $json.prompt }}','{{ $json.input }}']){
+    let sent=''
+    const result=await runWorkflowAgent({node:node('next','aiAgent',{executionMode:'live',aiPrompt:task}),input:[{json:{prompt:'Perintah awal',chatInput:'Percakapan awal',output:'Hasil terbaru dari node sebelumnya'}}],resources:{model:nodes[2],tools:[]},createModel:()=>createTestModel(async(request:any)=>{
+      sent=String(request.messages.at(-1).content)
+      return {choices:[{message:{role:'assistant',content:'Prompt baru siap'}}]}
+    })})
+    assert.match(sent,/Hasil terbaru dari node sebelumnya/)
+    assert.doesNotMatch(sent,/Percakapan awal/)
+    if(!task.includes('{{'))assert.match(sent,/Ubah menjadi prompt gambar/)
+    assert.equal(result[0].json.prompt,'Prompt baru siap')
+    assert.equal(result[0].json.output,'Prompt baru siap')
+  }
+  await assert.rejects(()=>runWorkflowAgent({node:nodes[1],input:[{json:{prompt:'Prompt lama',output:''}}],resources:{model:nodes[2],tools:[]},createModel:()=>{throw new Error('Model tidak boleh dipanggil untuk hasil kosong')}}),/Hasil langkah sebelumnya kosong/)
+})
+
 test('typed AI connections reject mismatched ports, duplicate models and normal data into sub-nodes',()=>{
   assert.deepEqual(validateGraph(nodes,edges),[])
   assert.ok(validateGraph(nodes,[...edges,{id:'bad',source:'agent',target:'memory'}]).length)

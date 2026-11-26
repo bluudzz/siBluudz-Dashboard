@@ -6,6 +6,8 @@
  * 5 segmen: email|password|refresh_token|client_id|client_secret
  */
 
+import { mailHtmlToText } from '../utils/mail-text.js'
+
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GMAIL_MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages'
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -379,8 +381,8 @@ export class GmailAccountManager {
     const date = data.internalDate ? new Date(Number(data.internalDate)).toISOString() : (dateHeader ? new Date(dateHeader).toISOString() : null)
 
     const { text, html } = extractBodyFromPayload(data.payload || {})
-    const htmlClean = typeof html === 'string'
-      ? html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, ' ')
+    const htmlClean = !text && typeof html === 'string'
+      ? await mailHtmlToText(html)
       : ''
 
     return {

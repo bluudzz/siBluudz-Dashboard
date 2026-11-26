@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { db, getNineRouterConfig, getSetting } from './db.js'
-import { resolveValue } from '../shared/workflow-engine.js'
+import { resolveValue, workflowInput } from '../shared/workflow-engine.js'
 import { storeWorkflowImage } from './workflow-media.js'
 
 const MAX_PROMPT = 4000
@@ -53,7 +53,11 @@ export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage
   for (const item of input) {
     const count=db.prepare("select count(*) as count from ai_usage_logs where user_id=? and date(created_at,'localtime')=date('now','localtime')").get(user.id).count
     if (user.role!=='admin'&&count>=limit) throw new Error('Kuota AI harian habis. Periksa pengaturan akun Anda.')
-    const prompt=String(resolveValue(node.data.prompt||'{{ $json.prompt }}',item.json)).trim()
+    const latest=workflowInput(item.json)
+    const automaticPrompt=latest&&typeof latest==='object'?latest.prompt:latest
+    const selected=node.data.prompt?.trim()?resolveValue(node.data.prompt,item.json):automaticPrompt
+    if(typeof selected!=='string')throw new Error('Hasil langkah sebelumnya bukan prompt teks. Gunakan AI Agent untuk menyusun prompt gambar atau isi Prompt gambar secara manual.')
+    const prompt=selected.trim()
     if (!prompt||prompt.length>MAX_PROMPT) throw new Error('Prompt gambar wajib diisi, maksimal 4.000 karakter.')
     if(signal?.aborted)throw signal.reason instanceof Error?signal.reason:new Error('Pengujian dihentikan pengguna.')
     const image=await requestImage(config,model,prompt,fetchImpl,signal)
@@ -66,7 +70,7 @@ export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage
       stored={imageUrl:image.url,previewUrl:image.url,mimeType:/\.png(?:$|\?)/i.test(url.pathname)?'image/png':'image/jpeg'}
     }
     db.prepare('insert into ai_usage_logs (id,user_id,prompt_tokens,completion_tokens,model,type) values (?,?,?,?,?,?)').run(randomUUID(),user.id,0,0,model,'workflow_image')
-    output.push({json:{...item.json,imageUrl:stored.imageUrl,imagePreviewUrl:stored.previewUrl,imageMime:stored.mimeType,imageModel:model,imagePrompt:prompt}})
+    output.push({json:{...item.json,prompt,imageUrl:stored.imageUrl,imagePreviewUrl:stored.previewUrl,imageMime:stored.mimeType,imageModel:model,imagePrompt:prompt}})
   }
   return output
 }

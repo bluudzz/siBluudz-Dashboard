@@ -1,5 +1,5 @@
 import { getPublicText, newsItems, validatePublicUrl } from './workflow-external.js'
-import { resolveValue } from '../shared/workflow-engine.js'
+import { resolveValue, workflowInput } from '../shared/workflow-engine.js'
 
 const MAX_PAGES = 5
 const DEFAULT_NODE_PAGES = 12
@@ -25,7 +25,7 @@ function standardResearchPrompt(value,seen=new Set()) {
     const objectValue=value
     if(seen.has(objectValue))return ''
     seen.add(objectValue)
-    for(const key of ['query','topic','prompt','originalPrompt','chatInput','input']){
+    for(const key of ['output','query','topic','prompt','chatInput','content','input']){
       if(objectValue[key]!==undefined){const found=standardResearchPrompt(objectValue[key],seen);if(found)return found}
     }
     return ''
@@ -210,14 +210,15 @@ export async function runResearchNode({node,input},{read=getPublicText,signal,pl
       else content=plainText(response.body)
       return {json:{...item.json,researchMode:'url',url,statusCode:response.status,content,pages:[{url,content,status:'read'}],sourceCount:1,readCount:1,searchedAt:new Date().toISOString()}}
     }
-    let rawQuery=''
-    try { rawQuery=node.data.query?resolveValue(node.data.query,item.json):item.json } catch { rawQuery=item.json }
-    const query=standardResearchPrompt(rawQuery)||standardResearchPrompt(item.json)
+    const configuredQuery=String(node.data.query||'').trim()
+    const automatic=!configuredQuery||/^\{\{\s*\$json\.(?:output|prompt|chatInput|topic|query|input)\s*\}\}$/.test(configuredQuery)
+    const rawQuery=automatic?workflowInput(item.json):resolveValue(configuredQuery,item.json)
+    const query=standardResearchPrompt(rawQuery)
     if(!query)throw new Error('Topik riset belum ditemukan. Isi topik, prompt, atau query pada langkah sebelumnya.')
     let plannedQueries
     if(typeof planQuery==='function'){
       try {
-        const planned=await planQuery({topic:query,context:item.json,model:String(node.data.model||''),signal})
+        const planned=await planQuery({topic:query,context:workflowInput(item.json),model:String(node.data.model||''),signal})
         plannedQueries=parseResearchPlan(planned).queries
       } catch(error) {
         if(signal?.aborted)throw error

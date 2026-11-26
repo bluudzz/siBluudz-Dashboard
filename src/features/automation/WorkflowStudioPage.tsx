@@ -1,24 +1,59 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlow, ReactFlowProvider, Controls, Background, applyNodeChanges, applyEdgeChanges, addEdge, MarkerType, type Edge, type NodeChange, type EdgeChange, type Connection, type ReactFlowInstance } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Play, Square, Save, Plus, Undo2, Redo2, Download, Upload, X, Search, Trash2, Copy, Workflow, Maximize2, RefreshCw, Send, BookOpen, Pencil, MoreHorizontal, Check, AlertTriangle, HelpCircle, Bot, ScrollText } from 'lucide-react'
+import { Play, Square, Save, Plus, Undo2, Redo2, Download, Upload, X, Search, Trash2, Copy, Workflow, Maximize2, RefreshCw, Send, BookOpen, Pencil, MoreHorizontal, Check, AlertTriangle, HelpCircle, Bot, ScrollText, Power } from 'lucide-react'
 import { TriggerNode, AiAgentNode, SetNode, SplitOutNode, IfNode, ChatTriggerNode, ChatModelNode, MemoryNode, ToolNode } from './CustomNodes'
 import { DataViewer, NodeSettingsPanel } from './NodeSettingsPanel'
 import { WorkflowAssistantPanel } from './WorkflowAssistantPanel'
 import { iconForWorkflowNode } from './workflow-node-icons'
-import { catalog, availableCatalog, ports, serializableGraph, graphStamp, workflowRequest, type StudioNode, type WorkflowItem, type RunItem, type ExecutionResult } from './workflow-model'
+import { catalog, availableCatalog, ports, serializableGraph, graphStamp, workflowRequest, workflowNodeImages, type StudioNode, type WorkflowItem, type RunItem, type ExecutionResult } from './workflow-model'
 import { validateGraph } from '../../../shared/workflow-engine'
 import { inspectWorkflow } from '../../../shared/workflow-readiness'
 import { aiPorts, isSubNode, isTrigger, isAiConnection } from '../../../shared/workflow-connections'
 import './workflow-studio.css'
 
-const nodeTypes={trigger:TriggerNode,promptTrigger:TriggerNode,chatTrigger:ChatTriggerNode,chatModel:ChatModelNode,memory:MemoryNode,tool:ToolNode,aiAgent:AiAgentNode,set:SetNode,splitOut:SplitOutNode,if:IfNode,approval:IfNode,searchContent:SetNode,httpRequest:SetNode,googleDrive:SetNode,imageGenerate:SetNode,instagram:SetNode}
+const nodeTypes={
+  trigger:TriggerNode,
+  webhookTrigger:TriggerNode,
+  promptTrigger:TriggerNode,
+  chatTrigger:ChatTriggerNode,
+  chatModel:ChatModelNode,
+  memory:MemoryNode,
+  tool:ToolNode,
+  aiAgent:AiAgentNode,
+  set:SetNode,
+  merge:SetNode,
+  jsonParse:SetNode,
+  splitOut:SplitOutNode,
+  if:IfNode,
+  switch:IfNode,
+  wait:SetNode,
+  approval:IfNode,
+  searchContent:SetNode,
+  httpRequest:SetNode,
+  apiRequest:SetNode,
+  googleDrive:SetNode,
+  imageGenerate:SetNode,
+  imageEdit:SetNode,
+  aiVision:SetNode,
+  instagram:SetNode,
+  notify:SetNode,
+}
 type Snapshot={nodes:StudioNode[];edges:Edge[]}
 type ConfirmDialogState={title:string;message:string;confirmText?:string;cancelText?:string;isDanger?:boolean}
+function triggerTypeLabel(triggerType:string) {
+  if(triggerType==='partial')return 'Satu langkah'
+  if(triggerType==='chat')return 'Chat'
+  if(triggerType==='schedule')return 'Terjadwal'
+  if(triggerType==='webhook')return 'Webhook'
+  return 'Workflow'
+}
 function Studio() {
   const [workflows,setWorkflows]=useState<WorkflowItem[]>([])
   const [workflowId,setWorkflowId]=useState('')
   const [name,setName]=useState('')
+  const [isActive,setIsActive]=useState(false)
+  const [webhookToken,setWebhookToken]=useState('')
   const [renaming,setRenaming]=useState(false)
   const [nodes,setNodes]=useState<StudioNode[]>([])
   const [edges,setEdges]=useState<Edge[]>([])
@@ -49,6 +84,8 @@ function Studio() {
   const [historyLoaded,setHistoryLoaded]=useState(false)
   const [viewedRunId,setViewedRunId]=useState('')
   const [viewedNodeId,setViewedNodeId]=useState('')
+  const [logSelection,setLogSelection]=useState<{runId:string;nodeId:string;step:string;message:string}|null>(null)
+  const logResultDialog=useRef<HTMLDialogElement>(null)
   const [liveProgress,setLiveProgress]=useState<{label:string;phase:string;done:number;total:number}|null>(null)
   const progressCursor=useRef(0)
   const [undoStack,setUndoStack]=useState<Snapshot[]>([])
@@ -75,9 +112,10 @@ function Studio() {
   const viewedRun=runs.find(run=>run.id===viewedRunId)
   const viewedResults=viewedRun?.result?.nodeResults||{}
   const viewedResult=viewedResults[viewedNodeId]
+  const logResult=logSelection?runs.find(run=>run.id===logSelection.runId)?.result?.nodeResults?.[logSelection.nodeId]:undefined
 
   const loadDetail=useCallback(async(id:string)=>{
-    const {workflow}=await workflowRequest<{workflow:{id:string;name:string;nodes:StudioNode[];edges:Edge[]}}>('/'+id)
+    const {workflow}=await workflowRequest<{workflow:{id:string;name:string;nodes:StudioNode[];edges:Edge[];isActive?:boolean;webhookToken?:string}}>('/'+id)
     const preparedNodes=workflow.nodes.map(node=>{
       if(node.type==='splitOut')return {...node,data:{...node.data,label:'Split Out',splitCount:String(node.data.splitCount||'3'),sourceField:'output',arrayField:'prompts'}}
       if(node.type==='chatTrigger'&&node.data.label==='Mulai dari Chat')return {...node,data:{...node.data,label:'Chat Trigger'}}
@@ -86,9 +124,10 @@ function Studio() {
       return node
     })
     setWorkflowId(workflow.id);setName(workflow.name);setNodes(preparedNodes);setEdges(workflow.edges)
+    setIsActive(Boolean(workflow.isActive));setWebhookToken(String(workflow.webhookToken||''))
     setRenaming(false);setReadinessOpen(false)
     setChatMessages([]);setChatSession(crypto.randomUUID());setChatMessage('');setChatOpen(false);setAssistantOpen(false)
-     setSavedStamp(graphStamp(workflow.name,preparedNodes,workflow.edges));setSelectedId(null);setDetailOpen(false);setRuns([]);setHistoryLoaded(false);setHistoryError('');setViewedRunId('');setUndoStack([]);setRedoStack([]);setTab('editor')
+    setSavedStamp(graphStamp(workflow.name,preparedNodes,workflow.edges));setSelectedId(null);setDetailOpen(false);setRuns([]);setHistoryLoaded(false);setHistoryError('');setViewedRunId('');setUndoStack([]);setRedoStack([]);setTab('editor')
   },[])
   const loadList=useCallback(async()=>{
     setBusyKind('loading');setError('')
@@ -105,6 +144,7 @@ function Studio() {
     observer.observe(canvas.current)
     return()=>{observer.disconnect();clearTimeout(timer)}
   },[compact,tab])
+  useEffect(()=>{if(logSelection)logResultDialog.current?.showModal();else logResultDialog.current?.close()},[logSelection])
   useEffect(()=>{if(newOpen)createDialog.current?.showModal();else createDialog.current?.close()},[newOpen])
   useEffect(()=>{if(palette)paletteDialog.current?.showModal();else paletteDialog.current?.close()},[palette])
   useEffect(()=>{if(confirmState)confirmDialog.current?.showModal();else confirmDialog.current?.close()},[confirmState])
@@ -204,12 +244,16 @@ function Studio() {
     const sub=isSubNode(type)
     const anchor=sub?nodes.find(node=>node.id===(parentId||selectedId)&&node.type==='aiAgent'):nodes.find(node=>node.id===selectedId&&!isSubNode(node.type))||[...nodes].reverse().find(node=>!isSubNode(node.type))
     if(sub&&anchor&&type==='chatModel'&&edges.some(edge=>edge.target===anchor.id&&edge.targetHandle===aiPorts.chatModel)){setNotice('AI Agent sudah memiliki Model AI. Gunakan Model AI yang terhubung.');return}
-    const node:StudioNode={id:crypto.randomUUID(),type,position:anchor?sub?{x:anchor.position.x+(['chatModel','memory','tool'].indexOf(type)-1)*230,y:anchor.position.y+260}:{x:anchor.position.x+340,y:anchor.position.y+(anchor.type==='if'?140:0)}:{x:100,y:180},data:{...definition.data}}
+    const node:StudioNode={id:crypto.randomUUID(),type,position:anchor?sub?{x:anchor.position.x+(['chatModel','memory','tool'].indexOf(type)-1)*230,y:anchor.position.y+260}:{x:anchor.position.x+340,y:anchor.position.y+(anchor.type==='if'||anchor.type==='switch'?140:0)}:{x:100,y:180},data:{...definition.data}}
     let nextEdges=edges
     if(anchor&&sub){
       if(type!=='tool'&&edges.some(edge=>edge.target===anchor.id&&edge.targetHandle===aiPorts[type])){setNotice('Port ini sudah terhubung. Buka sub-node yang ada untuk mengubah pengaturan.');return}
       nextEdges=addEdge({id:crypto.randomUUID(),source:node.id,sourceHandle:aiPorts[type],target:anchor.id,targetHandle:aiPorts[type],type:'smoothstep'},edges)
-    }else if(anchor&&!isTrigger(type))nextEdges=addEdge({id:crypto.randomUUID(),source:anchor.id,sourceHandle:anchor.type==='if'?'true':ports(anchor.type).output,target:node.id,targetHandle:ports(type).input,type:'smoothstep'},edges)
+    }else if(anchor&&!isTrigger(type)){
+      const switchBranch=anchor.type==='switch'?(['case1','case2','case3','fallback'].find(h=>!edges.some(e=>e.source===anchor.id&&e.sourceHandle===h))||'fallback'):''
+      const sourceHandle=anchor.type==='if'?'true':anchor.type==='switch'?switchBranch:ports(anchor.type).output
+      nextEdges=addEdge({id:crypto.randomUUID(),source:anchor.id,sourceHandle,target:node.id,targetHandle:ports(type).input,type:'smoothstep'},edges)
+    }
     commit([...nodes,node],nextEdges);setPalette(false);setSelectedId(node.id);setDetailOpen(true)
   }
   const duplicate=()=>{
@@ -217,13 +261,37 @@ function Studio() {
     const {result:_result,running:_running,...data}=selectedNode.data
     commit([...nodes,{...selectedNode,id:crypto.randomUUID(),position:{x:selectedNode.position.x,y:selectedNode.position.y+160},selected:false,data}],edges)
   }
-  const save=async()=>{
+  const save=async(activeFlag=isActive)=>{
     if(!workflowId||!name.trim())throw new Error('Nama workflow wajib diisi.')
     const validation=validateGraph(nodes,edges)
     if(validation.length)throw new Error(validation.join(' '))
     const clean=serializableGraph(nodes,edges)
-    await workflowRequest('/'+workflowId,{method:'PUT',body:JSON.stringify({name:name.trim(),...clean,isActive:false})})
-    setSavedStamp(stamp);setWorkflows(prev=>prev.map(item=>item.id===workflowId?{...item,name:name.trim()}:item))
+    const res=await workflowRequest<{isActive?:boolean;webhookToken?:string}>('/'+workflowId,{method:'PUT',body:JSON.stringify({name:name.trim(),...clean,isActive:activeFlag})})
+    if(typeof res?.isActive==='boolean')setIsActive(res.isActive)
+    if(typeof res?.webhookToken==='string')setWebhookToken(res.webhookToken)
+    setSavedStamp(stamp);setWorkflows(prev=>prev.map(item=>item.id===workflowId?{...item,name:name.trim(),is_active:activeFlag?1:0}:item))
+  }
+  const hasAutomationTrigger=nodes.some(node=>!node.data.disabled&&((node.type==='trigger'&&node.data.triggerMode==='schedule')||node.type==='webhookTrigger'))
+  const toggleActive=async()=>{
+    if(busy||!workflowId)return
+    const next=!isActive
+    setBusyKind('saving');setError('');setNotice('')
+    try{
+      if(dirty)await save(next)
+      else{
+        const res=await workflowRequest<{isActive:boolean;webhookToken?:string;message:string}>('/'+workflowId+'/active',{method:'PATCH',body:JSON.stringify({isActive:next})})
+        setIsActive(res.isActive)
+        if(typeof res.webhookToken==='string')setWebhookToken(res.webhookToken)
+        setWorkflows(prev=>prev.map(item=>item.id===workflowId?{...item,is_active:res.isActive?1:0}:item))
+      }
+      setNotice(next?'Workflow diaktifkan untuk jadwal/webhook otomatis.':'Workflow dikembalikan ke mode draft.')
+    }catch(err){message(err)}finally{setBusyKind('')}
+  }
+  const generateWebhookToken=async()=>{
+    if(!workflowId)return
+    const res=await workflowRequest<{webhookToken:string}>('/'+workflowId+'/webhook-token',{method:'POST'})
+    setWebhookToken(res.webhookToken)
+    setNotice('URL Webhook baru dibuat.')
   }
   const handleSave=async()=>{setBusyKind('saving');setError('');setNotice('');try{await save()}catch(err){message(err)}finally{setBusyKind('')}}
   const run=async(nodeId?:string)=>{
@@ -238,10 +306,10 @@ function Studio() {
       progressTimer=setInterval(()=>void pollActiveNode(workflowId),500)
       void pollActiveNode(workflowId)
       const result=await workflowRequest<ExecutionResult&{runId:string}>('/'+workflowId+(nodeId?'/test-node':'/execute'),{method:'POST',body:JSON.stringify(nodeId?{nodeId}:{})})
-       setHistoryLoaded(false)
-       if(progressTimer)clearInterval(progressTimer)
-       setNodes(prev=>prev.map(node=>({...node,data:{...node.data,running:false,status:undefined,result:result.nodeResults[node.id]}})))
-       setNotice(result.status==='cancelled'?'Pengujian dihentikan.':result.status==='error'?`Pengujian berhenti pada node "${failedNodeLabel(result)}". Buka node tersebut untuk melihat penyebabnya.`:result.status==='waiting_approval'?'Alur menunggu persetujuan. Buka node Persetujuan Manual untuk meninjau hasil.':'Pengujian selesai. Periksa input dan output setiap node.')
+      setHistoryLoaded(false)
+      if(progressTimer)clearInterval(progressTimer)
+      setNodes(prev=>prev.map(node=>({...node,data:{...node.data,running:false,status:undefined,result:result.nodeResults[node.id]}})))
+      setNotice(result.status==='cancelled'?'Pengujian dihentikan.':result.status==='error'?`Pengujian berhenti pada node "${failedNodeLabel(result)}". Buka node tersebut untuk melihat penyebabnya.`:result.status==='waiting_approval'?'Alur menunggu persetujuan. Buka node Persetujuan Manual untuk meninjau hasil.':'Pengujian selesai. Periksa input dan output setiap node.')
     }catch(err){if(progressTimer)clearInterval(progressTimer);if((err as Error&{code?:string}).code==='WORKFLOW_STOPPED')setNotice('Pengujian dihentikan.');else message(err);setNodes(prev=>prev.map(node=>({...node,data:{...node.data,running:false,status:undefined}})))}
     finally{setStopRequested(false);setBusyKind('');setLiveProgress(null)}
   }
@@ -264,9 +332,9 @@ function Studio() {
       progressTimer=setInterval(()=>void pollActiveNode(workflowId),500)
       void pollActiveNode(workflowId)
       const result=await workflowRequest<ExecutionResult&{runId:string}>('/'+workflowId+'/chat',{method:'POST',body:JSON.stringify({message:text,sessionId:chatSession})})
-       setHistoryLoaded(false)
-       if(progressTimer)clearInterval(progressTimer)
-       setNodes(previous=>previous.map(node=>({...node,data:{...node.data,running:false,status:undefined,result:result.nodeResults[node.id]}})))
+      setHistoryLoaded(false)
+      if(progressTimer)clearInterval(progressTimer)
+      setNodes(previous=>previous.map(node=>({...node,data:{...node.data,running:false,status:undefined,result:result.nodeResults[node.id]}})))
       if(result.status==='cancelled'){setNotice('Pengujian chat dihentikan.');setChatMessages(previous=>[...previous,{role:'Sistem',text:'Pengujian dihentikan.'}]);return}
       const outputs=nodes.filter(node=>node.type==='aiAgent').flatMap(node=>result.nodeResults[node.id]?.output||[])
       const answer=outputs.map(item=>String(item.json.output||'')).filter(Boolean).join('\n\n')
@@ -319,7 +387,7 @@ function Studio() {
     })
     if(!ok)return
     setBusyKind('deleting');setError('')
-     try{await workflowRequest('/'+workflowId,{method:'DELETE'});const rest=workflows.filter(w=>w.id!==workflowId);setWorkflows(rest);if(rest[0])await loadDetail(rest[0].id);else{setWorkflowId('');setName('');setNodes([]);setEdges([]);setSelectedId(null);setDetailOpen(false);setRuns([]);setHistoryLoaded(false);setSavedStamp('');setUndoStack([]);setRedoStack([])}}
+    try{await workflowRequest('/'+workflowId,{method:'DELETE'});const rest=workflows.filter(w=>w.id!==workflowId);setWorkflows(rest);if(rest[0])await loadDetail(rest[0].id);else{setWorkflowId('');setName('');setIsActive(false);setWebhookToken('');setNodes([]);setEdges([]);setSelectedId(null);setDetailOpen(false);setRuns([]);setHistoryLoaded(false);setSavedStamp('');setUndoStack([]);setRedoStack([])}}
     catch(err){message(err)}finally{setBusyKind('')}
   }
   const loadRuns=async()=>{
@@ -356,7 +424,7 @@ function Studio() {
         })
         if(!ok)return
       }
-       commit(importedNodes,importedEdges);setSelectedId(null);setDetailOpen(false);setNotice(removedCount?`${removedCount} node yang tidak tersedia dihapus dari workflow.`:'JSON berhasil diimpor ke draft. Simpan untuk menerapkan.')
+      commit(importedNodes,importedEdges);setSelectedId(null);setDetailOpen(false);setNotice(removedCount?`${removedCount} node yang tidak tersedia dihapus dari workflow.`:'JSON berhasil diimpor ke draft. Simpan untuk menerapkan.')
     }catch(err){message(err)}
   }
 
@@ -372,7 +440,7 @@ function Studio() {
           {!renaming&&<button className="wf-icon-button" aria-label="Ganti nama workflow" title="Ganti nama workflow" disabled={busy||!workflowId} onClick={()=>{renameStart.current=name;setRenaming(true)}}><Pencil size={15}/></button>}
           <button className="wf-create-button" aria-label="Workflow baru" title="Workflow baru" onClick={()=>setNewOpen(true)} disabled={busy}><Plus size={16}/><span>Baru</span></button>
         </div>
-        <div className="wf-toolbar-actions"><span className={'wf-save-status'+(dirty?' is-dirty':'')} role="status">{dirty?'Belum disimpan':'Tersimpan'}</span><button disabled={busy||!workflowId} onClick={()=>void handleSave()}><Save size={15}/>{busyKind==='saving'?'Menyimpan…':'Simpan'}</button>{['running','chat'].includes(busyKind)?<button className="wf-stop-test" disabled={stopRequested} onClick={()=>void stopRun()}><Square size={14} fill="currentColor"/>{stopRequested?'Menghentikan…':'Stop uji'}</button>:<button className="wf-primary" disabled={busy||!workflowId} onClick={()=>void run()}><Play size={15}/>Jalankan alur</button>}</div>
+        <div className="wf-toolbar-actions"><span className={'wf-save-status'+(dirty?' is-dirty':'')} role="status">{dirty?'Belum disimpan':'Tersimpan'}</span>{hasAutomationTrigger&&<button type="button" className={'wf-active-toggle'+(isActive?' is-active':'')} aria-pressed={isActive} disabled={busy||!workflowId} onClick={()=>void toggleActive()}><Power size={14}/>{isActive?'Aktif':'Draft'}</button>}<button disabled={busy||!workflowId} onClick={()=>void handleSave()}><Save size={15}/>{busyKind==='saving'?'Menyimpan…':'Simpan'}</button>{['running','chat'].includes(busyKind)?<button className="wf-stop-test" disabled={stopRequested} onClick={()=>void stopRun()}><Square size={14} fill="currentColor"/>{stopRequested?'Menghentikan…':'Stop uji'}</button>:<button className="wf-primary" disabled={busy||!workflowId} onClick={()=>void run()}><Play size={15}/>Jalankan alur</button>}</div>
       </div>
       <div className="wf-tabs-bar wf-editor-toolbar">
         <div className="wf-editor-navigation"><nav aria-label="Tampilan workflow"><button aria-pressed={tab==='editor'} onClick={()=>setTab('editor')}>Editor</button><button aria-pressed={tab==='executions'} disabled={busy||!workflowId} onClick={()=>{setTab('executions');if(!historyLoaded)void loadRuns()}}>Riwayat pengujian</button><button aria-pressed={tab==='logs'} disabled={busy||!workflowId} onClick={()=>{setTab('logs');if(!historyLoaded)void loadRuns()}}>Log</button></nav>{tab==='editor'&&<button aria-label="Tambah node" className="wf-add-node" disabled={busy||!workflowId} onClick={()=>{setSearch('');setPalette(true)}}><Plus size={15}/><span>Tambah node</span></button>}</div>
@@ -385,15 +453,15 @@ function Studio() {
       <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/>
       {tab==='editor'?<div className="wf-editor">
          {readinessOpen&&<section className="wf-readiness" id="wf-readiness" aria-label="Kesiapan workflow"><header><div><h2>{blockingIssues.length?`${blockingIssues.length} hal perlu diperbaiki`:'Siap diuji'}</h2><p>{blockingIssues.length?'Perbaiki pengaturan berikut sebelum memakai kuota AI. Klik masalah untuk membuka node.':'Konfigurasi dasar sudah lengkap. Ketersediaan model dan hasil AI diperiksa saat pengujian.'}</p></div><button type="button" aria-label="Tutup pemeriksaan alur" onClick={()=>setReadinessOpen(false)}><X size={16}/></button></header>{issues.length>0&&<ul>{issues.map((issue,index)=><li key={`${issue.nodeId||'graph'}-${issue.code}-${index}`} data-severity={issue.severity}>{issue.severity==='error'?<AlertTriangle size={15}/>:<HelpCircle size={15}/>}<span className="wf-issue-kind">{issue.severity==='error'?'Perbaiki':'Catatan'}</span>{issue.nodeId?<button disabled={busy} data-issue-node={issue.nodeId} onClick={()=>{setSelectedId(issue.nodeId!);setDetailOpen(true);void flow.current?.fitView({nodes:[{id:issue.nodeId!}],padding:.8,duration:200})}}>{issue.message}</button>:<p>{issue.message}</p>}</li>)}</ul>}</section>}
-         {guideOpen&&<section className="wf-usage-guide" id="wf-usage-guide" aria-label="Cara memakai Auto Workflow"><div className="wf-guide-heading"><div><h2>Mulai dari template Instagram 3 slide</h2><p>Alurnya memisahkan validasi, strategi, copywriting, quality check, dan persetujuan.</p></div><button type="button" className="wf-section-close" aria-label="Tutup panduan" onClick={()=>setGuideOpen(false)}><X size={16}/></button></div><ol><li>Klik <strong>Buat template Instagram</strong>, beri nama workflow, lalu klik Buat workflow.</li><li>Buka <strong>Manual Trigger</strong>. Isi topik, produk, audiens, tujuan, CTA, dan pastikan <code>slideCount: 3</code>.</li><li>Periksa berurutan <strong>Cari & Baca Informasi</strong>, <strong>Penentuan Topik</strong>, <strong>Validasi Fakta</strong>, dan <strong>Strategi Marketing 3 Slide</strong>. Node riset mencari topik dan membaca isi sumber sebelum diteruskan ke AI.</li><li>Tinjau <strong>Copywriting</strong> dan <strong>Quality Check</strong>. Buka <strong>Persetujuan Manual</strong> setelah pengujian, tinjau hasil masuk, lalu klik <strong>Setujui hasil ini</strong>. Jalankan ulang untuk meneruskan versi yang disetujui.</li></ol><p className="wf-guide-limit">AI Agent memakai Model AI dan Memory opsional. Pencarian internet dilakukan oleh node Cari & Baca Informasi. Klik Periksa alur sebelum pengujian. Node Generate Gambar dan Post to Instagram tersedia; pilih model serta akun, lalu tinjau hasil lewat Persetujuan Manual sebelum publikasi.</p><div className="wf-guide-bottom"><button disabled={busy} onClick={()=>{setNewName('Carousel Instagram 3 Slide');setNewDescription('Topik, validasi fakta, strategi, copywriting, quality check, dan persetujuan.');setTemplate('ig-autopost');setNewOpen(true)}}><Plus size={15}/>Buat template Instagram 3 slide</button><p><strong>Urutan:</strong> Manual Trigger → Cari & Baca Informasi → Penentuan Topik → Validasi Fakta → Strategi Marketing 3 Slide → Copywriting → Quality Check → Persetujuan Manual.</p></div></section>}
+         {guideOpen&&<section className="wf-usage-guide" id="wf-usage-guide" aria-label="Cara memakai Auto Workflow"><div className="wf-guide-heading"><div><h2>Mulai dari template Instagram 3 slide</h2><p>Alurnya memisahkan validasi, strategi, copywriting, quality check, dan persetujuan.</p></div><button type="button" className="wf-section-close" aria-label="Tutup panduan" onClick={()=>setGuideOpen(false)}><X size={16}/></button></div><ol><li>Klik <strong>Buat template Instagram</strong>, beri nama workflow, lalu klik Buat workflow.</li><li>Buka <strong>Manual Trigger</strong>. Isi topik, produk, audiens, tujuan, CTA, dan pastikan <code>slideCount: 3</code>.</li><li>Periksa berurutan <strong>Cari &amp; Baca Informasi</strong>, <strong>Penentuan Topik</strong>, <strong>Validasi Fakta</strong>, dan <strong>Strategi Marketing 3 Slide</strong>. Node riset mencari topik dan membaca isi sumber sebelum diteruskan ke AI.</li><li>Tinjau <strong>Copywriting</strong> dan <strong>Quality Check</strong>. Buka <strong>Persetujuan Manual</strong> setelah pengujian, tinjau hasil masuk, lalu klik <strong>Setujui hasil ini</strong>. Jalankan ulang untuk meneruskan versi yang disetujui.</li></ol><p className="wf-guide-limit">AI Agent memakai Model AI dan Memory opsional. Pencarian internet dilakukan oleh node Cari &amp; Baca Informasi. Klik Periksa alur sebelum pengujian. Node Generate Gambar, Edit &amp; Olah Gambar, dan Post to Instagram tersedia; pilih model serta akun, lalu tinjau hasil lewat Persetujuan Manual sebelum publikasi.</p><div className="wf-guide-bottom"><button disabled={busy} onClick={()=>{setNewName('Carousel Instagram 3 Slide');setNewDescription('Topik, validasi fakta, strategi, copywriting, quality check, dan persetujuan.');setTemplate('ig-autopost');setNewOpen(true)}}><Plus size={15}/>Buat template Instagram 3 slide</button><p><strong>Urutan:</strong> Manual Trigger → Cari &amp; Baca Informasi → Penentuan Topik → Validasi Fakta → Strategi Marketing 3 Slide → Copywriting → Quality Check → Persetujuan Manual.</p></div></section>}
          <div className={'wf-canvas'+(compact?' is-compact':'')} ref={canvas}>
           {busyKind==='running'&&liveProgress&&<div className="wf-live-status" role="status" aria-live="polite"><span className="wf-live-dot"/><span className="wf-live-copy"><strong>{liveProgress.label?`Sedang mengerjakan: ${liveProgress.label}`:'Menyiapkan alur…'}</strong><small>{liveProgress.done>0?`${liveProgress.done} node selesai`:'Menunggu node pertama'}</small></span></div>}
-          {compact?<div className="wf-mobile-flow">{nodes.map(node=><button key={node.id} data-mobile-node={node.id} className={'status-'+liveNodeStatus(node)} disabled={busy} onClick={()=>{setAssistantOpen(false);setSelectedId(node.id);setDetailOpen(true)}}><strong>{node.data.label}</strong><span>{catalog.find(item=>item.type===node.type)?.title||node.type} · {liveStatusText(liveNodeStatus(node))}</span><span>{edges.filter(edge=>edge.source===node.id).map(edge=>(edge.sourceHandle==='true'?'True → ':edge.sourceHandle==='false'?'False → ':'→ ')+(nodes.find(n=>n.id===edge.target)?.data.label||edge.target)).join(' · ')||'Akhir cabang'}</span></button>)}</div>:<ReactFlow<StudioNode,Edge> nodes={nodes.map(node=>({...node,data:{...node.data,onAddResource:(type:string)=>addNode(type,node.id),connectedAiResources:node.type==='aiAgent'?Object.keys(aiPorts).filter(resource=>edges.some(edge=>edge.target===node.id&&edge.targetHandle===aiPorts[resource])):[]}}))} edges={edges.map(edge=>({...edge,style:isAiConnection(edge)?{strokeDasharray:"5 4"}:undefined,type:'smoothstep',animated:busyKind==='running',markerEnd:{type:MarkerType.ArrowClosed}}))} nodeTypes={nodeTypes} onInit={instance=>{flow.current=instance}} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} isValidConnection={canConnect} onNodeDragStart={remember} onNodeClick={(_,node)=>{setAssistantOpen(false);setSelectedId(node.id);setDetailOpen(true)}} onPaneClick={()=>{setSelectedId(null);setDetailOpen(false)}} nodesDraggable={!busy} nodesConnectable={!busy} elementsSelectable={!busy} deleteKeyCode={busy?null:['Backspace','Delete']} fitView fitViewOptions={{padding:.4,maxZoom:1}} minZoom={.25} maxZoom={1.7}>
+          {compact?<div className="wf-mobile-flow">{nodes.map(node=><button key={node.id} data-mobile-node={node.id} className={'status-'+liveNodeStatus(node)} disabled={busy} onClick={()=>{setAssistantOpen(false);setSelectedId(node.id);setDetailOpen(true)}}>{!workflowNodeImages(node).length&&<strong>{node.data.label}</strong>}{workflowNodeImages(node).length>0&&<span className="wf-node-images">{workflowNodeImages(node).map((url,index)=><img key={url+index} src={url} alt={`Hasil gambar ${index+1}`} loading="lazy" draggable={false} referrerPolicy="no-referrer"/>)}</span>}<span>{workflowNodeImages(node).length?`Selesai - ${((node.data.result?.durationMs||0)/1000).toFixed(1)} s`:`${catalog.find(item=>item.type===node.type)?.title||node.type} · ${liveStatusText(liveNodeStatus(node))}`}</span>{!workflowNodeImages(node).length&&<span>{edges.filter(edge=>edge.source===node.id).map(edge=>(edge.sourceHandle==='true'?'True → ':edge.sourceHandle==='false'?'False → ':edge.sourceHandle?`${edge.sourceHandle} → `:'→ ')+(nodes.find(n=>n.id===edge.target)?.data.label||edge.target)).join(' · ')||'Akhir cabang'}</span>}</button>)}</div>:<ReactFlow<StudioNode,Edge> proOptions={{hideAttribution:true}} nodes={nodes.map(node=>({...node,data:{...node.data,onAddResource:(type:string)=>addNode(type,node.id),connectedAiResources:node.type==='aiAgent'?Object.keys(aiPorts).filter(resource=>edges.some(edge=>edge.target===node.id&&edge.targetHandle===aiPorts[resource])):[]}}))} edges={edges.map(edge=>({...edge,style:isAiConnection(edge)?{strokeDasharray:"5 4"}:undefined,type:'smoothstep',animated:busyKind==='running',markerEnd:{type:MarkerType.ArrowClosed}}))} nodeTypes={nodeTypes} onInit={instance=>{flow.current=instance}} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} isValidConnection={canConnect} onNodeDragStart={remember} onNodeClick={(_,node)=>{setAssistantOpen(false);setSelectedId(node.id);setDetailOpen(true)}} onPaneClick={()=>{setSelectedId(null);setDetailOpen(false)}} nodesDraggable={!busy} nodesConnectable={!busy} elementsSelectable={!busy} deleteKeyCode={busy?null:['Backspace','Delete']} fitView fitViewOptions={{padding:.4,maxZoom:1}} minZoom={.25} maxZoom={1.7}>
              <Background gap={24} size={1.5} color="var(--wf-control)"/><Controls showInteractive={false}/>
           </ReactFlow>}
           {!nodes.length&&<div className="wf-empty-canvas"><Workflow size={28}/><h2>{workflowId?'Mulai dengan trigger':'Buat workflow pertama'}</h2><p>{workflowId?'Tambahkan node pemicu, lalu hubungkan langkah berikutnya.':'Pilih template alur data atau mulai dari kanvas kosong.'}</p><button disabled={busy} onClick={()=>workflowId?setPalette(true):setNewOpen(true)}><Plus size={16}/>{workflowId?'Tambah node':'Workflow baru'}</button></div>}
           {workflowId&&<WorkflowAssistantPanel key={workflowId} workflowId={workflowId} nodes={nodes} edges={edges} busy={busy} visible={assistantOpen} initialDraft={assistantDrafts.current.get(workflowId)||''} onDraftChange={draft=>assistantDrafts.current.set(workflowId,draft)} onApply={(nextNodes,nextEdges)=>{commit(nextNodes,nextEdges);setSelectedId(null);setDetailOpen(false);setNotice('Usulan asisten diterapkan ke draft. Periksa lalu simpan.') }} onClose={()=>setAssistantOpen(false)}/>}
-          {detailOpen&&selectedNode&&<NodeSettingsPanel key={selectedNode.id} workflowId={workflowId} node={selectedNode} nodes={nodes} edges={edges} busy={busy} onUpdate={updateNode} onDelete={removeNode} onClose={()=>setDetailOpen(false)} onExecute={id=>void run(id)} onSelect={id=>{setSelectedId(id);setDetailOpen(true)}} onAddResource={addNode}/>}
+          {detailOpen&&selectedNode&&<NodeSettingsPanel key={selectedNode.id} workflowId={workflowId} webhookToken={webhookToken} onGenerateWebhookToken={generateWebhookToken} node={selectedNode} nodes={nodes} edges={edges} busy={busy} onUpdate={updateNode} onDelete={removeNode} onClose={()=>setDetailOpen(false)} onExecute={id=>void run(id)} onSelect={id=>{setSelectedId(id);setDetailOpen(true)}} onAddResource={addNode}/>}
           {toast}
         </div>
         {chatOpen&&<section className="wf-test-chat" aria-label="Uji chat workflow"><header><div><h3>Uji chat</h3><p>Setiap pesan menjalankan workflow dan memakai kuota model 9router.</p></div><button disabled={busy} onClick={()=>{setChatMessages([]);setChatSession(crypto.randomUUID())}}>Sesi baru</button><button type="button" className="wf-section-close" aria-label="Tutup uji chat" onClick={()=>setChatOpen(false)}><X size={16}/></button></header><div className="wf-chat-messages" aria-live="polite">{!chatMessages.length?<p className="wf-muted">Pilih Model AI, tambahkan Memory bila percakapan perlu diingat, lalu kirim pesan.</p>:chatMessages.map((message,index)=><article key={index} className={message.role==='Error'?'wf-error':''}><strong>{message.role}</strong><p>{message.text}</p></article>)}{busyKind==='chat'&&<p role="status">AI Agent sedang memproses…</p>}</div><form onSubmit={event=>void sendChat(event)}><label className="wf-field"><span>Pesan untuk AI Agent</span><textarea rows={2} maxLength={16000} value={chatMessage} disabled={busy} onChange={event=>setChatMessage(event.target.value)} placeholder="Contoh: Buat rencana carousel 3 slide untuk produk saya"/></label><button className="wf-primary" disabled={busy||!chatMessage.trim()} type="submit"><Send size={15}/>Kirim</button></form></section>}
@@ -401,15 +469,19 @@ function Studio() {
       </div>:tab==='executions'?<div className="wf-executions">
          <header><div><h2>Riwayat pengujian</h2><p className="wf-muted">Pilih pengujian untuk melihat langkah, input, dan outputnya.</p></div><button disabled={runsLoading} onClick={()=>void loadRuns()}><RefreshCw size={14}/>Muat ulang</button></header>
         {runsLoading?<p role="status">Memuat riwayat…</p>:!runs.length?<div className="wf-empty-history"><h3>Belum ada eksekusi</h3><p>Klik Jalankan alur di editor untuk merekam input dan output node.</p></div>:<div className="wf-history-grid">
-           <div className="wf-run-list" aria-label="Daftar pengujian">{runs.map(item=><button key={item.id} aria-pressed={viewedRunId===item.id} onClick={()=>{setViewedRunId(item.id);setViewedNodeId(Object.keys(item.result?.nodeResults||{})[0]||'')}}><strong><span className={'wf-history-status status-'+item.status}>{item.status==='error'?'Error':item.status==='cancelled'?'Dihentikan':item.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span> · {item.trigger_type==='partial'?'Satu langkah':item.trigger_type==='chat'?'Chat':'Workflow'}</strong><span>{new Date(item.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})}</span><span>{Object.keys(item.result?.nodeResults||{}).length} node diperiksa</span></button>)}</div>
-           <section className="wf-run-detail"><header className="wf-run-detail-header"><div><h3>Detail pengujian</h3>{viewedRun&&<p className="wf-muted">{new Date(viewedRun.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · {viewedRun.trigger_type==='partial'?'Satu langkah':viewedRun.trigger_type==='chat'?'Chat':'Workflow'}</p>}</div>{viewedRun&&<span className={'wf-history-status status-'+viewedRun.status}>{viewedRun.status==='error'?'Error':viewedRun.status==='cancelled'?'Dihentikan':viewedRun.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span>}</header>{!Object.keys(viewedResults).length?<p>Pengujian ini belum memiliki rincian input dan output per node.</p>:<><label className="wf-field"><span>Pilih node untuk diperiksa</span><select value={viewedNodeId} onChange={e=>setViewedNodeId(e.target.value)}>{Object.values(viewedResults).map(result=><option key={result.nodeId} value={result.nodeId}>{result.label} · {liveStatusText(result.status)}</option>)}</select></label>{viewedResult&&<><p className="wf-history-node-meta">{liveStatusText(viewedResult.status)} <span>· {viewedResult.durationMs} ms · {viewedResult.output.length} hasil</span></p>{viewedResult.error&&<p role="alert" className="wf-error">{viewedResult.error}</p>}<div className="wf-history-output"><h4>Hasil langkah</h4><DataViewer items={viewedResult.output}/></div><details className="wf-history-input" key={`${viewedRunId}-${viewedNodeId}`}><summary>Bahan masuk <span>{viewedResult.input.length} item</span></summary>{viewedResult.input.length?<DataViewer items={viewedResult.input}/>:<p className="wf-muted">Langkah pemicu ini memulai alur tanpa bahan masuk.</p>}</details></>}</>}</section>
+           <div className="wf-run-list" aria-label="Daftar pengujian">{runs.map(item=><button key={item.id} aria-pressed={viewedRunId===item.id} onClick={()=>{setViewedRunId(item.id);setViewedNodeId(Object.keys(item.result?.nodeResults||{})[0]||'')}}><strong><span className={'wf-history-status status-'+item.status}>{item.status==='error'?'Error':item.status==='cancelled'?'Dihentikan':item.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span> · {triggerTypeLabel(item.trigger_type)}</strong><span>{new Date(item.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})}</span><span>{Object.keys(item.result?.nodeResults||{}).length} node diperiksa</span></button>)}</div>
+           <section className="wf-run-detail"><header className="wf-run-detail-header"><div><h3>Detail pengujian</h3>{viewedRun&&<p className="wf-muted">{new Date(viewedRun.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · {triggerTypeLabel(viewedRun.trigger_type)}</p>}</div>{viewedRun&&<span className={'wf-history-status status-'+viewedRun.status}>{viewedRun.status==='error'?'Error':viewedRun.status==='cancelled'?'Dihentikan':viewedRun.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span>}</header>{!Object.keys(viewedResults).length?<p>Pengujian ini belum memiliki rincian input dan output per node.</p>:<><label className="wf-field"><span>Pilih node untuk diperiksa</span><select value={viewedNodeId} onChange={e=>setViewedNodeId(e.target.value)}>{Object.values(viewedResults).map(result=><option key={result.nodeId} value={result.nodeId}>{result.label} · {liveStatusText(result.status)}</option>)}</select></label>{viewedResult&&<><p className="wf-history-node-meta">{liveStatusText(viewedResult.status)} <span>· {viewedResult.durationMs} ms · {viewedResult.output.length} hasil</span></p>{viewedResult.error&&<p role="alert" className="wf-error">{viewedResult.error}</p>}<div className="wf-history-output"><h4>Hasil langkah</h4><DataViewer items={viewedResult.output}/></div><details className="wf-history-input" key={`${viewedRunId}-${viewedNodeId}`}><summary>Bahan masuk <span>{viewedResult.input.length} item</span></summary>{viewedResult.input.length?<DataViewer items={viewedResult.input}/>:<p className="wf-muted">Langkah pemicu ini memulai alur tanpa bahan masuk.</p>}</details></>}</>}</section>
         </div>}
       </div>:<div className="wf-executions wf-log-panel">
         <header><div><h2>Log</h2><p className="wf-muted">Catatan keberhasilan, error, notifikasi, dan status setiap langkah workflow.</p></div><button disabled={runsLoading} onClick={()=>void loadRuns()}><RefreshCw size={14}/>Muat ulang</button></header>
-        {runsLoading?<p role="status">Memuat log…</p>:!workflowLogs.length?<div className="wf-empty-history"><ScrollText size={22}/><h3>Belum ada log</h3><p>Log akan muncul setelah workflow atau satu langkah dijalankan.</p></div>:<div className="wf-log-list" aria-label="Log workflow">{workflowLogs.map((log,index)=><article key={`${log.runId}-${log.time}-${index}`} className={'wf-log-entry status-'+log.status}><div className="wf-log-icon">{log.status==='success'?<Check size={15}/>:log.status==='error'?<AlertTriangle size={15}/>:<ScrollText size={15}/>}</div><div className="wf-log-copy"><div><strong>{log.step}</strong><span className="wf-log-status">{log.status}</span></div><p>{log.message}</p><small>{new Date(log.time).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · Pengujian {log.runId.slice(0,8)}</small></div></article>)}</div>}
+        {runsLoading?<p role="status">Memuat log…</p>:!workflowLogs.length?<div className="wf-empty-history"><ScrollText size={22}/><h3>Belum ada log</h3><p>Log akan muncul setelah workflow atau satu langkah dijalankan.</p></div>:<div className="wf-log-list" aria-label="Log workflow">{workflowLogs.map((log,index)=><article key={`${log.runId}-${log.time}-${index}`} className={'wf-log-entry status-'+log.status} role="button" tabIndex={0} aria-label={`Lihat hasil ${log.step}`} onClick={()=>setLogSelection(log)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setLogSelection(log)}}}><div className="wf-log-icon">{log.status==='success'?<Check size={15}/>:log.status==='error'?<AlertTriangle size={15}/>:<ScrollText size={15}/>}</div><div className="wf-log-copy"><div><strong>{log.step}</strong><span className="wf-log-status">{log.status}</span></div><p>{log.message}</p><small>{new Date(log.time).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · Pengujian {log.runId.slice(0,8)}</small></div></article>)}</div>}
       </div>}
     </div>
     {tab==='executions'&&toast}
+    <dialog ref={logResultDialog} className="wf-log-result-dialog" aria-labelledby="wf-log-result-title" onCancel={()=>setLogSelection(null)} onClose={()=>setLogSelection(null)}>
+      <header className="wf-dialog-heading"><div><h2 id="wf-log-result-title">{logSelection?.step||'Hasil node'}</h2><p>{logSelection?.message}</p></div><button type="button" className="wf-dialog-close" aria-label="Tutup hasil node" onClick={()=>setLogSelection(null)}><X size={18}/></button></header>
+      <div className="wf-log-result-body">{logResult?<>{logResult.error&&<p role="alert" className="wf-error">{logResult.error}</p>}<DataViewer key={logSelection?.runId+'-'+logSelection?.nodeId} items={logResult.output}/><details className="wf-history-input"><summary>Bahan masuk</summary><DataViewer items={logResult.input}/></details></>:<p className="wf-muted">Log ini tidak memiliki hasil node yang tersimpan.</p>}</div>
+    </dialog>
     <dialog ref={paletteDialog} className="wf-palette-dialog" onCancel={()=>setPalette(false)} onClose={()=>setPalette(false)}><header className="wf-dialog-heading"><div><h2>Tambah node</h2><p>Pilih node berdasarkan tugas yang ingin Anda lakukan.</p></div><button type="button" className="wf-dialog-close" aria-label="Tutup katalog node" onClick={()=>setPalette(false)}><X size={18}/></button></header><div className="wf-palette-content"><label className="wf-search"><Search size={16}/><input aria-label="Cari node" placeholder="Cari node…" value={search} onChange={e=>setSearch(e.target.value)}/></label>{['Pemicu','Data','Logika','AI','Publikasi'].map(group=>{const matches=availableCatalog.filter(item=>item.group===group&&(item.title+' '+item.description).toLowerCase().includes(search.toLowerCase()));return matches.length>0&&<section key={group}><h3>{group}</h3>{matches.map(item=>{const Icon=iconForWorkflowNode(item.type);return <button key={item.type} disabled={busy} data-add-node={item.type} onClick={()=>addNode(item.type)}><span className={"wf-palette-icon wf-kind-"+item.type}><Icon size={18}/></span><span className="wf-palette-copy"><strong>{item.title}</strong><span>{item.description}</span></span><Plus className="wf-palette-plus" size={16}/></button>})}</section>})}{!availableCatalog.some(item=>(item.title+' '+item.description).toLowerCase().includes(search.toLowerCase()))&&<p>Tidak ada node yang cocok.</p>}</div></dialog>
     <dialog ref={createDialog} className="wf-create-dialog" onCancel={e=>{if(busy)e.preventDefault();else setNewOpen(false)}} onClose={()=>setNewOpen(false)}><header className="wf-dialog-heading"><div><h2>Workflow baru</h2><p>Pilih titik awal untuk alurmu.</p></div><button type="button" className="wf-dialog-close" disabled={busy} aria-label="Tutup workflow baru" onClick={()=>setNewOpen(false)}><X size={18}/></button></header><form onSubmit={create}><label className="wf-field"><span>Nama workflow</span><input required maxLength={160} value={newName} disabled={busy} onChange={e=>setNewName(e.target.value)} placeholder="Contoh: Alur persetujuan konten"/></label><label className="wf-field"><span>Deskripsi (opsional)</span><textarea rows={2} maxLength={2000} value={newDescription} disabled={busy} onChange={e=>setNewDescription(e.target.value)} placeholder="Tujuan dan konteks workflow"/></label><label className="wf-field"><span>Template awal</span><select value={template} disabled={busy} onChange={e=>setTemplate(e.target.value)}><option value="starter">Alur sederhana · Mulai → Atur informasi → Cek kondisi</option><option value="blank">Kanvas kosong</option><option value="chat-agent">AI Agent · Model, ingatan, dan brief</option><option value="ig-research">Riset Instagram · AI + pencarian 5 halaman</option><option value="ig-autopost">Instagram carousel · rencana sampai persetujuan (pratinjau)</option></select></label><p className="wf-muted">Semua workflow dibuat sebagai draft. Template integrasi hanya menyiapkan konfigurasi.</p><button className="wf-primary" disabled={busy||!newName.trim()} type="submit">{busyKind==='creating'?'Membuat…':'Buat workflow'}</button></form></dialog>
     <dialog ref={confirmDialog} className="wf-confirm-dialog" onCancel={e=>{e.preventDefault();handleCancelConfirm()}} onClose={handleCancelConfirm}>

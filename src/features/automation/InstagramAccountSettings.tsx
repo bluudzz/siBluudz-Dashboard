@@ -76,7 +76,7 @@ export function InstagramAccountSettings({value,busy,onChange,operation,onOperat
     <div className="wf-ig-actions"><label className="wf-field"><span>Tindakan</span><select aria-label="Tindakan Instagram" disabled={busy||working||checking||!access} value={operation} onChange={event=>onOperationChange(event.target.value)}>
       {!access&&<option value={operation}>{checking?'Memeriksa akses token…':'Hubungkan akun untuk melihat tindakan'}</option>}
       {enabled.length>0&&<optgroup label="Tersedia">{enabled.map(action=><option key={action.id} value={action.id}>{action.label}</option>)}</optgroup>}
-      {disabled.length>0&&<optgroup label="Tidak tersedia">{disabled.map(action=><option key={action.id} value={action.id} disabled>{action.label} · {['publish','list','inspect'].includes(action.id)?'Akses belum tersedia':'Belum didukung'}</option>)}</optgroup>}
+      {disabled.length>0&&<optgroup label="Tidak tersedia">{disabled.map(action=><option key={action.id} value={action.id} disabled>{action.label} · {['publish','reels','stories','list','inspect','comments','insights'].includes(action.id)?'Akses belum tersedia':'Belum didukung'}</option>)}</optgroup>}
     </select></label>{current&&!current.enabled&&<p className="wf-muted" role="status">{current.reason}</p>}
       {access&&<details className="wf-ig-access-details"><summary>{enabled.length} tindakan tersedia · Lihat akses</summary><ul>{access.actions.map(action=><li key={action.id} className={action.enabled?'':'is-disabled'}><strong>{action.label}</strong><span>{action.reason}</span></li>)}</ul>{!access.permissionsKnown&&<p className="wf-muted">Untuk memeriksa izin Page token, atur META_APP_ACCESS_TOKEN dari aplikasi Meta yang sama di VPS.</p>}</details>}
     </div>

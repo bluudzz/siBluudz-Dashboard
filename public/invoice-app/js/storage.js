@@ -11,6 +11,30 @@ const STORAGE_KEYS = {
 };
 
 const StorageManager = {
+  lastNotifiedSignature: '',
+
+  canonicalize: (value) => {
+    if (Array.isArray(value)) return value.map(StorageManager.canonicalize);
+    if (value && typeof value === 'object') {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = StorageManager.canonicalize(value[key]);
+          return acc;
+        }, {});
+    }
+    return value;
+  },
+
+  listSignature: (list) => {
+    if (!Array.isArray(list)) return '[]';
+    return JSON.stringify(list.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const { updatedAt: _u, createdAt: _c, ...rest } = item;
+      return StorageManager.canonicalize(rest);
+    }));
+  },
+
   // Get all saved invoices
   getSavedInvoices: () => {
     try {
@@ -27,6 +51,7 @@ const StorageManager = {
     try {
       localStorage.setItem(STORAGE_KEYS.SAVED_INVOICES, JSON.stringify(list));
       if (notifyParent) {
+        StorageManager.lastNotifiedSignature = StorageManager.listSignature(list);
         const message = {
           type: 'INVOICES_UPDATED',
           invoices: list

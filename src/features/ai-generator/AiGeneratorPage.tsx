@@ -1,10 +1,39 @@
 import * as React from 'react'
-import { ArrowUpRight, Check, ChevronDown, Copy, Download, History, ImagePlus, RefreshCw, Search, Send, Trash2, X } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Check,
+  ChevronDown,
+  History,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useUser } from '@/context/UserContext'
 import { PromptStudioPage } from '@/features/prompt-studio/PromptStudioPage'
-import { generatorTools, toolGroups, composeToolPrompt } from './tool-catalog'
+import { PromptCheckerWorkspace } from './PromptCheckerWorkspace'
+import { WebsitePromptWorkspace } from './WebsitePromptWorkspace'
+import { ImagePromptWorkspace } from './ImagePromptWorkspace'
+import { ProductSwapWorkspace } from './ProductSwapWorkspace'
+import type { ProductSwapResult, UploadedPhoto } from './ProductSwapWorkspace'
+import { RelightStudio } from './RelightStudio'
+import { AiToolIcon, ToolNavigation } from './ToolNavigation'
+import { generatorTools } from './tool-catalog'
 import type { GeneratorMode } from './tool-catalog'
+import { buildCheckerPrompt, parsePromptEvaluation } from '../../../shared/prompt-checker.js'
+import type { PromptEvaluation } from '../../../shared/prompt-checker.js'
+import { buildWebsitePrompt, parseWebsiteSpec } from '../../../shared/website-prompt.js'
+import type { WebsiteSpec } from '../../../shared/website-prompt.js'
+import { buildImagePrompt, parseImagePromptSpec } from '../../../shared/image-prompt.js'
+import type { ImagePromptSpec } from '../../../shared/image-prompt.js'
+import { defaultProductSwapSettings } from '../../../shared/product-swap.js'
+import type { ProductSwapResolution, ProductSwapSettings } from '../../../shared/product-swap.js'
+import {
+  curateTextModels,
+  curateImageModels,
+  pickPreferredLatestTextModel,
+} from '../../../shared/model-catalog.js'
 import './ai-generator.css'
 
 interface ModelCatalogEntry {
@@ -29,25 +58,33 @@ interface AiStatus {
   remaining: number
   isUnlimited: boolean
   availableModels?: string[]
+  availableImageModels?: string[]
   catalog?: ModelCatalogEntry[]
   syncedAt?: string
+  imageModelsSyncedAt?: string
   imageModel?: string
-}
-
-export interface ReframedData {
-  crescendo: string[]
-  policy_puppetry: string
-  cognitive_reframing: string
-  prefill_prompt: string
 }
 
 const OWNER_LABELS: Record<string, string> = {
   ag: 'Antigravity',
+  cx: 'Codex',
+  gptweb: 'GPTWeb',
+  river: 'River',
+  omnirush: 'OmniRush',
+  yeta: 'Yeta',
+  'muse-image': 'Muse Image',
   ds: 'DeepSeek',
   oc: 'OpenCode',
   mmf: 'MiMo',
   combo: 'Combo',
   colab: 'Colab',
+}
+
+function resolveLiveModel(candidate: string, liveList: string[], defaultModel?: string): string {
+  if (liveList.length === 0) return candidate || defaultModel || ''
+  if (candidate && liveList.includes(candidate)) return candidate
+  if (defaultModel && liveList.includes(defaultModel)) return defaultModel
+  return liveList[0]
 }
 
 function getModelProvider(modelName: string, owner?: string): string {
@@ -69,19 +106,16 @@ function getModelProvider(modelName: string, owner?: string): string {
 
 // Dipakai hanya bila 9router tidak dapat dihubungi dan cache DB kosong.
 const FALLBACK_NINEROUTER_MODELS = [
-  'ag/gemini-3.8-flash',
-  'ag/gemini-3.1-pro-high',
+  'cx/gpt-6.2-sol',
+  'ag/gemini-4-hydrogen',
   'ag/claude-sonnet-5-5',
   'ag/claude-opus-5-5',
-  'ag/gpt-oss-120b-medium',
-  'ds/deepseek-v4-flash',
-  'ds/deepseek-v4-pro',
-  'ds/deepseek-reasoner',
-  'oc/glm-5.3-flash-free',
-  'muse-spark',
+  'gptweb/gpt-6-2',
+  'river/GLM-5.3',
+  'yeta/deepseek-v4.1-flash',
 ]
 
-export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMode?: GeneratorMode } = {}) {
+export function AiGeneratorPage({ initialMode = 'prompt_checker' }: { initialMode?: GeneratorMode } = {}) {
   const { profile } = useUser()
   const [aiStatus, setAiStatus] = React.useState<AiStatus | null>(null)
   const [statusLoading, setStatusLoading] = React.useState(true)
@@ -90,24 +124,47 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
   const [mode, setMode] = React.useState<GeneratorMode>(initialMode)
   const [contextByMode, setContextByMode] = React.useState<Record<string, string>>({})
   const [studioVisited, setStudioVisited] = React.useState(initialMode === 'prompt_studio')
+  const [relightVisited, setRelightVisited] = React.useState(initialMode === 'relight_studio')
   const [inputsByMode, setInputsByMode] = React.useState<Record<string, string>>({})
   const [outputsByMode, setOutputsByMode] = React.useState<Record<string, string>>({})
-  const [reframedByMode, setReframedByMode] = React.useState<Record<string, ReframedData | null>>({})
+  const [checkerGoal, setCheckerGoal] = React.useState('general')
+  const [checkerFocuses, setCheckerFocuses] = React.useState<string[]>(['clarity', 'output_format'])
+  const [checkerEvaluation, setCheckerEvaluation] = React.useState<PromptEvaluation | null>(null)
+  const [checkerEvaluatedSource, setCheckerEvaluatedSource] = React.useState('')
+  const [websiteProjectType, setWebsiteProjectType] = React.useState('webapp')
+  const [websiteAssistant, setWebsiteAssistant] = React.useState('agent')
+  const [websiteStack, setWebsiteStack] = React.useState<string[]>([
+    'React + Vite',
+    'TypeScript',
+    'Tailwind CSS',
+  ])
+  const [websiteStandards, setWebsiteStandards] = React.useState<string[]>([
+    'responsive',
+    'dual_theme',
+  ])
+  const [websiteSpec, setWebsiteSpec] = React.useState<WebsiteSpec | null>(null)
+  const [imageTarget, setImageTarget] = React.useState('universal')
+  const [imageStyle, setImageStyle] = React.useState('product_studio')
+  const [imageRatio, setImageRatio] = React.useState('4:5')
+  const [imageLighting, setImageLighting] = React.useState('natural_morning')
+  const [imageLanguage, setImageLanguage] = React.useState('en')
+  const [imagePromptSpec, setImagePromptSpec] = React.useState<ImagePromptSpec | null>(null)
 
   const promptInput = inputsByMode[mode] || ''
-  const setPromptInput = React.useCallback((val: string) => {
-    setInputsByMode((prev) => ({ ...prev, [mode]: val }))
-  }, [mode])
+  const setPromptInput = React.useCallback(
+    (val: string) => {
+      setInputsByMode((prev) => ({ ...prev, [mode]: val }))
+    },
+    [mode]
+  )
 
   const generatedOutput = outputsByMode[mode] || ''
-  const setGeneratedOutput = React.useCallback((val: string) => {
-    setOutputsByMode((prev) => ({ ...prev, [mode]: val }))
-  }, [mode])
-
-  const reframedData = reframedByMode[mode] || null
-  const setReframedData = React.useCallback((val: ReframedData | null) => {
-    setReframedByMode((prev) => ({ ...prev, [mode]: val }))
-  }, [mode])
+  const setGeneratedOutput = React.useCallback(
+    (val: string) => {
+      setOutputsByMode((prev) => ({ ...prev, [mode]: val }))
+    },
+    [mode]
+  )
 
   const [selectedModel, setSelectedModel] = React.useState<string>(() => {
     try {
@@ -116,31 +173,52 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
       return ''
     }
   })
+  const [selectedImageModel, setSelectedImageModel] = React.useState<string>(() => {
+    try {
+      return localStorage.getItem('sibluudz_product_swap_model') || ''
+    } catch {
+      return ''
+    }
+  })
   const [customModels, setCustomModels] = React.useState<string[]>([])
+  const [imageModels, setImageModels] = React.useState<string[]>([])
   const [modelsLoading, setModelsLoading] = React.useState(false)
   const [isModelDropdownOpen, setIsModelDropdownOpen] = React.useState(false)
   const [modelCategory, setModelCategory] = React.useState<string>('all')
   const [modelSearch, setModelSearch] = React.useState('')
+  const [showLegacyModels, setShowLegacyModels] = React.useState(false)
+  const [modelsSyncError, setModelsSyncError] = React.useState('')
+  const lastTextSyncRef = React.useRef(0)
+  const lastImageSyncRef = React.useRef(0)
 
   const [generating, setGenerating] = React.useState(false)
   const [generationError, setGenerationError] = React.useState('')
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null)
-  const [viewMode, setViewMode] = React.useState<'architectural' | 'raw'>('architectural')
-  const [toolSearch, setToolSearch] = React.useState('')
+  const [pane, setPane] = React.useState<'input' | 'result'>('input')
   const historyDialogRef = React.useRef<HTMLDialogElement>(null)
 
-  const [sceneImage, setSceneImage] = React.useState('')
-  const [productImage, setProductImage] = React.useState('')
-  const [imageResult, setImageResult] = React.useState('')
+  const [scenePhoto, setScenePhoto] = React.useState<UploadedPhoto | null>(null)
+  const [productPhoto, setProductPhoto] = React.useState<UploadedPhoto | null>(null)
+  const [swapSettings, setSwapSettings] = React.useState<ProductSwapSettings>({
+    ...defaultProductSwapSettings,
+  })
+  const [swapResolution, setSwapResolution] = React.useState<ProductSwapResolution>('')
+  const [swapResult, setSwapResult] = React.useState<ProductSwapResult | null>(null)
+  const [relightSeed, setRelightSeed] = React.useState<{
+    key: number
+    source: { data: string; name: string } | null
+  }>({ key: 0, source: null })
 
   // History state
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false)
-  const [historyList, setHistoryList] = React.useState<{ id: string; type: string; model: string; prompt: string; result: string; createdAt: string }[]>([])
+  const [historySearch, setHistorySearch] = React.useState('')
+  const [historyList, setHistoryList] = React.useState<
+    { id: string; type: string; model: string; prompt: string; result: string; createdAt: string }[]
+  >([])
   const [historyLoading, setHistoryLoading] = React.useState(false)
   const [historyError, setHistoryError] = React.useState('')
 
   const dropdownRef = React.useRef<HTMLDivElement>(null)
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
   React.useEffect(() => {
     const dialog = historyDialogRef.current
@@ -151,19 +229,15 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
   const selectTool = (nextMode: GeneratorMode) => {
     if (generating) return
     setMode(nextMode)
+    setPane('input')
     if (nextMode === 'prompt_studio') setStudioVisited(true)
+    if (nextMode === 'relight_studio') setRelightVisited(true)
     setIsModelDropdownOpen(false)
+    setModelCategory('all')
+    setModelSearch('')
     setGenerationError('')
     setCopiedKey(null)
   }
-
-  // Auto-resize textarea to fit content smoothly
-  React.useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 110), 320)}px`
-    }
-  }, [promptInput])
 
   // Close dropdown when clicked outside
   React.useEffect(() => {
@@ -180,31 +254,89 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
 
   const [modelCatalog, setModelCatalog] = React.useState<ModelCatalogEntry[]>([])
 
+  const loadStatus = React.useCallback(async (refresh = false) => {
+    const res = await fetch(refresh ? '/api/ai/status?refresh=1' : '/api/ai/status', {
+      credentials: 'same-origin',
+    })
+    if (!res.ok) {
+      throw new Error(`Gagal mengambil status AI (${res.status})`)
+    }
+    const data: AiStatus = await res.json()
+    return data
+  }, [])
+
+  const applyStatus = React.useCallback((data: AiStatus) => {
+    setAiStatus(data)
+    const catalog = Array.isArray(data.catalog) ? data.catalog : []
+    setModelCatalog(catalog)
+    const rawAvailable = Array.isArray(data.availableModels) ? data.availableModels : []
+    const curatedText = curateTextModels(rawAvailable, catalog)
+    if (curatedText.all.length > 0 && lastTextSyncRef.current === 0) {
+      setCustomModels(curatedText.all)
+    }
+    const preferredTextDefault =
+      (data.model && curatedText.latest.includes(data.model) && data.model) ||
+      pickPreferredLatestTextModel(curatedText.latest, catalog)
+    setSelectedModel((prev) => {
+      const saved = (() => {
+        try {
+          return localStorage.getItem('sibluudz_ai_model') || ''
+        } catch {
+          return ''
+        }
+      })()
+      const next = resolveLiveModel(prev || saved, curatedText.latest, preferredTextDefault)
+      if (next && next !== prev) {
+        try {
+          localStorage.setItem('sibluudz_ai_model', next)
+        } catch {
+          /* Storage can be unavailable in private sessions. */
+        }
+      }
+      return next
+    })
+
+    const imgList = Array.isArray(data.availableImageModels) ? data.availableImageModels : []
+    const curatedImg = curateImageModels(imgList)
+    if (curatedImg.all.length > 0 && lastImageSyncRef.current === 0) {
+      setImageModels(curatedImg.all)
+    }
+    const preferredImgDefault =
+      (data.imageModel && curatedImg.latest.includes(data.imageModel) && data.imageModel) ||
+      curatedImg.latest[0] ||
+      data.imageModel
+    setSelectedImageModel((prev) => {
+      const saved = (() => {
+        try {
+          return localStorage.getItem('sibluudz_product_swap_model') || ''
+        } catch {
+          return ''
+        }
+      })()
+      const next = resolveLiveModel(prev || saved, curatedImg.latest, preferredImgDefault)
+      if (next && next !== prev) {
+        try {
+          localStorage.setItem('sibluudz_product_swap_model', next)
+        } catch {
+          /* Storage can be unavailable in private sessions. */
+        }
+      }
+      return next
+    })
+  }, [])
+
   const fetchStatus = React.useCallback(async () => {
     setStatusLoading(true)
     setStatusError('')
     try {
-      const res = await fetch('/api/ai/status', { credentials: 'same-origin' })
-      if (!res.ok) {
-        throw new Error(`Gagal mengambil status AI (${res.status})`)
-      }
-      const data: AiStatus = await res.json()
-      setAiStatus(data)
-      if (Array.isArray(data.availableModels) && data.availableModels.length > 0) {
-        setCustomModels(data.availableModels)
-      }
-      if (Array.isArray(data.catalog)) setModelCatalog(data.catalog)
-      setSelectedModel((prev) => {
-        if (prev) return prev
-        const saved = (() => { try { return localStorage.getItem('sibluudz_ai_model') } catch { return null } })()
-        return saved || data.model || 'gpt-4o-mini'
-      })
+      const data = await loadStatus(true)
+      applyStatus(data)
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : 'Gagal memuat status AI')
     } finally {
       setStatusLoading(false)
     }
-  }, [])
+  }, [loadStatus, applyStatus])
 
   const fetchHistory = React.useCallback(async () => {
     setHistoryLoading(true)
@@ -245,32 +377,157 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
     }
   }
 
-  const fetchModelsFromApi = async () => {
-    setModelsLoading(true)
+  const fetchModelsFromApi = React.useCallback(async (force = false, silent = false) => {
+    if (!force && Date.now() - lastTextSyncRef.current < 15_000) return
+    if (!silent) {
+      setModelsLoading(true)
+      setModelsSyncError('')
+    }
     try {
       const res = await fetch('/api/ai/models', { credentials: 'same-origin' })
       const data = await res.json()
-      if (Array.isArray(data.models) && data.models.length > 0) {
-        setCustomModels(data.models)
-        if (!selectedModel && data.defaultModel) {
-          setSelectedModel(data.defaultModel)
-        }
+      const catalog: ModelCatalogEntry[] = Array.isArray(data.catalog) ? data.catalog : []
+      if (catalog.length > 0) setModelCatalog(catalog)
+      if (data.success && Array.isArray(data.models)) {
+        lastTextSyncRef.current = Date.now()
+        setModelsSyncError('')
+        const curatedText = curateTextModels(data.models, catalog)
+        setCustomModels(curatedText.all)
+        setAiStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                availableModels: data.models,
+                catalog: catalog.length > 0 ? catalog : prev.catalog,
+                model: data.defaultModel || prev.model,
+                syncedAt: data.syncedAt || prev.syncedAt,
+              }
+            : prev
+        )
+        const preferredTextDefault =
+          (data.defaultModel && curatedText.latest.includes(data.defaultModel) && data.defaultModel) ||
+          pickPreferredLatestTextModel(curatedText.latest, catalog)
+        setSelectedModel((prev) => {
+          const next = resolveLiveModel(prev, curatedText.latest, preferredTextDefault)
+          if (next) {
+            try {
+              localStorage.setItem('sibluudz_ai_model', next)
+            } catch {
+              /* Storage can be unavailable in private sessions. */
+            }
+          }
+          return next
+        })
+      } else if (data.error) {
+        if (!silent) setModelsSyncError(data.error)
+        console.warn('Sinkron model 9router:', data.error)
       }
-      if (Array.isArray(data.catalog)) setModelCatalog(data.catalog)
-      if (data.error) console.warn('Sinkron model 9router:', data.error)
     } catch (e) {
+      if (!silent) setModelsSyncError('Gagal memeriksa model aktif di 9router.')
       console.warn('Gagal memuat model dari 9router:', e)
     } finally {
-      setModelsLoading(false)
+      if (!silent) setModelsLoading(false)
     }
-  }
+  }, [])
+
+  const fetchImageModelsFromApi = React.useCallback(async (force = false, silent = false) => {
+    if (!force && Date.now() - lastImageSyncRef.current < 15_000) return
+    if (!silent) {
+      setModelsLoading(true)
+      setModelsSyncError('')
+    }
+    try {
+      const res = await fetch('/api/ai/image-models', { credentials: 'same-origin' })
+      const data = await res.json()
+      if (data.success && Array.isArray(data.models)) {
+        lastImageSyncRef.current = Date.now()
+        setModelsSyncError('')
+        const curatedImg = curateImageModels(data.models)
+        setImageModels(curatedImg.all)
+        setAiStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                availableImageModels: data.models,
+                imageModel: data.defaultModel || prev.imageModel,
+              }
+            : prev
+        )
+        const preferredImgDefault =
+          (data.defaultModel && curatedImg.latest.includes(data.defaultModel) && data.defaultModel) ||
+          curatedImg.latest[0] ||
+          data.defaultModel
+        setSelectedImageModel((prev) => {
+          const next = resolveLiveModel(prev, curatedImg.latest, preferredImgDefault)
+          if (next) {
+            try {
+              localStorage.setItem('sibluudz_product_swap_model', next)
+            } catch {
+              /* Storage can be unavailable in private sessions. */
+            }
+          }
+          return next
+        })
+      } else if (data.error) {
+        if (!silent) setModelsSyncError(data.error)
+        console.warn('Sinkron model gambar 9router:', data.error)
+      }
+    } catch (e) {
+      if (!silent) setModelsSyncError('Gagal memeriksa model gambar di 9router.')
+      console.warn('Gagal memuat model gambar dari 9router:', e)
+    } finally {
+      if (!silent) setModelsLoading(false)
+    }
+  }, [])
 
   React.useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
+    let active = true
+    loadStatus()
+      .then((data) => {
+        if (!active) return
+        applyStatus(data)
+      })
+      .catch((err) => {
+        if (!active) return
+        setStatusError(err instanceof Error ? err.message : 'Gagal memuat status AI')
+      })
+      .finally(() => {
+        if (active) setStatusLoading(false)
+      })
+
+    void fetchModelsFromApi(true, true)
+    void fetchImageModelsFromApi(true, true)
+
+    return () => {
+      active = false
+    }
+  }, [loadStatus, applyStatus, fetchModelsFromApi, fetchImageModelsFromApi])
+
+  React.useEffect(() => {
+    const syncOnReturn = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchModelsFromApi(false, true)
+        void fetchImageModelsFromApi(false, true)
+      }
+    }
+    document.addEventListener('visibilitychange', syncOnReturn)
+    window.addEventListener('focus', syncOnReturn)
+    return () => {
+      document.removeEventListener('visibilitychange', syncOnReturn)
+      window.removeEventListener('focus', syncOnReturn)
+    }
+  }, [fetchModelsFromApi, fetchImageModelsFromApi])
+
+  const usagePercent =
+    aiStatus && !aiStatus.isUnlimited && aiStatus.dailyLimit > 0
+      ? Math.min(100, Math.round((aiStatus.usageToday / aiStatus.dailyLimit) * 100))
+      : 0
+
+  const isQuotaDepleted = Boolean(aiStatus && !aiStatus.isUnlimited && aiStatus.remaining <= 0)
+  const activeTool = generatorTools.find((tool) => tool.mode === mode)!
 
   const handleGenerate = async () => {
-    if (mode === 'prompt_studio') return
+    if (mode === 'prompt_studio' || mode === 'relight_studio') return
     if (generating || statusLoading || isQuotaDepleted || !aiStatus?.configured) return
     if (mode === 'product_swap') {
       if (!isQuotaDepleted && aiStatus?.configured) await handleImageEdit()
@@ -278,12 +535,46 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
     }
     if (!promptInput.trim()) return
 
-    const activeModelToUse = selectedModel || aiStatus?.model || 'gpt-4o-mini'
+    const activeModelToUse = selectedModel || aiStatus?.model || allNineRouterModels[0] || ''
 
     setGenerating(true)
     setGenerationError('')
     setGeneratedOutput('')
-    setReframedData(null)
+    if (mode === 'prompt_checker') {
+      setCheckerEvaluation(null)
+    }
+    if (mode === 'website_prompt') {
+      setWebsiteSpec(null)
+    }
+    if (mode === 'image_prompt') {
+      setImagePromptSpec(null)
+    }
+
+    const requestPrompt =
+      mode === 'prompt_checker'
+        ? buildCheckerPrompt(promptInput, {
+            goal: checkerGoal,
+            focuses: checkerFocuses,
+            extraCriteria: contextByMode[mode] || '',
+          })
+        : mode === 'website_prompt'
+        ? buildWebsitePrompt(promptInput, {
+            projectType: websiteProjectType,
+            assistant: websiteAssistant,
+            stack: websiteStack,
+            standards: websiteStandards,
+            constraints: contextByMode[mode] || '',
+          })
+        : mode === 'image_prompt'
+        ? buildImagePrompt(promptInput, {
+            target: imageTarget,
+            style: imageStyle,
+            ratio: imageRatio,
+            lighting: imageLighting,
+            language: imageLanguage,
+            details: contextByMode[mode] || '',
+          })
+        : promptInput
 
     const contextPayload = {
       profile: {
@@ -301,10 +592,10 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: composeToolPrompt(promptInput, contextByMode[mode] || '', activeTool.contextLabel),
+          prompt: requestPrompt,
           type: mode,
           model: activeModelToUse,
-          context: contextPayload,
+          ...(mode === 'image_prompt' ? {} : { context: contextPayload }),
         }),
       })
 
@@ -314,22 +605,17 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
       }
 
       setGeneratedOutput(data.result)
+      setPane('result')
 
-      if (data.reframed) {
-        setReframedData(data.reframed)
-        setViewMode('architectural')
-      } else if (mode === 'prompt_reframer') {
-        try {
-          const jsonMatch = (data.result || '').match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            setReframedData(JSON.parse(jsonMatch[0]))
-            setViewMode('architectural')
-          }
-        } catch {
-          setReframedData(null)
-        }
-      } else {
-        setReframedData(null)
+      if (mode === 'prompt_checker') {
+        setCheckerEvaluation(data.evaluation || parsePromptEvaluation(data.result || ''))
+        setCheckerEvaluatedSource(promptInput)
+      }
+      if (mode === 'website_prompt') {
+        setWebsiteSpec(data.websiteSpec || parseWebsiteSpec(data.result || ''))
+      }
+      if (mode === 'image_prompt') {
+        setImagePromptSpec(data.imagePromptSpec || parseImagePromptSpec(data.result || ''))
       }
 
       if (data.usage && aiStatus) {
@@ -346,117 +632,192 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
       }
     } catch (err) {
       setGenerationError(err instanceof Error ? err.message : 'Terjadi kesalahan saat memanggil 9router.')
+      setPane('input')
     } finally {
       setGenerating(false)
     }
   }
 
-  const pickImage = (file: File | undefined, setter: (value: string) => void) => {
-    if (!file) return
-    if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
-      setGenerationError('Format gambar harus PNG, JPG, atau WEBP.')
-      return
-    }
-    if (file.size > 6 * 1024 * 1024) {
-      setGenerationError('Ukuran gambar maksimal 6 MB.')
-      return
-    }
-    setGenerationError('')
-    const reader = new FileReader()
-    reader.onload = () => setter(String(reader.result || ''))
-    reader.onerror = () => setGenerationError('Gagal membaca gambar. Pilih ulang file Anda.')
-    reader.readAsDataURL(file)
-  }
-
   const handleImageEdit = async () => {
-    if (!sceneImage || !productImage) return
+    if (!scenePhoto || !productPhoto) return
     setGenerating(true)
     setGenerationError('')
-    setImageResult('')
     try {
       const res = await fetch('/api/ai/image-edit', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sceneImage,
-          productImage,
+          sceneImage: scenePhoto.data,
+          productImage: productPhoto.data,
           instructions: promptInput,
+          settings: swapSettings,
+          ...(swapResolution ? { resolution: swapResolution } : {}),
+          ...(currentImageModel ? { model: currentImageModel } : {}),
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Gagal memproses gambar (${res.status})`)
-      setImageResult(data.image)
+      setSwapResult({
+        image: data.image,
+        model: data.model || currentImageModel,
+        output: data.output || null,
+        warning: data.warning,
+        referenceImage: scenePhoto.data,
+        productImage: productPhoto.data,
+      })
+      setPane('result')
       if (data.usage && aiStatus) {
-        setAiStatus((prev) => prev ? { ...prev, ...data.usage } : null)
+        setAiStatus((prev) => (prev ? { ...prev, ...data.usage } : null))
       }
     } catch (err) {
       setGenerationError(err instanceof Error ? err.message : 'Gagal memproses penggantian produk.')
+      setPane('input')
     } finally {
       setGenerating(false)
     }
   }
 
-  const usagePercent = aiStatus && !aiStatus.isUnlimited && aiStatus.dailyLimit > 0
-    ? Math.min(100, Math.round((aiStatus.usageToday / aiStatus.dailyLimit) * 100))
-    : 0
-
-  const isQuotaDepleted = Boolean(aiStatus && !aiStatus.isUnlimited && aiStatus.remaining <= 0)
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      if (promptInput.trim() && !generating && !isQuotaDepleted && aiStatus?.configured) {
-        handleGenerate()
-      }
-    }
+  const swapProductSlots = () => {
+    setScenePhoto(productPhoto)
+    setProductPhoto(scenePhoto)
   }
 
-  const allNineRouterModels = React.useMemo(() => {
-    const list = new Set<string>()
-    if (aiStatus?.model) list.add(aiStatus.model)
-    if (Array.isArray(aiStatus?.availableModels)) {
-      aiStatus.availableModels.forEach((m) => list.add(m))
-    }
-    customModels.forEach((m) => list.add(m))
-    if (list.size === 0) {
-      FALLBACK_NINEROUTER_MODELS.forEach((m) => list.add(m))
-    }
-    return Array.from(list)
-  }, [aiStatus, customModels])
+  const sendSwapResultToRelight = (imageData: string) => {
+    setRelightSeed((prev) => ({
+      key: prev.key + 1,
+      source: { data: imageData, name: 'hasil-ganti-produk.png' },
+    }))
+    setRelightVisited(true)
+    selectTool('relight_studio')
+  }
 
-  const filteredNineRouterModels = React.useMemo(() => {
-    return allNineRouterModels.filter((modelName) => {
+  const promoteSwapResultToReference = async (imageData: string) => {
+    const dims = await new Promise<{ width: number; height: number }>((resolve) => {
+      const img = new Image()
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+      img.onerror = () => resolve({ width: 0, height: 0 })
+      img.src = imageData
+    })
+    setScenePhoto({
+      data: imageData,
+      name: 'referensi-lanjutan.png',
+      width: dims.width,
+      height: dims.height,
+      bytes: Math.round(imageData.length * 0.75),
+    })
+    setPane('input')
+  }
+
+  const curatedTextModels = React.useMemo(() => {
+    const raw =
+      customModels.length > 0
+        ? customModels
+        : Array.isArray(aiStatus?.availableModels) && aiStatus.availableModels.length > 0
+        ? aiStatus.availableModels
+        : aiStatus?.model
+        ? [aiStatus.model]
+        : statusError
+        ? FALLBACK_NINEROUTER_MODELS
+        : []
+    return curateTextModels(raw, modelCatalog)
+  }, [aiStatus, customModels, modelCatalog, statusError])
+
+  const allNineRouterModels = curatedTextModels.latest
+
+  const isLocalTool = mode === 'prompt_studio'
+  const isRelightTool = mode === 'relight_studio'
+  const isCheckerTool = mode === 'prompt_checker'
+  const isWebsiteTool = mode === 'website_prompt'
+  const isImagePromptTool = mode === 'image_prompt'
+  const isImagePicker = mode === 'product_swap'
+  const showModelPicker = !isLocalTool && !isRelightTool
+
+  const curatedImageModels = React.useMemo(() => {
+    const raw =
+      imageModels.length > 0
+        ? imageModels
+        : Array.isArray(aiStatus?.availableImageModels) && aiStatus.availableImageModels.length > 0
+        ? aiStatus.availableImageModels
+        : aiStatus?.imageModel
+        ? [aiStatus.imageModel]
+        : []
+    return curateImageModels(raw)
+  }, [imageModels, aiStatus])
+
+  const legacyPickerCount = isImagePicker
+    ? curatedImageModels.legacy.length
+    : curatedTextModels.legacy.length
+
+  const activePickerModels = React.useMemo(() => {
+    const group = isImagePicker ? curatedImageModels : curatedTextModels
+    return showLegacyModels ? group.all : group.latest
+  }, [isImagePicker, showLegacyModels, curatedImageModels, curatedTextModels])
+
+  const filteredPickerModels = React.useMemo(() => {
+    return activePickerModels.filter((modelName) => {
       const catalogEntry = modelCatalog.find((c) => c.id === modelName)
       const provider = getModelProvider(modelName, catalogEntry?.owner)
       const matchesCategory =
-        modelCategory === 'all' ||
-        provider.toLowerCase() === modelCategory.toLowerCase()
+        modelCategory === 'all' || provider.toLowerCase() === modelCategory.toLowerCase()
       const matchesSearch =
         modelName.toLowerCase().includes(modelSearch.toLowerCase()) ||
         provider.toLowerCase().includes(modelSearch.toLowerCase())
       return matchesCategory && matchesSearch
     })
-  }, [allNineRouterModels, modelCategory, modelSearch, modelCatalog])
+  }, [activePickerModels, modelCategory, modelSearch, modelCatalog])
 
-  const currentActiveModel = selectedModel || aiStatus?.model || 'gpt-4o-mini'
+  const currentActiveModel = selectedModel || aiStatus?.model || allNineRouterModels[0] || ''
+  const currentImageModel =
+    selectedImageModel || aiStatus?.imageModel || activePickerModels[0] || ''
+  const displayPickerModel =
+    statusLoading && !aiStatus && !selectedModel
+      ? 'Memuat model...'
+      : isImagePicker
+      ? currentImageModel || 'Otomatis'
+      : currentActiveModel || (modelsLoading ? 'Memuat model...' : 'Belum dipilih')
+  const currentModelProvider = getModelProvider(
+    displayPickerModel,
+    modelCatalog.find((c) => c.id === displayPickerModel)?.owner
+  )
 
-  const activeTool = generatorTools.find((tool) => tool.mode === mode)!
-  const isLocalTool = mode === 'prompt_studio'
-  const examples: Partial<Record<GeneratorMode, string>> = {
-    prompt_builder: 'Buat prompt untuk merancang identitas visual toko kopi lokal. Sertakan konteks, tugas, batasan, dan format hasil.',
-    prompt_optimizer: 'Perbaiki prompt ini agar tujuan, konteks, dan format hasilnya jelas: buat konten Instagram untuk bisnis kopi.',
-    prompt_checker: 'Evaluasi prompt berikut: Buat website bisnis. Jelaskan bagian yang belum spesifik dan saran perbaikannya.',
-    humanizer: 'Tulis ulang teks berikut dengan nada hangat dan profesional tanpa mengubah makna: Terima kasih atas kepercayaan Anda kepada layanan kami.',
-    image_prompt: 'Foto produk kopi kemasan di meja kayu, cahaya pagi dari samping, latar sederhana, komposisi vertikal untuk katalog.',
-    video_prompt: 'Video produk kopi 15 detik: detail kemasan, proses seduh, dan sajian akhir. Jelaskan adegan, pencahayaan, dan gerak kamera.',
-    website_prompt: 'Susun spesifikasi website portofolio fotografer: galeri, detail proyek, formulir kontak, desain responsif, dan aksesibilitas.',
-    invoice_items: 'Rinci pekerjaan website company profile menjadi item invoice: desain UI, development 5 halaman, formulir kontak, dan deployment. Mata uang IDR.',
-    proposal_structure: 'Susun proposal website company profile untuk UMKM: latar belakang, tujuan, scope, deliverable, timeline, dan ketentuan revisi.',
-    follow_up_message: 'Buat follow-up WhatsApp yang sopan untuk klien yang belum merespons proposal website selama 3 hari. Singkat, tanpa mendesak.',
-  }
-  const ready = Boolean(aiStatus?.configured && !statusLoading && !isQuotaDepleted && !generating && (mode === 'product_swap' ? sceneImage && productImage : promptInput.trim()))
-  const resultText = mode === 'product_swap' ? '' : generatedOutput
+  const ready = Boolean(
+    aiStatus?.configured &&
+      !statusLoading &&
+      !isQuotaDepleted &&
+      !generating &&
+      (mode === 'product_swap' ? scenePhoto && productPhoto : promptInput.trim())
+  )
+
+  const draftModes = React.useMemo(() => {
+    const map: Partial<Record<GeneratorMode, boolean>> = {}
+    for (const tool of generatorTools) {
+      if (tool.mode === 'product_swap') {
+        map[tool.mode] = Boolean(scenePhoto || productPhoto || swapResult || inputsByMode[tool.mode]?.trim())
+      } else {
+        map[tool.mode] = Boolean(
+          inputsByMode[tool.mode]?.trim() ||
+            outputsByMode[tool.mode]?.trim() ||
+            contextByMode[tool.mode]?.trim()
+        )
+      }
+    }
+    return map
+  }, [inputsByMode, outputsByMode, contextByMode, scenePhoto, productPhoto, swapResult])
+
+  const filteredHistory = React.useMemo(() => {
+    const query = historySearch.trim().toLowerCase()
+    if (!query) return historyList
+    return historyList.filter((item) => {
+      const toolTitle = generatorTools.find((t) => t.mode === item.type)?.title || item.type
+      return (
+        item.prompt.toLowerCase().includes(query) ||
+        item.result.toLowerCase().includes(query) ||
+        item.model.toLowerCase().includes(query) ||
+        toolTitle.toLowerCase().includes(query)
+      )
+    })
+  }, [historyList, historySearch])
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -469,95 +830,660 @@ export function AiGeneratorPage({ initialMode = 'prompt_builder' }: { initialMod
   }
 
   const restoreHistory = (item: { type: string; prompt: string; result: string }) => {
-    const target = generatorTools.find(tool => tool.mode === item.type)?.mode
+    const target = generatorTools.find((tool) => tool.mode === item.type)?.mode
     if (!target || target === 'prompt_studio' || generating) return
     selectTool(target)
-    setInputsByMode(prev => ({ ...prev, [target]: item.prompt }))
+    setInputsByMode((prev) => ({ ...prev, [target]: item.prompt }))
     // Stored prompts already include optional context from the original request.
-    setContextByMode(prev => ({ ...prev, [target]: '' }))
-    setOutputsByMode(prev => ({ ...prev, [target]: item.result }))
-    setReframedByMode(prev => ({ ...prev, [target]: null }))
+    setContextByMode((prev) => ({ ...prev, [target]: '' }))
+    setOutputsByMode((prev) => ({ ...prev, [target]: item.result }))
+    if (target === 'prompt_checker') {
+      setCheckerEvaluation(parsePromptEvaluation(item.result))
+      setCheckerEvaluatedSource(item.prompt)
+    }
+    if (target === 'website_prompt') {
+      setWebsiteSpec(parseWebsiteSpec(item.result))
+    }
+    if (target === 'image_prompt') {
+      setImagePromptSpec(parseImagePromptSpec(item.result))
+    }
+    setPane('result')
     setIsHistoryOpen(false)
   }
 
+  const toggleWebsiteStack = (item: string) => {
+    setWebsiteStack((prev) =>
+      prev.includes(item) ? prev.filter((s) => s !== item) : [...prev, item]
+    )
+  }
+
+  const toggleWebsiteStandard = (id: string) => {
+    setWebsiteStandards((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    )
+  }
+
+  const sendPromptToChecker = (promptText: string) => {
+    setInputsByMode((prev) => ({ ...prev, prompt_checker: promptText }))
+    setCheckerEvaluation(null)
+    setCheckerEvaluatedSource('')
+    selectTool('prompt_checker')
+  }
+
+  const websiteDisabledReason = statusLoading
+    ? 'Menunggu status koneksi.'
+    : !aiStatus?.configured
+    ? 'Koneksi AI belum siap.'
+    : isQuotaDepleted
+    ? 'Kuota harian sudah habis.'
+    : 'Jelaskan website atau fitur untuk mulai.'
+
+  const toggleCheckerFocus = (focusId: string) => {
+    setCheckerFocuses((prev) =>
+      prev.includes(focusId) ? prev.filter((id) => id !== focusId) : [...prev, focusId]
+    )
+  }
+
+  const checkerDisabledReason = statusLoading
+    ? 'Menunggu status koneksi.'
+    : !aiStatus?.configured
+    ? 'Koneksi AI belum siap.'
+    : isQuotaDepleted
+    ? 'Kuota harian sudah habis.'
+    : 'Isi prompt untuk mulai diaudit.'
+
+  const imagePromptDisabledReason = statusLoading
+    ? 'Menunggu status koneksi.'
+    : !aiStatus?.configured
+    ? 'Koneksi AI belum siap.'
+    : isQuotaDepleted
+    ? 'Kuota harian sudah habis.'
+    : 'Jelaskan ide gambar untuk mulai.'
+
+  const productSwapDisabledReason = statusLoading
+    ? 'Menunggu status koneksi.'
+    : !aiStatus?.configured
+    ? 'Koneksi AI belum siap.'
+    : isQuotaDepleted
+    ? 'Kuota harian sudah habis.'
+    : 'Unggah kedua foto untuk lanjut.'
+
+  const connectionNode = (
+    <span className="ag-connection" role="status">
+      <span
+        className={`ag-status-dot ${isLocalTool || aiStatus?.configured ? 'is-connected' : 'is-offline'}`}
+        aria-hidden="true"
+      />
+      <span>
+        {isLocalTool
+          ? 'Berjalan lokal'
+          : statusLoading
+          ? 'Memeriksa koneksi...'
+          : statusError
+          ? 'Status tidak tersedia'
+          : aiStatus?.configured
+          ? '9router tersambung'
+          : '9router belum aktif'}
+      </span>
+    </span>
+  )
+
+  const quotaNode = (
+    <div className="ag-quota">
+      <span>
+        {isLocalTool
+          ? 'Tanpa kuota API'
+          : aiStatus
+          ? aiStatus.isUnlimited
+            ? `${aiStatus.usageToday} dipakai · Tanpa batas`
+            : `${aiStatus.remaining} / ${aiStatus.dailyLimit} tersisa`
+          : 'Kuota belum tersedia'}
+      </span>
+      {!isLocalTool && aiStatus && !aiStatus.isUnlimited && (
+        <progress aria-label="Pemakaian kuota harian" value={usagePercent} max={100} />
+      )}
+    </div>
+  )
+
+  const railActions = (
+    <>
+      <button
+        type="button"
+        className="ag-rail-action-btn"
+        data-testid="history"
+        aria-label="Riwayat"
+        onClick={() => {
+          setHistorySearch('')
+          setIsHistoryOpen(true)
+          fetchHistory()
+        }}
+      >
+        <History size={15} aria-hidden="true" />
+        <span className="ag-history-label">Riwayat</span>
+      </button>
+      <button
+        type="button"
+        className="ag-icon-btn"
+        aria-label="Perbarui status AI"
+        onClick={fetchStatus}
+        disabled={statusLoading}
+      >
+        <RefreshCw size={15} className={statusLoading ? 'animate-spin' : ''} aria-hidden="true" />
+      </button>
+    </>
+  )
+
   return (
-    <div className="ai-workspace">
-      <header className="ai-page-header">
-        <div><h1>AI Generator</h1><p>Ruang kerja siBluudz untuk mengolah ide menjadi hasil siap pakai.</p></div>
-        <div className="ai-header-actions">
-          <Button variant="outline" size="sm" data-testid="history" onClick={() => { setIsHistoryOpen(true); fetchHistory() }}><History size={16} />Riwayat</Button>
-          <Button variant="ghost" size="icon" aria-label="Perbarui status AI" onClick={fetchStatus} disabled={statusLoading}><RefreshCw size={16} className={statusLoading ? 'animate-spin' : ''} /></Button>
-        </div>
-      </header>
+    <div className="ai-workspace" data-ui="ai-generator">
+      <div className="ag-shell">
+        <ToolNavigation
+          mode={mode}
+          disabled={generating}
+          onSelect={selectTool}
+          draftModes={draftModes}
+          connectionStatus={connectionNode}
+          quotaSummary={quotaNode}
+          actions={railActions}
+        />
 
-      {!isLocalTool && <><div className="ai-connection-bar" role="status">
-        <span className="ai-connection"><span className={`ai-status-dot ${aiStatus?.configured ? 'is-connected' : ''}`} />{statusLoading ? 'Memeriksa koneksi…' : statusError ? 'Status tidak tersedia' : aiStatus?.configured ? '9router siap digunakan' : '9router belum dikonfigurasi'}</span>
-        <span>{aiStatus ? `${aiStatus.role === 'admin' ? 'Admin' : aiStatus.tier === 'pro' ? 'Pro' : 'Free'} · ${aiStatus.usageToday} digunakan hari ini` : 'Pemakaian —'}</span>
-        <span className="ai-quota">{aiStatus ? aiStatus.isUnlimited ? 'Tanpa batas harian' : `${aiStatus.remaining} dari ${aiStatus.dailyLimit} permintaan tersisa` : 'Kuota —'}{aiStatus && !aiStatus.isUnlimited && <progress aria-label="Pemakaian kuota harian" value={usagePercent} max={100} />}</span>
-      </div>
-      {statusError && <div className="ai-notice" role="alert">{statusError} <button onClick={fetchStatus}>Coba lagi</button></div>}
-      {aiStatus && !aiStatus.configured && <div className="ai-notice" role="alert">{profile.role === 'admin' ? 'Atur API Key 9router di Pengaturan untuk mulai membuat konten.' : 'Hubungi administrator untuk mengaktifkan koneksi AI.'}</div>}
-      {isQuotaDepleted && <div className="ai-notice" role="alert">Kuota harian habis. Coba kembali setelah kuota direset atau hubungi administrator.</div>}
-      </>}
+        <div className="ag-stage">
+        <div className="ag-sheet">
+          <header className="ag-sheet-header">
+            <div className="ag-sheet-title">
+              <span className="ag-tool-badge" aria-hidden="true">
+                <AiToolIcon mode={mode} size={16} />
+              </span>
+              <div className="ag-title-copy">
+                <h1>{activeTool.headerTitle || activeTool.title}</h1>
+                <p>{activeTool.description}</p>
+              </div>
+            </div>
 
-      <div className="ai-studio">
-        <aside className="ai-tool-nav" aria-label="Pilihan tool AI">
-          <div className="ai-nav-heading"><h2>Tool AI</h2><span>{generatorTools.length} tersedia</span></div>
-          <div className="ai-mobile-tools"><label htmlFor="ai-tool-select">Pilihan tool</label><select id="ai-tool-select" value={mode} disabled={generating} onChange={e => selectTool(e.target.value as GeneratorMode)}>{toolGroups.map(group => <optgroup key={group.title} label={group.title}>{group.modes.map(toolMode => { const tool = generatorTools.find(item => item.mode === toolMode)!; return <option key={toolMode} value={toolMode}>{tool.title}</option> })}</optgroup>)}</select></div>
-          <label className="ai-search"><Search size={15} /><input aria-label="Cari tool AI" placeholder="Cari tool…" value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} /></label>
-          <div className="ai-tool-groups">
-            {toolGroups.map((group) => {
-              const tools = group.modes.flatMap((toolMode) => generatorTools.filter((tool) => tool.mode === toolMode && `${tool.title} ${tool.description}`.toLowerCase().includes(toolSearch.toLowerCase())))
-              return tools.length > 0 && <div className="ai-tool-group" key={group.title}><h3>{group.title}</h3>{tools.map((tool) => <button key={tool.mode} data-mode={tool.mode} className={mode === tool.mode ? 'is-selected' : ''} aria-pressed={mode === tool.mode} disabled={generating} onClick={() => selectTool(tool.mode)}><span>{tool.title.replace(' (Agent)', '')}</span>{mode === tool.mode && <ArrowUpRight size={14} />}</button>)}</div>
-            })}
-            {!generatorTools.some((tool) => `${tool.title} ${tool.description}`.toLowerCase().includes(toolSearch.toLowerCase())) && <p className="ai-muted">Tool tidak ditemukan. Coba kata lain.</p>}
+            {(showModelPicker || isLocalTool) && (
+              <div className="ag-header-controls">
+              {showModelPicker ? (
+                <div className="ag-model-picker" ref={dropdownRef}>
+                  <span id="ai-model-label" className="ag-model-label">
+                    {isImagePicker ? 'Model gambar' : 'Model'}
+                  </span>
+                  <button
+                    type="button"
+                    className="ag-model-trigger"
+                    aria-labelledby="ai-model-label ai-model-value"
+                    aria-expanded={isModelDropdownOpen}
+                    aria-controls="ai-model-options"
+                    disabled={generating}
+                    onClick={() => {
+                      const nextOpen = !isModelDropdownOpen
+                      setIsModelDropdownOpen(nextOpen)
+                      if (nextOpen) {
+                        void (isImagePicker
+                          ? fetchImageModelsFromApi(false, false)
+                          : fetchModelsFromApi(false, false))
+                      }
+                    }}
+                  >
+                    <span className="ag-model-provider">{currentModelProvider}</span>
+                    <span id="ai-model-value" className="ag-model-name">
+                      {displayPickerModel}
+                    </span>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </button>
+
+                  {isModelDropdownOpen && (
+                    <div
+                      className="ag-model-menu"
+                      id="ai-model-options"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setIsModelDropdownOpen(false)
+                      }}
+                    >
+                      <label className="ag-search-box">
+                        <Search size={15} aria-hidden="true" />
+                        <input
+                          autoFocus
+                          aria-label={isImagePicker ? 'Cari model gambar AI' : 'Cari model AI'}
+                          placeholder="Cari model atau provider..."
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                        />
+                      </label>
+                      <div className="ag-model-filters">
+                        <select
+                          aria-label="Filter provider"
+                          value={modelCategory}
+                          onChange={(e) => setModelCategory(e.target.value)}
+                        >
+                          <option value="all">Semua provider</option>
+                          {Array.from(
+                            new Set(
+                              activePickerModels.map((name) =>
+                                getModelProvider(name, modelCatalog.find((item) => item.id === name)?.owner)
+                              )
+                            )
+                          )
+                            .sort()
+                            .map((provider) => (
+                              <option key={provider}>{provider}</option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="ag-icon-btn"
+                          aria-label={
+                            isImagePicker ? 'Sinkronkan katalog model gambar' : 'Sinkronkan katalog model'
+                          }
+                          disabled={modelsLoading}
+                          onClick={() =>
+                            void (isImagePicker
+                              ? fetchImageModelsFromApi(true, false)
+                              : fetchModelsFromApi(true, false))
+                          }
+                        >
+                          <RefreshCw
+                            size={15}
+                            className={modelsLoading ? 'animate-spin' : ''}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
+                      <div
+                        className={`ag-model-status${modelsSyncError ? ' is-error' : ''}`}
+                        role="status"
+                      >
+                        {modelsLoading
+                          ? 'Memeriksa model aktif di 9router...'
+                          : modelsSyncError
+                          ? modelsSyncError
+                          : `${activePickerModels.length} model aktif dari 9router`}
+                      </div>
+                      <div className="ag-model-list">
+                        {filteredPickerModels.map((name) => {
+                          const activeMatch = isImagePicker
+                            ? currentImageModel === name
+                            : currentActiveModel === name
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              aria-pressed={activeMatch}
+                              onClick={() => {
+                                if (isImagePicker) {
+                                  setSelectedImageModel(name)
+                                  try {
+                                    localStorage.setItem('sibluudz_product_swap_model', name)
+                                  } catch {
+                                    /* Storage can be unavailable in private sessions. */
+                                  }
+                                } else {
+                                  setSelectedModel(name)
+                                  try {
+                                    localStorage.setItem('sibluudz_ai_model', name)
+                                  } catch {
+                                    /* Storage can be unavailable in private sessions. */
+                                  }
+                                }
+                                setIsModelDropdownOpen(false)
+                              }}
+                            >
+                              <span>{name}</span>
+                              {activeMatch && <Check size={15} aria-hidden="true" />}
+                            </button>
+                          )
+                        })}
+                        {!filteredPickerModels.length && (
+                          <p className="ag-empty-note">Model tidak ditemukan.</p>
+                        )}
+                      </div>
+                      {legacyPickerCount > 0 && (
+                        <button
+                          type="button"
+                          className="ag-model-legacy-toggle"
+                          onClick={() => setShowLegacyModels((prev) => !prev)}
+                        >
+                          {showLegacyModels
+                            ? 'Hanya tampilkan model terbaru'
+                            : `Tampilkan ${legacyPickerCount} model versi lama`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span className="ag-kind-pill">Prompt lokal · Tanpa kuota API</span>
+              )}
+              </div>
+            )}
+          </header>
+
+          {!isLocalTool && (statusError || (aiStatus && !aiStatus.configured) || isQuotaDepleted) && (
+            <div className="ag-system-notices">
+              {statusError && (
+                <div className="ag-alert is-negative" role="alert">
+                  <AlertTriangle size={15} aria-hidden="true" />
+                  <span>{statusError}</span>
+                  <button type="button" onClick={fetchStatus}>
+                    Coba lagi
+                  </button>
+                </div>
+              )}
+              {aiStatus && !aiStatus.configured && (
+                <div className="ag-alert is-warning" role="alert">
+                  <AlertTriangle size={15} aria-hidden="true" />
+                  <span>
+                    {profile.role === 'admin'
+                      ? 'Atur API Key 9router di Pengaturan untuk mulai membuat konten.'
+                      : 'Hubungi administrator untuk mengaktifkan koneksi AI.'}
+                  </span>
+                </div>
+              )}
+              {isQuotaDepleted && (
+                <div className="ag-alert is-warning" role="alert">
+                  <AlertTriangle size={15} aria-hidden="true" />
+                  <span>Kuota harian habis. Coba kembali setelah kuota direset atau hubungi administrator.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="ag-mobile-pane-tabs" role="group" aria-label="Panel editor">
+            <button type="button" aria-pressed={pane === 'input'} onClick={() => setPane('input')}>
+              {isLocalTool ? 'Brief' : 'Arahan'}
+            </button>
+            <button type="button" aria-pressed={pane === 'result'} onClick={() => setPane('result')}>
+              {isRelightTool ? 'Foto & hasil' : 'Hasil'}
+            </button>
           </div>
-          <p className="ai-nav-note">Draf tiap tool tetap tersimpan selama halaman ini terbuka.</p>
-        </aside>
 
-        <div className="ai-work-sheet">
-          <div className="ai-tool-heading"><div><h2>{activeTool.title}</h2><p>{activeTool.description}</p></div><span className="ai-muted">{isLocalTool ? 'Lokal · tanpa kuota API' : mode === 'product_swap' ? 'AI · editor gambar' : 'AI · editor teks'}</span></div>
-          {studioVisited && <div hidden={!isLocalTool} className="ai-prompt-studio"><PromptStudioPage embedded /></div>}
-          <div className="ai-editor-grid" hidden={isLocalTool}>
-            <section className="ai-compose" aria-labelledby="ai-instruction-title">
-              <div className="ai-section-heading"><h3 id="ai-instruction-title">{mode === 'product_swap' ? 'Foto sumber' : 'Bahan & arahan'}</h3><button className="ai-text-button" disabled={generating || (!promptInput && !contextByMode[mode])} onClick={() => { setPromptInput(''); setContextByMode(prev => ({ ...prev, [mode]: '' })); setGenerationError('') }}>Kosongkan</button></div>
-              {mode !== 'product_swap' ? <div className="ai-model-picker" ref={dropdownRef}>
-                <label id="ai-model-label">Model AI</label>
-                <button className="ai-model-trigger" aria-labelledby="ai-model-label ai-model-value" aria-expanded={isModelDropdownOpen} aria-controls="ai-model-options" disabled={generating} onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}><span id="ai-model-value">{currentActiveModel}</span><ChevronDown size={16} /></button>
-                {isModelDropdownOpen && <div className="ai-model-menu" id="ai-model-options" onKeyDown={(e) => { if (e.key === 'Escape') setIsModelDropdownOpen(false) }}>
-                  <label className="ai-search"><Search size={15} /><input autoFocus aria-label="Cari model AI" placeholder="Cari model atau provider…" value={modelSearch} onChange={(e) => setModelSearch(e.target.value)} /></label>
-                  <div className="ai-model-filters"><select aria-label="Filter provider" value={modelCategory} onChange={(e) => setModelCategory(e.target.value)}><option value="all">Semua provider</option>{Array.from(new Set(allNineRouterModels.map((name) => getModelProvider(name, modelCatalog.find((item) => item.id === name)?.owner)))).sort().map((provider) => <option key={provider}>{provider}</option>)}</select><button aria-label="Sinkronkan katalog model" disabled={modelsLoading} onClick={fetchModelsFromApi}><RefreshCw size={15} className={modelsLoading ? 'animate-spin' : ''} /></button></div>
-                  <div className="ai-model-list">{filteredNineRouterModels.map((name) => <button key={name} aria-pressed={currentActiveModel === name} onClick={() => { setSelectedModel(name); try { localStorage.setItem('sibluudz_ai_model', name) } catch { /* Storage can be unavailable in private sessions. */ } setIsModelDropdownOpen(false) }}><span>{name}</span>{currentActiveModel === name && <Check size={15} />}</button>)}{!filteredNineRouterModels.length && <p className="ai-muted">Model tidak ditemukan.</p>}</div>
-                </div>}
-              </div> : <div className="ai-image-inputs">{([{ label: 'Foto referensi', value: sceneImage, setter: setSceneImage }, { label: 'Foto produk', value: productImage, setter: setProductImage }]).map(({ label, value, setter }) => <div className="ai-upload" key={label}><label><span>{label}</span>{value ? <img src={value} alt={label} /> : <span className="ai-upload-placeholder"><ImagePlus size={24} />Pilih gambar</span>}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={generating} onChange={(e) => { pickImage(e.target.files?.[0], setter); e.target.value = '' }} /></label>{value && <button aria-label={`Hapus ${label.toLowerCase()}`} disabled={generating} onClick={() => setter('')}><X size={14} /></button>}</div>)}<p className="ai-muted">PNG, JPG, WEBP · maksimal 6 MB per gambar.</p></div>}
-              <label className="ai-prompt-label" htmlFor="ai-prompt">{activeTool.inputLabel}</label>
-              <textarea id="ai-prompt" ref={textareaRef} value={promptInput} onChange={(e) => setPromptInput(e.target.value)} onKeyDown={handleKeyDown} disabled={generating} placeholder={activeTool.placeholder} />
-              {activeTool.contextLabel && <div className="ai-context-field"><label htmlFor="ai-context">{activeTool.contextLabel} <span>(opsional)</span></label><textarea id="ai-context" rows={2} maxLength={8000} value={contextByMode[mode] || ''} onChange={e => setContextByMode(prev => ({ ...prev, [mode]: e.target.value }))} disabled={generating} placeholder={activeTool.contextPlaceholder} /></div>}
-              {examples[mode] && <details className="ai-example-details" key={mode}><summary>Lihat contoh instruksi</summary><button className="ai-example" disabled={generating} onClick={() => { setPromptInput(examples[mode]!); textareaRef.current?.focus() }}><span>Gunakan contoh ini<ArrowUpRight size={14} /></span><span>{examples[mode]}</span></button></details>}
-              <div className="ai-compose-footer"><span className="ai-muted">{(promptInput.length + (contextByMode[mode]?.length || 0)).toLocaleString('id-ID')} karakter · Ctrl / ⌘ + Enter</span><Button data-testid="generate" onClick={handleGenerate} disabled={!ready}>{generating ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}{generating ? 'Memproses…' : activeTool.action}</Button></div>
-              {!generating && !ready && <p className="ai-disabled-reason">{statusLoading ? 'Menunggu status koneksi.' : !aiStatus?.configured ? 'Koneksi AI belum siap.' : isQuotaDepleted ? 'Kuota harian sudah habis.' : mode === 'product_swap' ? 'Unggah kedua gambar untuk melanjutkan.' : 'Isi instruksi untuk mulai membuat hasil.'}</p>}
-              {generationError && <div className="ai-notice" role="alert">{generationError}</div>}
-            </section>
+          {studioVisited && (
+            <div hidden={!isLocalTool} className="ai-prompt-studio">
+              <PromptStudioPage
+                embedded
+                pane={pane}
+                onAuditInChecker={(promptText) => {
+                  setInputsByMode((prev) => ({ ...prev, prompt_checker: promptText }))
+                  setCheckerEvaluation(null)
+                  setCheckerEvaluatedSource('')
+                  selectTool('prompt_checker')
+                }}
+              />
+            </div>
+          )}
 
-            <section className="ai-results" aria-labelledby="ai-results-title" aria-busy={generating}>
-              <div className="ai-section-heading"><h3 id="ai-results-title">{activeTool.resultTitle}</h3>{resultText && <button className="ai-text-button" onClick={() => copyText('result', resultText)}>{copiedKey === 'result' ? <Check size={14} /> : <Copy size={14} />}{copiedKey === 'result' ? 'Disalin' : 'Salin hasil'}</button>}</div>
-              {generating ? <div className="ai-result-loading" role="status"><RefreshCw size={20} className="animate-spin" /><h4>AI sedang mengolah instruksi</h4><p>Hasil akan muncul di sini. Waktu proses bergantung pada model yang dipilih.</p></div>
-                : mode === 'product_swap' ? imageResult ? <div className="ai-image-result"><img src={imageResult} alt="Hasil penggantian produk" /><a href={imageResult} download="produk-ai.png"><Download size={16} />Unduh gambar</a><a href={imageResult} target="_blank" rel="noreferrer">Buka ukuran penuh<ArrowUpRight size={14} /></a></div> : <div className="ai-empty-result"><div className="ai-empty-heading"><h4>Foto produk, dalam suasana baru.</h4><p>Unggah foto referensi dan produk. Hasil penggantian akan muncul di sini.</p></div><dl><div><dt>Referensi</dt><dd>Menentukan latar dan komposisi.</dd></div><div><dt>Produk</dt><dd>Objek yang akan ditempatkan.</dd></div><div><dt>Arahan</dt><dd>Detail posisi dan tampilan akhir.</dd></div></dl></div>
-                : resultText ? <>
-                  {reframedData && <div className="ai-result-tabs"><button aria-pressed={viewMode === 'architectural'} onClick={() => setViewMode('architectural')}>Terstruktur</button><button aria-pressed={viewMode === 'raw'} onClick={() => setViewMode('raw')}>Teks asli</button></div>}
-                  {reframedData && viewMode === 'architectural' ? <div className="ai-structured-result">{[{ title: 'Crescendo Chain', text: reframedData.crescendo?.join('\n\n') || '' }, { title: 'Policy Puppetry', text: reframedData.policy_puppetry }, { title: 'Cognitive Reframing', text: reframedData.cognitive_reframing }, { title: 'Completion & Prefill', text: reframedData.prefill_prompt }].map((item) => <details key={item.title} open><summary>{item.title}</summary><p>{item.text}</p><button className="ai-text-button" onClick={() => copyText(item.title, item.text)}>{copiedKey === item.title ? <Check size={14} /> : <Copy size={14} />}Salin bagian</button></details>)}</div> : <><label className="ai-muted" htmlFor="ai-result">Bisa diedit sebelum disalin.</label><textarea id="ai-result" className="ai-result-text" value={resultText} onChange={(e) => setGeneratedOutput(e.target.value)} spellCheck={false} /></>}
-                </> : <div className="ai-empty-result"><div className="ai-empty-heading"><h4>{activeTool.resultTitle}</h4><p>Lengkapi bahan di panel input, lalu pilih “{activeTool.action}”. Hasil dapat kamu baca, edit, dan salin di sini.</p></div><ul className="ai-result-checklist">{activeTool.checklist.map(item => <li key={item}>{item}</li>)}</ul></div>}
-              <p className="ai-result-note">Periksa kembali fakta, angka, dan detail sebelum menggunakan hasil AI.</p>
-            </section>
-          </div>
+          {relightVisited && (
+            <RelightStudio
+              key={relightSeed.key}
+              active={isRelightTool}
+              configured={!!aiStatus?.configured}
+              statusLoading={statusLoading}
+              quotaDepleted={isQuotaDepleted}
+              defaultModel={aiStatus?.imageModel}
+              initialSource={relightSeed.source}
+              busy={generating}
+              pane={pane}
+              onResult={() => setPane('result')}
+              onBusyChange={setGenerating}
+              onUsage={(usage) => setAiStatus((previous) => (previous ? { ...previous, ...usage } : null))}
+            />
+          )}
+
+          {isCheckerTool && (
+            <PromptCheckerWorkspace
+              promptInput={promptInput}
+              onPromptChange={setPromptInput}
+              extraCriteria={contextByMode.prompt_checker || ''}
+              onExtraCriteriaChange={(value) =>
+                setContextByMode((prev) => ({ ...prev, prompt_checker: value }))
+              }
+              goal={checkerGoal}
+              onGoalChange={setCheckerGoal}
+              focuses={checkerFocuses}
+              onToggleFocus={toggleCheckerFocus}
+              generatedOutput={generatedOutput}
+              onGeneratedOutputChange={setGeneratedOutput}
+              evaluation={checkerEvaluation}
+              evaluatedSourcePrompt={checkerEvaluatedSource}
+              currentActiveModel={currentActiveModel}
+              generating={generating}
+              ready={ready}
+              disabledReason={checkerDisabledReason}
+              generationError={generationError}
+              pane={pane}
+              onGenerate={() => void handleGenerate()}
+              onClear={() => {
+                setPromptInput('')
+                setContextByMode((prev) => ({ ...prev, prompt_checker: '' }))
+                setGenerationError('')
+              }}
+              onApplyImproved={(nextPrompt) => {
+                setPromptInput(nextPrompt)
+                setPane('input')
+                setGenerationError('')
+              }}
+              copiedKey={copiedKey}
+              onCopy={copyText}
+            />
+          )}
+
+          {isWebsiteTool && (
+            <WebsitePromptWorkspace
+              promptInput={promptInput}
+              onPromptChange={setPromptInput}
+              constraints={contextByMode.website_prompt || ''}
+              onConstraintsChange={(value) =>
+                setContextByMode((prev) => ({ ...prev, website_prompt: value }))
+              }
+              projectType={websiteProjectType}
+              onProjectTypeChange={setWebsiteProjectType}
+              assistant={websiteAssistant}
+              onAssistantChange={setWebsiteAssistant}
+              stack={websiteStack}
+              onToggleStack={toggleWebsiteStack}
+              onSetStack={setWebsiteStack}
+              standards={websiteStandards}
+              onToggleStandard={toggleWebsiteStandard}
+              generatedOutput={generatedOutput}
+              onGeneratedOutputChange={setGeneratedOutput}
+              spec={websiteSpec}
+              currentActiveModel={currentActiveModel}
+              generating={generating}
+              ready={ready}
+              disabledReason={websiteDisabledReason}
+              generationError={generationError}
+              pane={pane}
+              onGenerate={() => void handleGenerate()}
+              onClear={() => {
+                setPromptInput('')
+                setContextByMode((prev) => ({ ...prev, website_prompt: '' }))
+                setGenerationError('')
+              }}
+              onAuditInChecker={sendPromptToChecker}
+              copiedKey={copiedKey}
+              onCopy={copyText}
+            />
+          )}
+
+          {isImagePromptTool && (
+            <ImagePromptWorkspace
+              promptInput={promptInput}
+              onPromptChange={setPromptInput}
+              details={contextByMode.image_prompt || ''}
+              onDetailsChange={(value) =>
+                setContextByMode((prev) => ({ ...prev, image_prompt: value }))
+              }
+              target={imageTarget}
+              onTargetChange={setImageTarget}
+              style={imageStyle}
+              onStyleChange={setImageStyle}
+              ratio={imageRatio}
+              onRatioChange={setImageRatio}
+              lighting={imageLighting}
+              onLightingChange={setImageLighting}
+              language={imageLanguage}
+              onLanguageChange={setImageLanguage}
+              generatedOutput={generatedOutput}
+              onGeneratedOutputChange={setGeneratedOutput}
+              spec={imagePromptSpec}
+              currentActiveModel={currentActiveModel}
+              generating={generating}
+              ready={ready}
+              disabledReason={imagePromptDisabledReason}
+              generationError={generationError}
+              pane={pane}
+              onGenerate={() => void handleGenerate()}
+              onClear={() => {
+                setPromptInput('')
+                setContextByMode((prev) => ({ ...prev, image_prompt: '' }))
+                setGenerationError('')
+              }}
+              onAuditInChecker={sendPromptToChecker}
+              copiedKey={copiedKey}
+              onCopy={copyText}
+            />
+          )}
+
+          {isImagePicker && (
+            <ProductSwapWorkspace
+              scenePhoto={scenePhoto}
+              productPhoto={productPhoto}
+              onScenePhotoChange={setScenePhoto}
+              onProductPhotoChange={setProductPhoto}
+              onSwapSlots={swapProductSlots}
+              instructions={promptInput}
+              onInstructionsChange={setPromptInput}
+              settings={swapSettings}
+              onSettingsChange={setSwapSettings}
+              resolution={swapResolution}
+              onResolutionChange={setSwapResolution}
+              result={swapResult}
+              currentImageModel={currentImageModel}
+              generating={generating}
+              ready={ready}
+              disabledReason={productSwapDisabledReason}
+              generationError={generationError}
+              pane={pane}
+              onGenerate={() => void handleImageEdit()}
+              onClear={() => {
+                setScenePhoto(null)
+                setProductPhoto(null)
+                setPromptInput('')
+                setSwapResult(null)
+                setGenerationError('')
+              }}
+              onSendToRelight={sendSwapResultToRelight}
+              onUseAsReference={(imageData) => void promoteSwapResultToReference(imageData)}
+            />
+          )}
         </div>
       </div>
+      </div>
 
-      <dialog ref={historyDialogRef} className="ai-history-dialog" aria-labelledby="ai-history-title" onCancel={() => setIsHistoryOpen(false)} onClose={() => setIsHistoryOpen(false)}>
-        <div className="ai-section-heading"><div><h2 id="ai-history-title">Riwayat generasi</h2><p className="ai-muted">{historyList.length} hasil tersimpan</p></div><button className="ai-icon-button" aria-label="Tutup riwayat" onClick={() => setIsHistoryOpen(false)}><X size={18} /></button></div>
-        {historyError && <div className="ai-notice" role="alert">{historyError} <button onClick={fetchHistory}>Coba lagi</button></div>}
-        {historyList.length > 0 && <button className="ai-text-button" onClick={handleClearHistory}><Trash2 size={14} />Hapus semua riwayat</button>}
-        <div className="ai-history-list">{historyLoading ? <p role="status">Memuat riwayat…</p> : !historyList.length ? <p className="ai-muted">Belum ada riwayat. Hasil generasi akan tersimpan di sini.</p> : historyList.map((item) => <article key={item.id}><div className="ai-history-meta"><span>{generatorTools.find((tool) => tool.mode === item.type)?.title || item.type}</span><span>{item.createdAt}</span></div><h3>{item.prompt}</h3><p>{item.result}</p><div className="ai-history-actions"><span title={item.model}>{item.model}</span><button className="ai-text-button" data-testid="restore-history" disabled={generating} onClick={() => restoreHistory(item)}>Gunakan kembali<ArrowUpRight size={14} /></button><button className="ai-icon-button" aria-label="Hapus riwayat ini" onClick={(e) => handleDeleteHistory(item.id, e)}><Trash2 size={15} /></button></div></article>)}</div>
+      <div className="ag-mobile-statusbar" role="status">
+        {connectionNode}
+        {quotaNode}
+      </div>
+
+      <dialog
+        ref={historyDialogRef}
+        className="ag-dialog ag-history-dialog"
+        aria-labelledby="ai-history-title"
+        onCancel={() => setIsHistoryOpen(false)}
+        onClose={() => setIsHistoryOpen(false)}
+      >
+        <div className="ag-dialog-head">
+          <div>
+            <h2 id="ai-history-title">Riwayat generasi</h2>
+            <p className="ag-muted">{historyList.length} hasil tersimpan di akun ini</p>
+          </div>
+          <button
+            type="button"
+            className="ag-icon-btn"
+            aria-label="Tutup riwayat"
+            onClick={() => setIsHistoryOpen(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="ag-history-toolbar">
+          <label className="ag-search-box">
+            <Search size={15} aria-hidden="true" />
+            <input
+              aria-label="Cari riwayat"
+              placeholder="Filter prompt, model, atau tool..."
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+            />
+          </label>
+          {historyList.length > 0 && (
+            <button type="button" className="ag-danger-text-btn" onClick={handleClearHistory}>
+              <Trash2 size={14} aria-hidden="true" />
+              <span>Hapus semua</span>
+            </button>
+          )}
+        </div>
+
+        {historyError && (
+          <div className="ag-alert is-negative" role="alert">
+            <AlertTriangle size={15} aria-hidden="true" />
+            <span>{historyError}</span>
+            <button type="button" onClick={fetchHistory}>
+              Coba lagi
+            </button>
+          </div>
+        )}
+
+        <div className="ag-history-list">
+          {historyLoading ? (
+            <p className="ag-muted" role="status">
+              Memuat riwayat...
+            </p>
+          ) : !historyList.length ? (
+            <p className="ag-empty-note">
+              Belum ada riwayat. Hasil dari tool teks akan otomatis tersimpan di sini.
+            </p>
+          ) : !filteredHistory.length ? (
+            <p className="ag-empty-note">Tidak ada riwayat yang cocok dengan kata pencarian.</p>
+          ) : (
+            filteredHistory.map((item) => (
+              <article key={item.id} className="ag-history-card">
+                <div className="ag-history-meta">
+                  <span className="ag-history-type">
+                    {generatorTools.find((tool) => tool.mode === item.type)?.title || item.type}
+                  </span>
+                  <span>{item.createdAt}</span>
+                </div>
+                <h3>{item.prompt}</h3>
+                <p>{item.result}</p>
+                <div className="ag-history-actions">
+                  <span className="ag-history-model" title={item.model}>
+                    {item.model}
+                  </span>
+                  {generatorTools.some((tool) => tool.mode === item.type) && (
+                    <button
+                      type="button"
+                      className="ag-text-btn"
+                      data-testid="restore-history"
+                      disabled={generating}
+                      onClick={() => restoreHistory(item)}
+                    >
+                      <span>Gunakan kembali</span>
+                      <ArrowUpRight size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="ag-icon-btn"
+                    aria-label="Hapus riwayat ini"
+                    onClick={(e) => handleDeleteHistory(item.id, e)}
+                  >
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
       </dialog>
     </div>
   )

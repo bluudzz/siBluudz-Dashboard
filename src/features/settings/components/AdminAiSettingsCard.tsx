@@ -25,6 +25,8 @@ export interface AiConfigSettings {
   hasApiKey: boolean
   apiKeyMasked: string
   availableModels?: string[]
+  availableImageModels?: string[]
+  syncedAt?: string
 }
 
 interface AdminAiSettingsCardProps {
@@ -40,8 +42,11 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
   const [modelInput, setModelInput] = React.useState('')
   const [imageModelInput, setImageModelInput] = React.useState('')
   const [availableModels, setAvailableModels] = React.useState<string[]>([])
+  const [availableImageModels, setAvailableImageModels] = React.useState<string[]>([])
+  const [syncedAt, setSyncedAt] = React.useState('')
   const [fetchingModels, setFetchingModels] = React.useState(false)
   const [isCustomModelMode, setIsCustomModelMode] = React.useState(false)
+  const [isCustomImageModelMode, setIsCustomImageModelMode] = React.useState(false)
   const [freeLimitInput, setFreeLimitInput] = React.useState('5')
   const [proLimitInput, setProLimitInput] = React.useState('100')
   const [savingSettings, setSavingSettings] = React.useState(false)
@@ -56,7 +61,7 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
   const fetchSettings = React.useCallback(async () => {
     setSettingsLoading(true)
     try {
-      const res = await fetch('/api/admin/ai-settings', { credentials: 'same-origin' })
+      const res = await fetch('/api/admin/ai-settings?refresh=1', { credentials: 'same-origin' })
       const data: (AiConfigSettings & { error?: string }) | null = await res.json().catch(() => null)
       if (!res.ok || !data) {
         throw new Error(data?.error || `Gagal memuat konfigurasi (${res.status}). Pastikan backend server aktif.`)
@@ -67,6 +72,12 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
       setImageModelInput(data.imageModel || '')
       if (Array.isArray(data.availableModels) && data.availableModels.length > 0) {
         setAvailableModels(data.availableModels)
+      }
+      if (Array.isArray(data.availableImageModels)) {
+        setAvailableImageModels(data.availableImageModels)
+      }
+      if (data.syncedAt) {
+        setSyncedAt(data.syncedAt)
       }
       setFreeLimitInput(String(data.freeDailyLimit || 5))
       setProLimitInput(String(data.proDailyLimit || 100))
@@ -103,13 +114,33 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
       }
 
       const list: string[] = Array.isArray(data.models) ? data.models : []
+      const imageList: string[] = Array.isArray(data.imageModels) ? data.imageModels : []
       setAvailableModels(list)
-      setIsCustomModelMode(false)
-      if (list.length > 0 && !modelInput) {
-        setModelInput(list[0])
+      setAvailableImageModels(imageList)
+      if (data.syncedAt) {
+        setSyncedAt(data.syncedAt)
       }
-      setSettingsMessage(`Berhasil mendeteksi ${list.length} model dari 9router! Silakan pilih model default yang Anda inginkan.`)
-      setTimeout(() => setSettingsMessage(''), 4000)
+      setIsCustomModelMode(false)
+      setIsCustomImageModelMode(false)
+
+      let autoSwitched = false
+      if (list.length > 0 && (!modelInput || !list.includes(modelInput))) {
+        const nextModel = data.defaultModel && list.includes(data.defaultModel) ? data.defaultModel : list[0]
+        if (modelInput && modelInput !== nextModel) autoSwitched = true
+        setModelInput(nextModel)
+      }
+      if (imageModelInput && imageList.length > 0 && !imageList.includes(imageModelInput)) {
+        const nextImg = data.defaultImageModel && imageList.includes(data.defaultImageModel)
+          ? data.defaultImageModel
+          : imageList[0]
+        setImageModelInput(nextImg)
+      }
+      setSettingsMessage(
+        `Berhasil menyinkronkan ${list.length} model teks dan ${imageList.length} model gambar dari 9router.${
+          autoSwitched ? ' Model default disesuaikan otomatis ke katalog terbaru.' : ''
+        }`
+      )
+      setTimeout(() => setSettingsMessage(''), 5000)
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Gagal mengambil daftar model')
     } finally {
@@ -201,13 +232,21 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
       } else {
         if (Array.isArray(data.availableModels) && data.availableModels.length > 0) {
           setAvailableModels(data.availableModels)
-          if (!modelInput && data.model) {
+          if ((!modelInput || !data.availableModels.includes(modelInput)) && data.model && data.availableModels.includes(data.model)) {
             setModelInput(data.model)
           }
         }
+        if (Array.isArray(data.availableImageModels)) {
+          setAvailableImageModels(data.availableImageModels)
+        }
+        if (data.syncedAt) {
+          setSyncedAt(data.syncedAt)
+        }
         setTestResult({
           success: true,
-          message: `Berhasil terhubung ke 9router! Respon: "${data.reply}" (Model: ${data.model})` + (data.availableModels?.length ? ` — Ditemukan ${data.availableModels.length} model aktif.` : ''),
+          message:
+            `Berhasil terhubung ke 9router! Respon: "${data.reply}" (Model: ${data.model})` +
+            (data.availableModels?.length ? ` · Ditemukan ${data.availableModels.length} model aktif.` : ''),
         })
       }
     } catch (err) {
@@ -299,7 +338,7 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
                     <option value="">-- Pilih Model AI Default ({availableModels.length} Model Terdeteksi) --</option>
                   )}
                   {!availableModels.includes(modelInput) && modelInput && (
-                    <option value={modelInput}>{modelInput} (Model Kustom Saat Ini)</option>
+                    <option value={modelInput}>{modelInput} (Tidak tersedia di 9router)</option>
                   )}
                   {availableModels.map((m) => (
                     <option key={m} value={m}>
@@ -307,10 +346,11 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1 flex-wrap">
                   <span className="text-emerald-500 font-bold">✓</span>
                   <span>
-                    {availableModels.length} model terdeteksi dari 9router.{' '}
+                    {availableModels.length} model terdeteksi dari 9router
+                    {syncedAt ? ` (sinkron ${new Date(syncedAt).toLocaleString('id-ID')})` : ''}.{' '}
                     <button
                       type="button"
                       onClick={() => setIsCustomModelMode(true)}
@@ -348,18 +388,63 @@ export function AdminAiSettingsCard({ onSettingsSaved }: AdminAiSettingsCardProp
 
           {/* Model AI Image (Ganti Produk) */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground">
-              Model Image / Vision (Ganti Produk di Foto)
-            </label>
-            <Input
-              value={imageModelInput}
-              onChange={(e) => setImageModelInput(e.target.value)}
-              placeholder="ag/gemini-3.1-flash-image (default jika kosong)"
-              className="font-mono text-xs"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Model yang digunakan pada fitur &quot;Ganti Produk di Foto&quot; (misal: ag/gemini-3.1-flash-image atau model image 9router lainnya).
-            </p>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Model Image / Vision (Ganti Produk di Foto)
+              </label>
+              {availableImageModels.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsCustomImageModelMode(!isCustomImageModelMode)}
+                  className="text-[11px] text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                >
+                  <Edit3 className="h-3 w-3" />
+                  {isCustomImageModelMode ? 'Pilih dari List' : 'Ketik Manual'}
+                </button>
+              )}
+            </div>
+            {availableImageModels.length > 0 && !isCustomImageModelMode ? (
+              <div className="space-y-1">
+                <select
+                  value={imageModelInput}
+                  onChange={(e) => setImageModelInput(e.target.value)}
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                >
+                  <option value="">Otomatis (pilih model gambar aktif 9router)</option>
+                  {imageModelInput && !availableImageModels.includes(imageModelInput) && (
+                    <option value={imageModelInput}>{imageModelInput} (Tidak ada di 9router)</option>
+                  )}
+                  {availableImageModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  {availableImageModels.length} model gambar aktif di 9router untuk fitur &quot;Ganti Produk di Foto&quot;.
+                </p>
+              </div>
+            ) : (
+              <>
+                <Input
+                  list="available-image-models-datalist"
+                  value={imageModelInput}
+                  onChange={(e) => setImageModelInput(e.target.value)}
+                  placeholder="Otomatis dari model gambar 9router (jika kosong)"
+                  className="font-mono text-xs"
+                />
+                {availableImageModels.length > 0 && (
+                  <datalist id="available-image-models-datalist">
+                    {availableImageModels.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Model gambar yang digunakan pada fitur &quot;Ganti Produk di Foto&quot; (klik &quot;Deteksi Model&quot; untuk memuat daftar terbaru).
+                </p>
+              </>
+            )}
           </div>
 
           {/* API Key */}

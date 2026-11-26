@@ -356,6 +356,10 @@ export function useAddAccount(deps: {
   }
 
   const handleStartDeviceAuth = async () => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(outlookForm.email.trim())) {
+      setError('Isi alamat email akun Microsoft yang ingin dihubungkan.')
+      return
+    }
     setLoadingDeviceCode(true)
     setError('')
     try {

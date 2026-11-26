@@ -33,6 +33,7 @@ export function getManager(account) {
 
 export function outlookErrorStatus(error) {
   if (error instanceof OutlookAuthError) {
+    if (error.code === 'ACCOUNT_MISMATCH') return { status: 409, code: 'ACCOUNT_MISMATCH' }
     if (error.code === 'INVALID_GRANT') return { status: 401, code: 'INVALID_GRANT' }
     if (error.code === 'TIMEOUT') return { status: 504, code: 'TIMEOUT' }
     if (error.code === 'NETWORK') return { status: 502, code: 'NETWORK' }
@@ -216,7 +217,9 @@ router.post('/accounts/:id/refresh', requireSameOrigin, requireUser, async (req,
   if (!account) return res.status(404).json({ error: 'Akun Outlook tidak ditemukan.' })
 
   try {
-    const accessToken = await getManager(account).refreshToken()
+    const manager = getManager(account)
+    const accessToken = await manager.refreshToken()
+    await manager.getInboxMessages(1)
     res.json({ access_token: accessToken })
   } catch (error) {
     const { status, code } = outlookErrorStatus(error)
@@ -308,6 +311,19 @@ router.post('/device/poll', requireSameOrigin, requireUser, async (req, res) => 
     const accessToken = status.tokens.access_token
     const cleanEmail = typeof email === 'string' ? email.trim() : ''
     const cleanPassword = typeof password === 'string' ? password.trim() : ''
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Isi alamat email akun Microsoft yang ingin dihubungkan.' })
+    }
+    const verifiedManager = new OutlookAccountManager({
+      email: cleanEmail,
+      refreshToken,
+      clientId: clientIdToUse,
+    })
+    verifiedManager.tokenCache = {
+      accessToken,
+      expiresAt: Date.now() + (Number(status.tokens.expires_in) || 3600) * 1000,
+    }
+    await verifiedManager.getInboxMessages(1)
     const pipeLine = cleanEmail ? `${cleanEmail}|${cleanPassword}|${refreshToken}|${clientIdToUse}` : ''
 
     let accountId = null

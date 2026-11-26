@@ -85,7 +85,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
-  const invoiceSaveQueue = useRef<Promise<void>>(Promise.resolve())
+  const pendingInvoicesRef = useRef<InvoiceRecord[] | null>(null)
+  const pendingWaitersRef = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([])
+  const flushPromiseRef = useRef<Promise<void> | null>(null)
+  const latestInvoicesRef = useRef<InvoiceRecord[]>([])
 
   const refreshAccount = async () => {
     setDataLoading(true)
@@ -131,25 +134,46 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setProfile(result.user)
   }
 
-  const saveInvoices = (updated: InvoiceRecord[]) => {
-    const persist = async () => {
-      await apiRequest('/api/invoices', {
-        method: 'PUT',
-        body: JSON.stringify({ invoices: updated }),
-      })
-      setInvoices(updated)
-      localStorage.setItem('invoice_saved_invoices_list', JSON.stringify(updated))
-      setDataError('')
-    }
+  const saveInvoices = React.useCallback((updated: InvoiceRecord[]) => {
+    latestInvoicesRef.current = updated
+    setInvoices(updated)
+    localStorage.setItem('invoice_saved_invoices_list', JSON.stringify(updated))
+    pendingInvoicesRef.current = updated
 
-    const operation = invoiceSaveQueue.current.then(persist)
-    invoiceSaveQueue.current = operation.catch(() => undefined)
-    return operation.catch((error: unknown) => {
-      console.error('Failed to save invoices on local API:', error)
-      setDataError(error instanceof Error ? error.message : 'Invoice gagal disimpan ke server lokal.')
-      throw error
+    return new Promise<void>((resolve, reject) => {
+      pendingWaitersRef.current.push({ resolve, reject })
+      if (flushPromiseRef.current) return
+
+      const flush = async () => {
+        try {
+          while (pendingInvoicesRef.current) {
+            const snapshot = pendingInvoicesRef.current
+            const waiters = pendingWaitersRef.current
+            pendingInvoicesRef.current = null
+            pendingWaitersRef.current = []
+            try {
+              await apiRequest('/api/invoices', {
+                method: 'PUT',
+                body: JSON.stringify({ invoices: snapshot }),
+              })
+              if (latestInvoicesRef.current === snapshot) {
+                setDataError('')
+              }
+              waiters.forEach((waiter) => waiter.resolve())
+            } catch (error: unknown) {
+              console.error('Failed to save invoices on local API:', error)
+              setDataError(error instanceof Error ? error.message : 'Invoice gagal disimpan ke server lokal.')
+              waiters.forEach((waiter) => waiter.reject(error))
+            }
+          }
+        } finally {
+          flushPromiseRef.current = null
+        }
+      }
+
+      flushPromiseRef.current = flush()
     })
-  }
+  }, [])
 
   const signOut = async () => {
     await apiRequest('/api/auth/logout', { method: 'POST' })

@@ -1,27 +1,40 @@
 import { Router } from 'express'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
-import { executeGraphAsync, validateGraph, WORKFLOW_NODE_TYPES } from '../../shared/workflow-engine.js'
+import { validateGraph } from '../../shared/workflow-engine.js'
 import { decodeWorkflowRun } from '../workflow-history.js'
-import { createWorkflowRuntime } from '../workflow-runtime.js'
-import { isAiConnection } from '../../shared/workflow-connections.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
 import { proposeWorkflowChange, loadAssistantHistory, clearAssistantHistory } from '../workflow-assistant.js'
+import { activeRuns, executeStoredWorkflow, normalizedWorkflow, sanitizeGraph } from '../workflow-scheduler.js'
 
 const router = Router()
 const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
 const parse = value => JSON.parse(value || '[]')
-const activeRuns = new Map()
-function sanitizeGraph(nodes,edges) {
-  const cleanNodes=(Array.isArray(nodes)?nodes:[]).filter(node=>node&&WORKFLOW_NODE_TYPES.has(node.type))
-  const ids=new Set(cleanNodes.map(node=>node.id))
-  const cleanEdges=(Array.isArray(edges)?edges:[]).filter(edge=>edge&&ids.has(edge.source)&&ids.has(edge.target))
-  return {nodes:cleanNodes,edges:cleanEdges}
+
+function hasAutomationTrigger(nodes) {
+  return nodes.some(node => !node.data?.disabled && ((node.type === 'trigger' && node.data?.triggerMode === 'schedule') || node.type === 'webhookTrigger'))
 }
-function normalizedWorkflow(row) {
-  // Reading or testing must not overwrite stored legacy nodes. Only an explicit save writes a draft.
-  return sanitizeGraph(parse(row.nodes),parse(row.edges))
+
+function validateActivation(nodes, edges) {
+  const readiness = inspectWorkflow(nodes, edges).filter(issue => issue.severity === 'error')
+  if (readiness.length) return readiness.map(issue => issue.message).join(' ')
+  if (!hasAutomationTrigger(nodes)) return 'Untuk mengaktifkan workflow otomatis, gunakan Manual Trigger mode Jadwal atau tambahkan Webhook Trigger.'
+  return ''
+}
+
+function normalizeWebhookPayload(body) {
+  if (body == null) return [{ json: { receivedAt: new Date().toISOString() } }]
+  const raw = JSON.stringify(body)
+  if (Buffer.byteLength(raw, 'utf8') > 256 * 1024) throw new Error('Payload webhook maksimal 256 KB.')
+  if (Array.isArray(body)) {
+    if (body.length && body.every(item => item && typeof item === 'object' && !Array.isArray(item) && item.json && typeof item.json === 'object')) {
+      return body.slice(0, 1000)
+    }
+    return [{ json: { items: body, receivedAt: new Date().toISOString() } }]
+  }
+  if (typeof body === 'object') return [{ json: { ...body, receivedAt: body.receivedAt || new Date().toISOString() } }]
+  return [{ json: { payload: body, receivedAt: new Date().toISOString() } }]
 }
 
 function templateGraph(template) {
@@ -76,15 +89,36 @@ function templateGraph(template) {
   return {nodes,edges}
 }
 
+router.post('/hooks/:token', async (req, res) => {
+  const token = String(req.params.token || '')
+  if (!/^[a-f0-9]{64}$/.test(token)) return res.status(404).json({ error: 'Webhook tidak ditemukan.' })
+  const workflow = db.prepare('select * from workflows where webhook_token = ?').get(token)
+  if (!workflow) return res.status(404).json({ error: 'Webhook tidak ditemukan.' })
+  if (!workflow.is_active) return res.status(409).json({ error: 'Workflow webhook belum diaktifkan.' })
+  const user = db.prepare('select * from users where id = ?').get(workflow.user_id)
+  if (!user) return res.status(404).json({ error: 'Pemilik workflow tidak ditemukan.' })
+  const graph = normalizedWorkflow(workflow)
+  if (!graph.nodes.some(node => node.type === 'webhookTrigger' && !node.data?.disabled)) {
+    return res.status(400).json({ error: 'Workflow tidak memiliki Webhook Trigger yang aktif.' })
+  }
+  try {
+    const webhookPayload = normalizeWebhookPayload(req.body)
+    const result = await executeStoredWorkflow({ workflow, user, triggerType: 'webhook', webhookPayload })
+    res.json({ runId: result.runId, status: result.status, nodeCount: Object.keys(result.nodeResults || {}).length })
+  } catch (error) {
+    res.status(error?.status || 400).json({ error: error?.message || 'Eksekusi webhook gagal.', ...(error?.issues ? { issues: error.issues } : {}) })
+  }
+})
+
 router.get('/', requireUser, (req,res)=>{
-  const workflows=db.prepare('select id,name,description,is_active,created_at,updated_at from workflows where user_id = ? order by updated_at desc').all(req.user.id)
-   res.json({workflows,capabilities:{simulation:true,scheduler:false,externalIntegrations:true}})
+  const workflows=db.prepare('select id,name,description,is_active,webhook_token,created_at,updated_at from workflows where user_id = ? order by updated_at desc').all(req.user.id)
+  res.json({workflows,capabilities:{simulation:true,scheduler:true,webhooks:true,externalIntegrations:true}})
 })
 router.get('/:id',requireUser,(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)
   if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
   const graph=normalizedWorkflow(row)
-  res.json({workflow:{id:row.id,name:row.name,description:row.description,nodes:graph.nodes,edges:graph.edges,isActive:Boolean(row.is_active),createdAt:row.created_at,updatedAt:row.updated_at}})
+  res.json({workflow:{id:row.id,name:row.name,description:row.description,nodes:graph.nodes,edges:graph.edges,isActive:Boolean(row.is_active),webhookToken:row.webhook_token||'',createdAt:row.created_at,updatedAt:row.updated_at}})
 })
 router.post('/',requireSameOrigin,requireUser,(req,res)=>{
   const name=typeof req.body?.name==='string'?req.body.name.trim():''
@@ -93,25 +127,56 @@ router.post('/',requireSameOrigin,requireUser,(req,res)=>{
   const description=typeof req.body?.description==='string'?req.body.description.slice(0,2000):''
   const id=randomUUID(),{nodes,edges}=templateGraph(req.body.template)
   db.prepare('insert into workflows (id,user_id,name,description,nodes,edges,is_active) values (?,?,?,?,?,?,0)').run(id,req.user.id,name,description,JSON.stringify(nodes),JSON.stringify(edges))
-  res.status(201).json({id,name,description,isActive:false})
+  res.status(201).json({id,name,description,isActive:false,webhookToken:''})
 })
 router.put('/:id',requireSameOrigin,requireUser,(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)
   if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
-  if(req.body?.isActive)return res.status(400).json({error:'Jadwal otomatis belum tersedia. Workflow hanya dapat diuji secara manual.'})
   const name=req.body?.name===undefined?row.name:String(req.body.name).trim()
   if(!name || name.length>160)return res.status(400).json({error:'Nama workflow wajib diisi, maksimal 160 karakter.'})
   const submitted= sanitizeGraph(req.body?.nodes??parse(row.nodes),req.body?.edges??parse(row.edges))
   const nodes=submitted.nodes,edges=submitted.edges
   const errors=validateGraph(nodes,edges)
   if(errors.length)return res.status(400).json({error:errors.join(' ')})
+  const wantActive=req.body?.isActive===undefined?Boolean(row.is_active):Boolean(req.body.isActive)
+  if(wantActive){
+    const activationError=validateActivation(nodes,edges)
+    if(activationError)return res.status(400).json({error:activationError})
+  }
   const savedNodes=nodes.map(node=>{
     const {status:_status,lastOutput:_lastOutput,onTestNode:_onTestNode,result:_result,running:_running,...data}=node.data
     return {id:node.id,type:node.type,position:node.position,data}
   })
   const description=req.body?.description===undefined?row.description:String(req.body.description).slice(0,2000)
-  db.prepare("update workflows set name=?,description=?,nodes=?,edges=?,is_active=0,updated_at=datetime('now') where id=? and user_id=?").run(name,description,JSON.stringify(savedNodes),JSON.stringify(edges),row.id,req.user.id)
-  res.json({success:true,message:'Workflow tersimpan sebagai draft.'})
+  let webhookToken=row.webhook_token||''
+  if(wantActive&&!webhookToken&&nodes.some(n=>n.type==='webhookTrigger'&&!n.data?.disabled)){
+    webhookToken=randomBytes(32).toString('hex')
+  }
+  db.prepare("update workflows set name=?,description=?,nodes=?,edges=?,is_active=?,webhook_token=?,updated_at=datetime('now') where id=? and user_id=?").run(name,description,JSON.stringify(savedNodes),JSON.stringify(edges),wantActive?1:0,webhookToken||null,row.id,req.user.id)
+  res.json({success:true,isActive:wantActive,webhookToken,message:wantActive?'Workflow tersimpan dan aktif.':'Workflow tersimpan sebagai draft.'})
+})
+router.patch('/:id/active',requireSameOrigin,requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const wantActive=Boolean(req.body?.isActive)
+  const graph=normalizedWorkflow(row)
+  if(wantActive){
+    const activationError=validateActivation(graph.nodes,graph.edges)
+    if(activationError)return res.status(400).json({error:activationError})
+  }
+  let webhookToken=row.webhook_token||''
+  if(wantActive&&!webhookToken&&graph.nodes.some(n=>n.type==='webhookTrigger'&&!n.data?.disabled)){
+    webhookToken=randomBytes(32).toString('hex')
+  }
+  db.prepare("update workflows set is_active=?,webhook_token=?,updated_at=datetime('now') where id=? and user_id=?").run(wantActive?1:0,webhookToken||null,row.id,req.user.id)
+  res.json({isActive:wantActive,webhookToken,message:wantActive?'Workflow diaktifkan.':'Workflow dinonaktifkan (draft).'})
+})
+router.post('/:id/webhook-token',requireSameOrigin,requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const webhookToken=randomBytes(32).toString('hex')
+  db.prepare("update workflows set webhook_token=?,updated_at=datetime('now') where id=? and user_id=?").run(webhookToken,row.id,req.user.id)
+  res.json({webhookToken,webhookPath:`/api/workflows/hooks/${webhookToken}`})
 })
 router.delete('/:id',requireSameOrigin,requireUser,(req,res)=>{
   if(!findWorkflow(req.params.id,req.user.id))return res.status(404).json({error:'Workflow tidak ditemukan.'})
@@ -122,50 +187,19 @@ async function run(req,res,partial=false,chat=false){
   const workflow=findWorkflow(req.params.id,req.user.id)
   if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})
   if(partial && typeof req.body?.nodeId!=='string')return res.status(400).json({error:'Pilih node untuk Execute step.'})
-  const activeKey=req.user.id+':'+workflow.id
-  if(activeRuns.get(activeKey)?.running)return res.status(409).json({error:'Workflow ini sedang berjalan. Tunggu hasilnya sebelum menjalankan lagi.'})
-  const controller=new AbortController()
-  const active={userId:req.user.id,workflowId:workflow.id,currentNodeId:'',currentNodeLabel:'',phase:'starting',completed:[],statuses:{},events:[],sequence:0,running:true,controller}
-  activeRuns.set(activeKey,active)
   try{
-     const normalized=normalizedWorkflow(workflow)
-     let nodes=normalized.nodes
-     let edges=normalized.edges
-    if(chat){
-      if(typeof req.body?.message!=='string'||!req.body.message.trim()||req.body.message.length>16000)return res.status(400).json({error:'Pesan chat wajib diisi, maksimal 16.000 karakter.'})
-      if(typeof req.body?.sessionId!=='string'||!req.body.sessionId||req.body.sessionId.length>200)return res.status(400).json({error:'Session ID chat tidak valid.'})
-      if(nodes.filter(node=>node.type==='chatTrigger'&&!node.data.disabled).length!==1)return res.status(400).json({error:'Uji chat membutuhkan tepat satu Chat Trigger aktif.'})
-      nodes=nodes.map(node=>node.type==='chatTrigger'?{...node,data:{...node.data,chatInput:req.body.message,sessionId:req.body.sessionId}}:node)
-      const scope=new Set()
-      const visit=id=>{if(scope.has(id))return;scope.add(id);edges.filter(edge=>edge.source===id&&!isAiConnection(edge)).forEach(edge=>visit(edge.target))}
-      visit(nodes.find(node=>node.type==='chatTrigger'&&!node.data.disabled).id)
-      edges.filter(edge=>scope.has(edge.target)&&isAiConnection(edge)).forEach(edge=>scope.add(edge.source))
-      nodes=nodes.filter(node=>scope.has(node.id));edges=edges.filter(edge=>scope.has(edge.source)&&scope.has(edge.target))
-    }
-     const readiness=inspectWorkflow(nodes,edges,partial?req.body.nodeId:undefined).filter(issue=>issue.severity==='error')
-     if(readiness.length)return res.status(422).json({error:readiness.map(issue=>issue.message).join(' '),issues:readiness})
-     const result=await executeGraphAsync(nodes,edges,partial?req.body.nodeId:undefined,createWorkflowRuntime(req.user,workflow.id,controller.signal),progress=>{
-       active.phase=progress.phase
-       active.currentNodeId=progress.phase==='start'?progress.nodeId:''
-       active.currentNodeLabel=progress.label||''
-       if(progress.phase==='start')active.statuses[progress.nodeId]='running'
-       if(progress.phase==='complete'){
-         active.statuses[progress.nodeId]=progress.status||'success'
-         active.completed.push({nodeId:progress.nodeId,status:progress.status})
-       }
-       active.events.push({sequence:++active.sequence,...progress})
-       if(active.events.length>250)active.events.splice(0,active.events.length-250)
-     },controller.signal)
-     active.phase=result.status==='cancelled'?'stopped':'complete';active.currentNodeId='';active.currentNodeLabel='';active.status=result.status
-    const runId=randomUUID()
-    db.prepare("insert into workflow_runs (id,workflow_id,user_id,status,trigger_type,logs,result,completed_at) values (?,?,?,?,?,?,?,datetime('now'))").run(runId,workflow.id,req.user.id,result.status,chat?'chat':partial?'partial':'manual',JSON.stringify(result.logs),JSON.stringify(result))
-    res.json({runId,...result,...(partial?{nodeId:req.body.nodeId,output:result.nodeResults[req.body.nodeId]?.output}:{})})
-   }catch(error){
-     const stopped=error?.code==='WORKFLOW_STOPPED'||controller.signal.aborted
-     active.phase=stopped?'stopped':'error';active.currentNodeId='';active.currentNodeLabel='';active.status=stopped?'cancelled':'error'
-     res.status(stopped?409:400).json({error:stopped?'Pengujian dihentikan.':error.message,...(stopped?{code:'WORKFLOW_STOPPED'}:{})})
-   }
-   finally{active.running=false;setTimeout(()=>{if(activeRuns.get(activeKey)===active)activeRuns.delete(activeKey)},2500)}
+    const result=await executeStoredWorkflow({
+      workflow,
+      user:req.user,
+      triggerType:chat?'chat':partial?'partial':'manual',
+      partialNodeId:partial?req.body.nodeId:undefined,
+      chatMessage:req.body?.message,
+      chatSessionId:req.body?.sessionId,
+    })
+    res.json(result)
+  }catch(error){
+    res.status(error?.status||400).json({error:error?.message||'Pengujian gagal.',...(error?.code?{code:error.code}:{}),...(error?.issues?{issues:error.issues}:{})})
+  }
 }
 router.post('/:id/assistant',requireSameOrigin,requireUser,async(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)

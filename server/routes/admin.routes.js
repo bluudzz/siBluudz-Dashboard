@@ -1,7 +1,14 @@
 import { Router } from 'express'
 import { db, getSetting, setSetting, getNineRouterConfig } from '../db.js'
 import { requireSameOrigin, requireAdmin, userResponse, hashPassword } from '../middleware/auth.js'
-import { fetchNineRouterModels, callNineRouterChat, getImageModelName } from './ai.routes.js'
+import {
+  fetchNineRouterModels,
+  fetchNineRouterImageModels,
+  syncNineRouterCatalogIfStale,
+  getCachedImageModels,
+  callNineRouterChat,
+  getImageModelName,
+} from './ai.routes.js'
 
 const router = Router()
 
@@ -137,7 +144,8 @@ router.post('/users/:id/reset-password', requireSameOrigin, requireAdmin, async 
   }
 })
 
-router.get('/ai-settings', requireAdmin, (_req, res) => {
+router.get('/ai-settings', requireAdmin, async (req, res) => {
+  await syncNineRouterCatalogIfStale({ force: req.query?.refresh === '1' || req.query?.refresh === 'true' })
   const { baseUrl, apiKey, model, freeDailyLimit, proDailyLimit } = getNineRouterConfig()
   let availableModels = []
   try {
@@ -153,6 +161,8 @@ router.get('/ai-settings', requireAdmin, (_req, res) => {
     hasApiKey: Boolean(apiKey),
     apiKeyMasked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
     availableModels,
+    availableImageModels: getCachedImageModels(),
+    syncedAt: getSetting('ninerouter_models_synced_at', ''),
   })
 })
 
@@ -213,11 +223,18 @@ router.post('/fetch-models', requireSameOrigin, requireAdmin, async (req, res) =
     }
 
     const models = await fetchNineRouterModels(baseUrl, apiKey)
+    const imageModels = await fetchNineRouterImageModels(baseUrl, apiKey).catch(() => getCachedImageModels())
+    const updated = getNineRouterConfig()
     res.json({
       success: true,
-      message: `Berhasil mendeteksi ${models.length} model.`,
+      message: `Berhasil mendeteksi ${models.length} model teks dan ${imageModels.length} model gambar.`,
       models,
+      imageModels,
       count: models.length,
+      imageCount: imageModels.length,
+      defaultModel: updated.model,
+      defaultImageModel: getImageModelName(),
+      syncedAt: getSetting('ninerouter_models_synced_at', ''),
     })
   } catch (error) {
     res.status(500).json({
@@ -248,8 +265,10 @@ router.post('/test-9router', requireSameOrigin, requireAdmin, async (req, res) =
     const reply = response?.choices?.[0]?.message?.content || 'OK'
 
     let detectedModels = []
+    let detectedImageModels = []
     try {
       detectedModels = await fetchNineRouterModels(baseUrl, apiKey)
+      detectedImageModels = await fetchNineRouterImageModels(baseUrl, apiKey).catch(() => getCachedImageModels())
     } catch (modelErr) {
       console.warn('Auto-fetch models during test:', modelErr.message)
     }
@@ -260,6 +279,8 @@ router.post('/test-9router', requireSameOrigin, requireAdmin, async (req, res) =
       reply,
       model: response?.model || model,
       availableModels: detectedModels,
+      availableImageModels: detectedImageModels,
+      syncedAt: getSetting('ninerouter_models_synced_at', ''),
     })
   } catch (error) {
     res.status(500).json({

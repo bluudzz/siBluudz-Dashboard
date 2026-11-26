@@ -472,14 +472,11 @@ router.get('/accounts/:id/messages/:uid', requireUser, async (req, res) => {
       const fetched = await client.fetchOne(uid, { source: true }, { uid: true })
       if (!fetched?.source) return null
       const parsed = await simpleParser(fetched.source)
-      const htmlText = typeof parsed.html === 'string'
-        ? parsed.html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, ' ')
-        : ''
       return {
         subject: parsed.subject || '(Tanpa subjek)',
         from: parsed.from?.text || '',
         date: parsed.date?.toISOString() || null,
-        text: (parsed.text || htmlText).slice(0, 40000),
+        text: (parsed.text || '').slice(0, 40000),
       }
     })
     if (!message) return res.status(404).json({ error: 'Pesan tidak ditemukan atau sudah dihapus.' })

@@ -1,28 +1,60 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeResult, ExecutionResult } from '../../../shared/workflow-engine'
+import { workflowInput, type DataItem } from '../../../shared/workflow-engine.js'
+
+export function workflowInputFields(items:DataItem[]):string[] {
+  const sample=items.slice(0,20)
+  const hidden=new Set(['constructor','prototype','agentModel','agentRun','toolSteps','model','sessionId','imageModel','imageMime','splitIndex','statusCode','searchedAt','researchMode','researchPlan','searchProvider','driveSelection','driveHasMore','driveAccount'])
+  const seen=new Set([JSON.stringify(sample.map(item=>workflowInput(item.json)))])
+  return [...new Set(sample.flatMap(item=>Object.keys(item.json)))].filter(key=>{
+    if(key.startsWith('_')||hidden.has(key))return false
+    const signature=JSON.stringify(sample.map(item=>item.json[key]))
+    if(seen.has(signature))return false
+    seen.add(signature)
+    return true
+  }).slice(0,80)
+}
 
 export type WorkflowData = { label: string; result?: NodeResult; running?: boolean; [key:string]: unknown }
 export type StudioNode = Node<WorkflowData>
 export type { NodeResult, ExecutionResult }
+export function workflowImagePreview(json:Record<string,unknown>):string {
+  const candidate=json.imagePreviewUrl||json.imageUrl
+  return typeof candidate==='string'&&(candidate.startsWith('/api/workflow-media/')||candidate.startsWith('https://'))?candidate:''
+}
+export function workflowNodeImages(node:Pick<StudioNode,'type'|'data'>):string[] {
+  if((node.type!=='imageGenerate'&&node.type!=='imageEdit')||node.data.result?.status!=='success')return []
+  // ponytail: cap canvas thumbnails at 3; use Output for the full gallery.
+  return node.data.result.output.map(item=>workflowImagePreview(item.json)).filter(Boolean).slice(0,3)
+}
 export const PROMPT_TRIGGER_DEFAULT_MODEL='ag/gemini-3.8-flash'
 export const RESEARCH_DEFAULT_MODEL='ag/gemini-3.8-flash'
-export interface WorkflowItem { id:string; name:string; description?:string; is_active?:number }
+export interface WorkflowItem { id:string; name:string; description?:string; is_active?:number; webhook_token?:string }
 export interface RunItem { id:string; status:string; trigger_type:string; started_at:string; completed_at?:string; result: Partial<ExecutionResult> }
 
 export const catalog = [
   {type:'promptTrigger',title:'Prompt Trigger',group:'Pemicu',description:'Tulis perintah; minta AI mengerjakannya atau teruskan langsung.',data:{label:'Prompt Trigger',prompt:'',promptMode:'ai',model:PROMPT_TRIGGER_DEFAULT_MODEL}},
   {type:'chatTrigger',title:'Chat Trigger',group:'Pemicu',description:'Starts the workflow when you send a message through the chat test panel.',data:{label:'Chat Trigger',chatInput:'Help me plan content',sessionId:'test-session'}},
-  {type:'trigger',title:'Manual Trigger',group:'Pemicu',description:'Starts the workflow when you click the Run button manually.',data:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{"topic":"Content idea", "approved":true}',cron:'0 10 * * *',interval:'Every day at 10:00 AM'}},
+  {type:'trigger',title:'Manual / Jadwal Trigger',group:'Pemicu',description:'Mulai alur manual atau berjalan otomatis sesuai jadwal cron (WIB).',data:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{"topic":"Content idea", "approved":true}',cron:'0 10 * * *',interval:'Setiap hari 10:00 WIB'}},
+  {type:'webhookTrigger',title:'Webhook Trigger',group:'Pemicu',description:'Mulai alur otomatis ketika ada data JSON dikirim ke URL webhook.',data:{label:'Webhook Trigger',sampleData:'{"topic":"Event baru","source":"external"}'}},
   {type:'set',title:'Atur Data (Edit Fields)',group:'Data',description:'Menambahkan atau mengubah data sebelum diteruskan ke langkah berikutnya.',data:{label:'Atur Data',fields:'{"headline":"Konten: {{ $json.topic }}"}',keepInput:true}},
+  {type:'merge',title:'Gabungkan Data (Merge)',group:'Data',description:'Gabungkan hasil dari 2 cabang atau rangkum banyak item menjadi 1 objek.',data:{label:'Gabungkan Data',mode:'combineByPosition',aggregateField:'items'}},
+  {type:'jsonParse',title:'Parse JSON / Pecah Array',group:'Data',description:'Urai teks JSON dari AI/API atau pecah daftar array apa saja menjadi item.',data:{label:'Parse JSON',parseMode:'parse',sourceField:'output',arrayPath:'',keepInput:true}},
   {type:'splitOut',title:'Split Out',group:'Data',description:'Membagi hasil AI Agent menjadi beberapa item sesuai jumlah yang Anda pilih.',data:{label:'Split Out',splitCount:'3',sourceField:'output',arrayField:'prompts'}},
-  {type:'if',title:'Periksa Kondisi (If)',group:'Logika',description:'Memeriksa data lalu memilih jalur berikutnya berdasarkan kondisi yang Anda buat.',data:{label:'Periksa Kondisi',field:'approved',operator:'equals',value:'true'}},
-  {type:'approval',title:'Persetujuan Manual',group:'Logika',description:'Hentikan cabang alur sampai Anda meninjau dan menyetujui konten yang masuk.',data:{label:'Persetujuan Manual',approvedItems:null}},
   {type:'searchContent',title:'Riset Informasi',group:'Data',description:'Susun pencarian, baca banyak sumber internet dan komunitas, lalu kumpulkan fakta.',data:{label:'Riset Informasi',sourceMode:'search',query:'',url:'',model:RESEARCH_DEFAULT_MODEL,maxPages:'12'}},
+  {type:'apiRequest',title:'HTTP / Webhook Request',group:'Data',description:'Kirim permintaan GET, POST, PUT, PATCH, atau DELETE ke API HTTPS eksternal.',data:{label:'HTTP Request',method:'GET',url:'',headers:'{}',body:''}},
   {type:'httpRequest',title:'Ambil Halaman/API',group:'Data',description:'Ambil data dari URL HTTPS publik dengan metode GET.',data:{label:'Ambil Halaman/API',url:''}},
-  {type:'googleDrive',title:'Google Drive',group:'Data',description:'Pilih gambar dari link berbagi, secara acak atau berdasarkan nama.',data:{label:'Google Drive',accountId:'',operation:'shared',sharedLink:'',selectionMode:'random',nameFilter:'',search:'',fileId:''}},
+  {type:'googleDrive',title:'Google Drive',group:'Data',description:'Pilih gambar atau video dari link berbagi Google Drive.',data:{label:'Google Drive',accountId:'',operation:'shared',mediaFilter:'images',sharedLink:'',selectionMode:'random',nameFilter:'',search:'',fileId:''}},
+  {type:'if',title:'Periksa Kondisi (If)',group:'Logika',description:'Memeriksa data lalu memilih jalur berikutnya berdasarkan kondisi yang Anda buat.',data:{label:'Periksa Kondisi',field:'approved',operator:'equals',value:'true'}},
+  {type:'switch',title:'Router / Switch',group:'Logika',description:'Arahkan data ke hingga 4 cabang berbeda (Case 1–3 dan Fallback).',data:{label:'Router / Switch',field:'type',rule1Operator:'equals',rule1Value:'carousel',rule2Operator:'equals',rule2Value:'reels',rule3Operator:'',rule3Value:''}},
+  {type:'wait',title:'Tunda (Wait)',group:'Logika',description:'Beri jeda beberapa detik sebelum melanjutkan ke langkah berikutnya.',data:{label:'Tunda',durationSeconds:'5'}},
+  {type:'approval',title:'Persetujuan Manual',group:'Logika',description:'Hentikan cabang alur sampai Anda meninjau dan menyetujui konten yang masuk.',data:{label:'Persetujuan Manual',approvedItems:null}},
   {type:'imageGenerate',title:'Generate Gambar',group:'AI',description:'Buat satu gambar per ide atau slide dengan model gambar 9router.',data:{label:'Generate Gambar',model:'',prompt:''}},
-  {type:'instagram',title:'Post to Instagram',group:'Publikasi',description:'Terbitkan gambar/carousel/reel/story, baca komentar, atau lihat statistik akun profesional.',data:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''}},
+  {type:'imageEdit',title:'Edit & Olah Gambar',group:'AI',description:'Sesuaikan rasio IG 4:5 + teks overlay, atau edit gambar memakai AI.',data:{label:'Edit & Olah Gambar',editMode:'igFormat',aspectRatio:'4:5',overlayTitle:'',overlaySubtitle:'',watermark:'',textPosition:'bottom',model:'',prompt:'',resolution:'1K'}},
+  {type:'aiVision',title:'Analisis Gambar (Vision)',group:'AI',description:'Periksa kualitas atau baca isi gambar memakai model AI multimodal.',data:{label:'Analisis Gambar',model:PROMPT_TRIGGER_DEFAULT_MODEL,prompt:'Periksa kualitas visual, keterbacaan, dan kesesuaian gambar dengan brief.',qaMode:true}},
   {type:'aiAgent',title:'AI Agent',group:'AI',description:'Meminta AI mengolah data dan menyelesaikan tugas sesuai instruksi Anda.',data:{label:'AI Agent',executionMode:'live',aiPrompt:'',systemMessage:'',maxIterations:'3'}},
+  {type:'instagram',title:'Post to Instagram',group:'Publikasi',description:'Terbitkan gambar/carousel/reel/story, baca komentar, atau lihat statistik akun profesional.',data:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''}},
+  {type:'notify',title:'Kirim Notifikasi',group:'Publikasi',description:'Kirim pesan atau ringkasan hasil workflow ke Telegram, Discord, atau Webhook.',data:{label:'Kirim Notifikasi',channelId:'',message:'',includeImage:false}},
   {type:'chatModel',title:'Model AI · 9router',group:'Gunakan AI',description:'Pilih model AI yang akan digunakan oleh AI Agent.',data:{label:'Model AI · 9router',model:'',temperature:'0.7'}},
   {type:'memory',title:'Memory',group:'Gunakan AI',description:'Menyimpan pesan sebelumnya agar AI Agent dapat memahami konteks percakapan.',data:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'}},
   {type:'tool',title:'Tools',group:'Gunakan AI',description:'Memberi kemampuan tambahan kepada AI Agent, seperti membaca brief atau menghitung teks.',data:{label:'Tools',toolType:'knowledge',description:'Baca brief brand yang disediakan pengguna.',content:''}},
@@ -45,6 +77,8 @@ export function formatModelLabel(id?: string): string {
   const prefixes: [RegExp, string][] = [
     [/^ag\//i, '[AG] '],
     [/^cx\//i, '[CX] '],
+    [/^gptweb\//i, '[GPTWEB] '],
+    [/^omnirush\//i, '[OMNIRUSH] '],
     [/^ds\//i, '[DS] '],
     [/^(gold\/)?tig\//i, '[TIG] '],
     [/^river\//i, '[RIVER] '],

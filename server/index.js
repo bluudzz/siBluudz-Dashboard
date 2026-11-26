@@ -8,12 +8,14 @@ import invoiceRoutes from './routes/invoice.routes.js'
 import mailRoutes from './routes/mail.routes.js'
 import outlookRoutes from './outlook/outlook.routes.js'
 import gmailRoutes from './gmail/gmail.routes.js'
-import aiRoutes from './routes/ai.routes.js'
+import aiRoutes, { syncNineRouterCatalogIfStale } from './routes/ai.routes.js'
 import adminRoutes from './routes/admin.routes.js'
 import automationRoutes from './routes/automation.routes.js'
 import { workflowMediaRouter } from './workflow-media.js'
 import instagramRoutes from './routes/instagram.routes.js'
 import { googleDriveRouter } from './workflow-drive.js'
+import { workflowChannelsRouter } from './workflow-notify.js'
+import { startWorkflowScheduler } from './workflow-scheduler.js'
 
 const app = express()
 const port = Number(process.env.API_PORT || 3001)
@@ -32,6 +34,7 @@ app.use('/api/ai', aiRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/workflows', automationRoutes)
 app.use('/api/workflow-media', workflowMediaRouter)
+app.use('/api/workflow-channels', workflowChannelsRouter)
 app.use('/api/instagram', instagramRoutes)
 app.use('/api/google-drive', googleDriveRouter)
 
@@ -52,4 +55,10 @@ app.listen(port, '127.0.0.1', () => {
   console.log(`Local API running at http://127.0.0.1:${port}`)
   console.log(`SQLite database: ${path.join(dataDirectory, 'sibluudz.sqlite')}`)
   console.log(`Google OAuth: ${googleEnabled ? 'configured' : 'not configured'}`)
+  startWorkflowScheduler()
+  if (process.env.NODE_ENV !== 'test') {
+    void syncNineRouterCatalogIfStale({ force: true }).catch((err) => {
+      console.warn('Initial 9router model sync skipped:', err.message)
+    })
+  }
 })

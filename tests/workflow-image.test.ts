@@ -41,4 +41,53 @@ test('image node sends prompt to 9router and exposes a generated image URL',asyn
     {fetchImpl:async(url:string,options:any)=>{museCalls.push({url,options});return{ok:true,status:200,text:async()=>JSON.stringify({data:[{b64_json:tinyJpeg}]})}}})
   assert.equal(museCalls[0].url,'https://api.9router.com/v1/images/generations')
   assert.equal(JSON.parse(museCalls[0].options.body).model,'sdwebui/sdxl-base-1.0')
+
+  for (const [data, json, expected] of [
+    [{}, {prompt:'Perintah awal',output:'Prompt hasil AI terbaru'}, 'Prompt hasil AI terbaru'],
+    [{}, {prompt:'Prompt pemicu'}, 'Prompt pemicu'],
+    [{}, {prompt:'Prompt lama',output:{prompt:'Prompt terstruktur terbaru'}}, 'Prompt terstruktur terbaru'],
+    [{prompt:'Gunakan {{ $json.prompt }}'}, {prompt:'Prompt manual',output:'Hasil AI'}, 'Gunakan Prompt manual'],
+  ] as const) {
+    let sentPrompt=''
+    const generated=await runImageNode({node:{data:{model:'test-image',...data}},input:[{json}]},
+      {id:'image-user',role:'admin'},
+      {fetchImpl:async(_url:string,options:any)=>{
+        sentPrompt=JSON.parse(options.body).prompt
+        return {ok:true,status:200,text:async()=>JSON.stringify({data:[{b64_json:tinyJpeg}]})}
+      },storeImage:async()=>({imageUrl:'https://example.com/image.jpg',previewUrl:'https://example.com/image.jpg',mimeType:'image/jpeg'})})
+    assert.equal(sentPrompt,expected)
+    assert.equal(generated[0].json.imagePrompt,expected)
+    assert.equal(generated[0].json.prompt,expected)
+  }
+  await assert.rejects(()=>runImageNode({node:{data:{model:'test-image'}},input:[{json:{prompt:'Prompt lama',output:{pages:[{content:'Hasil riset'}]}}}]},
+    {id:'image-user',role:'admin'},
+    {fetchImpl:async()=>{throw new Error('Model tidak boleh dipanggil untuk input yang tidak cocok')}}),/bukan prompt teks/)
+  await assert.rejects(()=>runImageNode({node:{data:{model:'test-image'}},input:[{json:{prompt:'Jangan gunakan prompt lama',output:'  '}}]},
+    {id:'image-user',role:'admin'},
+    {fetchImpl:async()=>{throw new Error('Model tidak boleh dipanggil untuk hasil kosong')}}),/Prompt gambar wajib/)
+
+  const {executeGraphAsync}=await import('../shared/workflow-engine.js')
+  const graphNodes=[
+    {id:'start',type:'promptTrigger',position:{x:0,y:0},data:{prompt:'Perintah awal'}},
+    {id:'agent',type:'aiAgent',position:{x:0,y:0},data:{executionMode:'live'}},
+    {id:'model',type:'chatModel',position:{x:0,y:0},data:{model:'test-model'}},
+    {id:'edit',type:'set',position:{x:0,y:0},data:{fields:'{"prompt":"Prompt setelah jalur diubah"}'}},
+    {id:'image',type:'imageGenerate',position:{x:0,y:0},data:{model:'test-image'}},
+  ]
+  for(const mode of ['direct','edited','selected']){
+    const viaEdit=mode==='edited'
+    let sent=''
+    const links=[{id:'start-agent',source:'start',target:'agent'}, {id:'model-agent',source:'model',target:'agent',sourceHandle:'ai_languageModel',targetHandle:'ai_languageModel'},
+      ...(viaEdit?[{id:'agent-edit',source:'agent',target:'edit'},{id:'edit-image',source:'edit',target:'image'}]:[{id:'agent-image',source:'agent',target:'image'}])]
+    const configuredNodes=mode==='selected'?graphNodes.map(item=>item.id==='image'?{...item,data:{...item.data,inputField:'originalPrompt',prompt:'Manual prompt overridden by selected input'}}:item):graphNodes
+    const execution=await executeGraphAsync(configuredNodes,links,'image',async(context:any)=>context.kind==='agent'
+      ?[{json:{...context.input[0].json,output:'Prompt terbaru dari AI'}}]
+      :runImageNode(context,{id:'image-user',role:'admin'},{fetchImpl:async(_url:string,options:any)=>{
+        sent=JSON.parse(options.body).prompt
+        return {ok:true,status:200,text:async()=>JSON.stringify({data:[{url:'https://example.com/generated.jpg'}]})}
+      }}))
+    assert.equal(execution.status,'completed')
+    assert.equal(sent,mode==='selected'?'Perintah awal':viaEdit?'Prompt setelah jalur diubah':'Prompt terbaru dari AI')
+    assert.equal(execution.nodeResults.image.output[0].json.imagePrompt,sent)
+  }
 })

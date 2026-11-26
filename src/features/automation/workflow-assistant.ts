@@ -3,17 +3,27 @@ import type { StudioNode } from './workflow-model'
 
 const editable:Record<string,string[]>={
   trigger:['label','triggerMode','sampleData','cron','interval'],
+  webhookTrigger:['label','sampleData'],
   promptTrigger:['label','prompt','promptMode','model'],
   chatTrigger:['label','chatInput','sessionId'],
   chatModel:['label','temperature'],
   memory:['label','sessionKey','windowSize'],
   tool:['label','toolType','description','content'],
   set:['label','fields','keepInput'],
+  merge:['label','mode','aggregateField'],
+  jsonParse:['label','parseMode','sourceField','arrayPath','keepInput'],
   if:['label','field','operator','value'],
+  switch:['label','field','rule1Operator','rule1Value','rule2Operator','rule2Value','rule3Operator','rule3Value'],
+  wait:['label','durationSeconds'],
+  apiRequest:['label','method','url','body'],
+  imageEdit:['label','editMode','aspectRatio','overlayTitle','overlaySubtitle','watermark','textPosition','prompt','resolution'],
+  aiVision:['label','prompt','qaMode'],
+  notify:['label','message','includeImage'],
   aiAgent:['label','role','aiPrompt','systemMessage','maxIterations'],
 }
-const booleans=new Set(['keepInput'])
-const choices:Record<string,string[]>={temperature:['0','0.2','0.7','1'],windowSize:['1','5','10','20'],toolType:['knowledge','textLength'],maxIterations:['1','2','3','4','5'],triggerMode:['manual','schedule'],promptMode:['normal','ai'],operator:['equals','contains','exists']}
+const booleans=new Set(['keepInput','qaMode','includeImage'])
+const operators=['equals','notEquals','contains','notContains','startsWith','gt','lt','exists','isEmpty']
+const choices:Record<string,string[]>={temperature:['0','0.2','0.7','1'],windowSize:['1','5','10','20'],toolType:['knowledge','textLength'],maxIterations:['1','2','3','4','5'],triggerMode:['manual','schedule'],promptMode:['normal','ai'],operator:operators,rule1Operator:operators,rule2Operator:operators,rule3Operator:operators,mode:['combineByPosition','append','aggregate'],parseMode:['parse','splitArray'],method:['GET','POST','PUT','PATCH','DELETE'],editMode:['igFormat','aiEdit'],aspectRatio:['4:5','1:1','9:16','original']}
 const secret=/password|secret|token|api.?key|credential|authorization|cookie/i
 function safe(value:unknown,depth=0):unknown {
   if(depth>3)return '[data disingkat]'

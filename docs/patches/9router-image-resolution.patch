@@ -1,0 +1,39 @@
+diff --git a/open-sse/handlers/imageProviders/antigravity.js b/open-sse/handlers/imageProviders/antigravity.js
+--- a/open-sse/handlers/imageProviders/antigravity.js
++++ b/open-sse/handlers/imageProviders/antigravity.js
+@@ -76,6 +76,16 @@
+     const chatBody = {
+       contents: [{ role: "user", parts }],
+     };
++    if (body.image_size !== undefined) {
++      if (!["1K", "2K", "4K"].includes(body.image_size)) {
++        const error = new Error("image_size must be 1K, 2K, or 4K");
++        error.status = 400;
++        throw error;
++      }
++      chatBody.generationConfig = {
++        imageConfig: { imageSize: body.image_size },
++      };
++    }
+ 
+     const result = await executor.execute({
+       model: targetModel,
+diff --git a/open-sse/executors/antigravity.js b/open-sse/executors/antigravity.js
+--- a/open-sse/executors/antigravity.js
++++ b/open-sse/executors/antigravity.js
+@@ -179,6 +179,15 @@
+     // ─── Image generation: completely different request structure ───
+     if (isImageModel(model)) {
+       const imageConfig = parseImageConfig(model);
++      const imageSize = body.request?.generationConfig?.imageConfig?.imageSize ?? body.generationConfig?.imageConfig?.imageSize;
++      if (imageSize !== undefined) {
++        if (!["1K", "2K", "4K"].includes(imageSize)) {
++          const error = new Error("imageSize must be 1K, 2K, or 4K");
++          error.status = 400;
++          throw error;
++        }
++        imageConfig.imageSize = imageSize;
++      }
+       // Strip model name suffixes for the actual API model name
+       const cleanModel = model.replace(/-(\d+)x(\d+)$/, "");
+ 

@@ -69,8 +69,10 @@ export function WorkflowAssistantPanel({workflowId,nodes,edges,busy,visible,init
     fetch('/api/ai/status',{credentials:'same-origin'}).then(response=>response.ok?response.json():Promise.reject(new Error('Gagal membaca model 9router.'))).then((data:ModelResponse)=>{
       if(cancelled)return
       const ids=(data.availableModels||[]).filter(id=>!data.catalog?.find(item=>item.id===id)?.imageOutput)
-      setModels([...new Set([data.model||'',...ids].filter(Boolean))])
-      setModel(ids.includes(PREFERRED_MODEL)?PREFERRED_MODEL:data.model||'')
+      const serverDefault=data.model&&(!ids.length||ids.includes(data.model))?data.model:''
+      const nextList=ids.length?ids:[serverDefault].filter(Boolean)
+      setModels(nextList)
+      setModel(ids.includes(PREFERRED_MODEL)?PREFERRED_MODEL:(serverDefault||ids[0]||''))
       if(!data.configured)setModelError('Hubungkan 9router dan pilih model di Pengaturan AI.')
     }).catch(()=>{if(!cancelled)setModelError('Daftar model belum dapat dibaca. Coba muat ulang.')})
     return()=>{cancelled=true}
@@ -92,7 +94,7 @@ export function WorkflowAssistantPanel({workflowId,nodes,edges,busy,visible,init
   const currentStamp=JSON.stringify(serializableGraph(nodes,edges))
   async function send(){
     const instruction=input.trim()
-    if(!instruction||loading||busy||!historyLoaded)return
+    if(!instruction||loading||!model||!historyLoaded)return
     const sourceStamp=currentStamp
     setInput('');onDraftChange('');setError('');setProposal(null);setLoading(true)
     setMessages(previous=>trimMessages([...previous,{role:'user',text:instruction}]))
@@ -109,7 +111,7 @@ export function WorkflowAssistantPanel({workflowId,nodes,edges,busy,visible,init
     finally{setLoading(false)}
   }
   function apply(){
-    if(!proposal)return
+    if(!proposal||busy||loading)return
     if(proposal.sourceStamp!==currentStamp){setError('Alur sudah berubah. Kirim ulang perintah agar asisten membaca versi terbaru.');setProposal(null);return}
     onApply(proposal.draft.nodes,proposal.draft.edges)
     assistantJobs.delete(workflowId)
@@ -117,7 +119,7 @@ export function WorkflowAssistantPanel({workflowId,nodes,edges,busy,visible,init
     setProposal(null)
   }
   async function resetHistory(){
-    if(loading||busy||!historyLoaded)return
+    if(loading||!historyLoaded)return
     setLoading(true);setError('');setProposal(null)
     try{
       await workflowRequest(`/${workflowId}/assistant/history`,{method:'DELETE'})
@@ -127,13 +129,13 @@ export function WorkflowAssistantPanel({workflowId,nodes,edges,busy,visible,init
     finally{setLoading(false)}
   }
   return <aside className="wf-assistant" aria-label="Asisten AI workflow" hidden={!visible}>
-    <header className="wf-assistant-header"><div><Bot size={18}/><strong>Asisten Workflow</strong><small>{!historyLoaded?'Memuat percakapan…':messages.length>1?'Percakapan tersimpan':'Memahami seluruh alur'}</small></div><div className="wf-assistant-header-actions">{messages.length>1&&<button aria-label="Mulai percakapan baru" title="Hapus riwayat percakapan" disabled={loading||busy||!historyLoaded} onClick={()=>void resetHistory()}><RotateCcw size={16}/></button>}<button aria-label="Tutup asisten" onClick={onClose}><X size={17}/></button></div></header>
+    <header className="wf-assistant-header"><div><Bot size={18}/><strong>Asisten Workflow</strong><small>{!historyLoaded?'Memuat percakapan…':messages.length>1?'Percakapan tersimpan':'Memahami seluruh alur'}</small></div><div className="wf-assistant-header-actions">{messages.length>1&&<button aria-label="Mulai percakapan baru" title="Hapus riwayat percakapan" disabled={loading||!historyLoaded} onClick={()=>void resetHistory()}><RotateCcw size={16}/></button>}<button aria-label="Tutup asisten" onClick={onClose}><X size={17}/></button></div></header>
     <div className="wf-assistant-messages" ref={messageList} role="log" aria-live="polite">
       {messages.map((item,index)=><div className={'wf-assistant-message is-'+item.role} key={index}>{item.text}</div>)}
       {loading&&<div className="wf-assistant-message is-assistant">Membaca alur dan menyusun usulan…</div>}
       {error&&<p className="wf-assistant-error" role="alert">{error}</p>}
-      {proposal&&<section className="wf-assistant-proposal"><strong>Usulan perubahan</strong><ul>{proposal.changes.map((change,index)=><li key={index}><Check size={13}/>{change}</li>)}</ul>{proposal.issues.filter(issue=>issue.severity==='error').length>0&&<p>{proposal.issues.filter(issue=>issue.severity==='error').length} pengaturan masih perlu dilengkapi sebelum pengujian.</p>}<button type="button" disabled={busy||loading} onClick={apply}><Check size={15}/>Terapkan ke draft</button><button type="button" className="wf-assistant-discard" onClick={()=>{setProposal(null);assistantJobs.delete(workflowId)}}><RotateCcw size={14}/>Abaikan</button></section>}
+      {proposal&&<section className="wf-assistant-proposal"><strong>Usulan perubahan</strong>{busy&&<p role="status">Chat tetap bisa digunakan. Terapkan perubahan setelah alur selesai.</p>}<ul>{proposal.changes.map((change,index)=><li key={index}><Check size={13}/>{change}</li>)}</ul>{proposal.issues.filter(issue=>issue.severity==='error').length>0&&<p>{proposal.issues.filter(issue=>issue.severity==='error').length} pengaturan masih perlu dilengkapi sebelum pengujian.</p>}<button type="button" disabled={busy||loading} onClick={apply}><Check size={15}/>Terapkan ke draft</button><button type="button" className="wf-assistant-discard" onClick={()=>{setProposal(null);assistantJobs.delete(workflowId)}}><RotateCcw size={14}/>Abaikan</button></section>}
     </div>
-    <form className="wf-assistant-compose" onSubmit={event=>{event.preventDefault();void send()}}><label htmlFor="wf-assistant-input">Perintah untuk asisten</label><div><textarea id="wf-assistant-input" rows={3} maxLength={16000} placeholder="Contoh: Tambahkan riset web sebelum AI Agent dan persetujuan sebelum Instagram…" value={input} disabled={loading||busy||!historyLoaded} onChange={event=>{setInput(event.target.value);onDraftChange(event.target.value)}} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();void send()}}}/><button aria-label="Kirim perintah" disabled={!input.trim()||loading||busy||!model||!historyLoaded} type="submit"><Send size={16}/></button></div><div className="wf-assistant-model"><label htmlFor="wf-assistant-model">Model AI 9router</label><div><select id="wf-assistant-model" value={model} disabled={loading||modelLoading} onChange={event=>{setModel(event.target.value);setModelError('')}}><option value="">Pilih model…</option>{model&&!models.includes(model)&&<option value={model}>{formatModelLabel(model)}</option>}{models.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select><button type="button" aria-label="Muat ulang model 9router" title="Muat ulang model" disabled={loading||modelLoading} onClick={()=>void refreshModels()}><RefreshCw size={15}/></button></div></div>{modelError&&<small className="wf-assistant-error" role="alert">{modelError}</small>}</form>
+    <form className="wf-assistant-compose" onSubmit={event=>{event.preventDefault();void send()}}><label htmlFor="wf-assistant-input">Perintah untuk asisten</label><div><textarea id="wf-assistant-input" rows={3} maxLength={16000} placeholder="Contoh: Tambahkan riset web sebelum AI Agent dan persetujuan sebelum Instagram…" value={input} disabled={loading||!historyLoaded} onChange={event=>{setInput(event.target.value);onDraftChange(event.target.value)}} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();void send()}}}/><button aria-label="Kirim perintah" disabled={!input.trim()||loading||!model||!historyLoaded} type="submit"><Send size={16}/></button></div><div className="wf-assistant-model"><label htmlFor="wf-assistant-model">Model AI 9router</label><div><select id="wf-assistant-model" value={model} disabled={loading||modelLoading} onChange={event=>{setModel(event.target.value);setModelError('')}}><option value="">Pilih model…</option>{model&&!models.includes(model)&&<option value={model}>{formatModelLabel(model)}</option>}{models.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select><button type="button" aria-label="Muat ulang model 9router" title="Muat ulang model" disabled={loading||modelLoading} onClick={()=>void refreshModels()}><RefreshCw size={15}/></button></div></div>{modelError&&<small className="wf-assistant-error" role="alert">{modelError}</small>}</form>
   </aside>
 }

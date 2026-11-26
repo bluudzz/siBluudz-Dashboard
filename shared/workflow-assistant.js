@@ -3,18 +3,27 @@ import { aiPorts, isSubNode, isTrigger } from './workflow-connections.js'
 import { validateGraph, WORKFLOW_NODE_TYPES } from './workflow-engine.js'
 
 const defaults={
-  trigger:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{}'},
+  trigger:{label:'Manual Trigger',triggerMode:'manual',sampleData:'{}',cron:'0 10 * * *',interval:'Setiap hari 10:00 WIB'},
+  webhookTrigger:{label:'Webhook Trigger',sampleData:'{"topic":"Ide konten"}'},
   promptTrigger:{label:'Prompt Trigger',prompt:'',promptMode:'normal',model:'ag/gemini-3.8-flash'},
   chatTrigger:{label:'Chat Trigger',chatInput:'',sessionId:'test-session'},
   set:{label:'Atur Data',fields:'{}',keepInput:true},
   splitOut:{label:'Split Out',splitCount:'3',sourceField:'output',arrayField:'prompts'},
+  merge:{label:'Gabungkan Data',mode:'combineByPosition',aggregateField:'items'},
+  jsonParse:{label:'Parse JSON',parseMode:'parse',sourceField:'output',arrayPath:'',keepInput:true},
   if:{label:'Periksa Kondisi',field:'approved',operator:'equals',value:'true'},
+  switch:{label:'Router / Switch',field:'type',rule1Operator:'equals',rule1Value:'carousel',rule2Operator:'equals',rule2Value:'reels',rule3Operator:'',rule3Value:''},
+  wait:{label:'Tunda',durationSeconds:'5'},
   approval:{label:'Persetujuan Manual',approvedItems:null},
   searchContent:{label:'Riset Informasi',sourceMode:'search',query:'',url:'',model:'ag/gemini-3.8-flash',maxPages:'12'},
   httpRequest:{label:'Ambil Halaman/API',url:''},
-  googleDrive:{label:'Google Drive',accountId:'',operation:'shared',sharedLink:'',selectionMode:'random',nameFilter:''},
+  apiRequest:{label:'HTTP / Webhook Request',method:'GET',url:'',headers:'{}',body:''},
+  googleDrive:{label:'Google Drive',accountId:'',operation:'shared',mediaFilter:'images',sharedLink:'',selectionMode:'random',nameFilter:''},
   imageGenerate:{label:'Generate Gambar',model:'',prompt:''},
-  instagram:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:''},
+  imageEdit:{label:'Edit & Olah Gambar',editMode:'igFormat',aspectRatio:'4:5',overlayTitle:'',overlaySubtitle:'',watermark:'',textPosition:'bottom',model:'',prompt:'',resolution:'1K'},
+  aiVision:{label:'Analisis Gambar',model:'ag/gemini-3.8-flash',prompt:'Periksa kualitas gambar, keterbacaan, dan kesesuaian dengan brief.',qaMode:true},
+  instagram:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''},
+  notify:{label:'Kirim Notifikasi',channelId:'',message:'',includeImage:false},
   aiAgent:{label:'AI Agent',executionMode:'live',aiPrompt:'',systemMessage:'',maxIterations:'3'},
   chatModel:{label:'Model AI · 9router',model:'',temperature:'0.7'},
   memory:{label:'Memory',sessionKey:'{{ $json.sessionId }}',windowSize:'5'},
@@ -23,11 +32,17 @@ const defaults={
 const assistantAddableTypes=new Set(Object.keys(defaults).filter(type=>!['tool','httpRequest'].includes(type)))
 const hiddenLegacyTypes=new Set(['tool','httpRequest'])
 const editable={
-  trigger:['label','sampleData'],promptTrigger:['label','prompt','promptMode'],chatTrigger:['label','chatInput'],
-  set:['label','fields','keepInput'],splitOut:['label','splitCount'],if:['label','field','operator','value'],approval:['label'],
+  trigger:['label','triggerMode','cron','interval','sampleData'],webhookTrigger:['label','sampleData'],promptTrigger:['label','prompt','promptMode'],chatTrigger:['label','chatInput'],
+  set:['label','fields','keepInput'],splitOut:['label','splitCount'],merge:['label','mode','aggregateField'],jsonParse:['label','parseMode','sourceField','arrayPath','keepInput'],
+  if:['label','field','operator','value'],switch:['label','field','rule1Operator','rule1Value','rule2Operator','rule2Value','rule3Operator','rule3Value'],wait:['label','durationSeconds'],approval:['label'],
   searchContent:['label','sourceMode','query','url','maxPages'],httpRequest:['label','url'],
-  googleDrive:['label','operation','sharedLink','selectionMode','nameFilter','search','fileId'],
-  imageGenerate:['label','prompt'],instagram:['label','operation','caption'],
+  apiRequest:['label','method','url','body'],
+  googleDrive:['label','operation','mediaFilter','sharedLink','selectionMode','nameFilter','search','fileId'],
+  imageGenerate:['label','prompt'],
+  imageEdit:['label','editMode','aspectRatio','overlayTitle','overlaySubtitle','watermark','textPosition','prompt','resolution'],
+  aiVision:['label','prompt','qaMode'],
+  instagram:['label','operation','caption','imageUrl','videoUrl','coverUrl','mediaId'],
+  notify:['label','message','includeImage'],
   aiAgent:['label','aiPrompt','systemMessage','executionMode','maxIterations'],
   chatModel:['label','temperature'],memory:['label','sessionKey','windowSize'],tool:['label','toolType','description','content'],
 }
@@ -41,7 +56,7 @@ function safePatch(type,patch) {
   const result={}
   for(const [key,value] of Object.entries(patch)){
     if(!editable[type]?.includes(key))continue
-    if(key==='keepInput'&&typeof value==='boolean')result[key]=value
+    if((key==='keepInput'||key==='qaMode'||key==='includeImage')&&typeof value==='boolean')result[key]=value
     else if(typeof value==='string'&&value.length<=4000)result[key]=value
   }
   if(result.label)result.label=result.label.slice(0,100)
@@ -60,7 +75,7 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
     if(!source||!target)throw new Error('Koneksi mengarah ke node yang tidak tersedia.')
     if(hiddenLegacyTypes.has(source.type)||hiddenLegacyTypes.has(target.type))throw new Error('Asisten Workflow tidak dapat memakai node lama yang sudah disembunyikan.')
     const aiPort=isSubNode(source.type)?aiPorts[source.type]:null
-    const sourceHandle=aiPort||(source.type==='if'?(branch||'true'):portOut(source.type))
+    const sourceHandle=aiPort||(source.type==='if'?(branch||'true'):source.type==='switch'?(branch||'case1'):portOut(source.type))
     const targetHandle=aiPort||portIn(target.type)
     if(edges.some(edge=>edge.source===source.id&&edge.target===target.id&&edge.sourceHandle===sourceHandle&&edge.targetHandle===targetHandle))return
     edges.push({id:idFactory(),source:source.id,target:target.id,sourceHandle,targetHandle})
@@ -80,7 +95,8 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
       if(anchor){
         if(isSubNode(op.type))connect(id,anchor.id)
         else if(!isTrigger(op.type)){
-          const outgoing=edges.filter(edge=>edge.source===anchor.id&&dataEdge(edge)&&(anchor.type!=='if'||edge.sourceHandle===(op.branch||'true')))
+          const defaultBranch=anchor.type==='switch'?(op.branch||'case1'):(op.branch||'true')
+          const outgoing=edges.filter(edge=>edge.source===anchor.id&&dataEdge(edge)&&(!['if','switch'].includes(anchor.type)||edge.sourceHandle===defaultBranch))
           if(outgoing.length===1){
             const old=outgoing[0]
             edges.splice(edges.indexOf(old),1)
@@ -125,9 +141,12 @@ export function applyWorkflowOperations(sourceNodes,sourceEdges,operations,{defa
 }
 
 const purposes={
-  trigger:'Mulai alur secara manual dengan data awal JSON.',promptTrigger:'Terima perintah pengguna; mode normal meneruskan prompt, mode AI mengolahnya.',chatTrigger:'Mulai alur dari pesan Uji chat.',
-  set:'Bentuk atau ubah data yang diteruskan.',splitOut:'Pisahkan daftar hasil AI Agent menjadi beberapa item.',if:'Cabangkan alur berdasarkan kondisi true atau false.',approval:'Hentikan alur sampai pengguna menyetujui hasil.',
-  searchContent:'Susun pencarian, baca banyak sumber, atau baca satu URL HTTPS langsung.',httpRequest:'Node lama untuk membaca URL HTTPS.',googleDrive:'Pilih dan unduh berkas dari link Google Drive bersama.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',instagram:'Terbitkan gambar atau carousel dengan akun Instagram tersimpan.',
+  trigger:'Mulai alur manual atau sesuai jadwal cron (WIB).',webhookTrigger:'Mulai alur saat menerima panggilan webhook JSON dari luar.',promptTrigger:'Terima perintah pengguna; mode normal meneruskan prompt, mode AI mengolahnya.',chatTrigger:'Mulai alur dari pesan Uji chat.',
+  set:'Bentuk atau ubah data yang diteruskan.',splitOut:'Pisahkan daftar prompts hasil AI Agent menjadi beberapa item.',merge:'Gabungkan data dari beberapa cabang (posisi, append, atau rangkum 1 item).',jsonParse:'Urai teks JSON menjadi field atau pecah array JSON apa saja menjadi item.',
+  if:'Cabangkan alur berdasarkan kondisi true atau false.',switch:'Cabangkan alur hingga 4 jalur (case1, case2, case3, fallback).',wait:'Tunda eksekusi beberapa detik sebelum langkah berikutnya.',approval:'Hentikan alur sampai pengguna menyetujui hasil.',
+  searchContent:'Susun pencarian, baca banyak sumber, atau baca satu URL HTTPS langsung.',httpRequest:'Node lama untuk membaca URL HTTPS.',apiRequest:'Panggil API HTTPS eksternal (GET/POST/PUT/PATCH/DELETE) dengan header & body JSON.',
+  googleDrive:'Pilih dan unduh gambar atau video dari Google Drive.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',imageEdit:'Sesuaikan rasio IG 4:5 + teks overlay atau edit gambar memakai AI.',aiVision:'Analisis dan periksa kualitas gambar memakai AI Vision.',
+  instagram:'Terbitkan foto, carousel, Reels, Story, baca komentar, atau lihat statistik Instagram.',notify:'Kirim notifikasi ke Telegram, Discord, atau Webhook.',
   aiAgent:'Jalankan instruksi memakai Model AI dan Memory opsional.',chatModel:'Pilih model 9router untuk AI Agent.',memory:'Simpan konteks percakapan AI Agent.',tool:'Node lama untuk workflow terdahulu.',
 }
 export const workflowAssistantCatalog=Object.entries(defaults).filter(([type])=>!['tool','httpRequest'].includes(type)).map(([type,data])=>({type,title:data.label,purpose:purposes[type],editable:editable[type]}))

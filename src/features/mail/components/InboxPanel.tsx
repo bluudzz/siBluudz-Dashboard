@@ -10,6 +10,8 @@ interface InboxPanelProps {
   totalMessages: number
   selectedMessage: MailMessageDetail | null
   loadingInbox: boolean
+  inboxError: string
+  onReconnect: () => void
   onOpenMessage: (uid: number | string) => void
   onCloseMessage: () => void
 }
@@ -22,6 +24,8 @@ export function InboxPanel({
   totalMessages,
   selectedMessage,
   loadingInbox,
+  inboxError,
+  onReconnect,
   onOpenMessage,
   onCloseMessage,
 }: InboxPanelProps) {
@@ -31,7 +35,7 @@ export function InboxPanel({
         <div className="em-sheet-heading">
           <h2>Inbox</h2>
           <span>
-            {selectedAccount ? `${messages.length} dari ${totalMessages}` : '—'}
+            {inboxError ? 'Koneksi gagal' : selectedAccount ? `${messages.length} dari ${totalMessages}` : '—'}
           </span>
         </div>
         <p className="em-list-sub">
@@ -47,6 +51,15 @@ export function InboxPanel({
           </div>
         ) : loadingInbox ? (
           <p className="em-empty"><RefreshCw size={13} className="animate-spin" /> Mengambil pesan…</p>
+        ) : inboxError ? (
+          <div className="em-empty-stack" role="alert">
+            <p>Email belum dapat dibaca. Perbaiki koneksi akun terlebih dahulu.</p>
+            {isOutlookGraph && (
+              <button type="button" className="em-tool-button" onClick={onReconnect}>
+                <RefreshCw size={14} /> Hubungkan ulang akun ini
+              </button>
+            )}
+          </div>
         ) : totalMessages === 0 ? (
           <div className="em-empty-stack">
             <Inbox size={18} />

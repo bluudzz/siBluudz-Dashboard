@@ -60,6 +60,14 @@ export function EmailManagerPage() {
     mail.setNotice('')
   }
 
+  const reconnectAccount = () => {
+    if (!mail.selectedAccount) return
+    addAccount.handleCancelDeviceAuth()
+    addAccount.handleEmailInput(mail.selectedAccount.email)
+    addAccount.setOutlookSubMethod('device')
+    openAddAccount()
+  }
+
   return (
     <div className="em-workspace">
       <header className="em-page-header">
@@ -94,6 +102,12 @@ export function EmailManagerPage() {
         )}
         {mail.selectedAccount && (
           <span className="em-actions-inline">
+            {mail.isOutlookGraph && (
+              <button type="button" className="em-tool-button" onClick={reconnectAccount}>
+                <RefreshCw size={14} />
+                Hubungkan ulang
+              </button>
+            )}
             {(mail.isOutlookGraph || mail.isGmailApi) && (
               <>
                 <button
@@ -198,6 +212,8 @@ export function EmailManagerPage() {
             totalMessages={mail.messages.length}
             selectedMessage={mail.selectedMessage}
             loadingInbox={mail.loadingInbox}
+            inboxError={mail.inboxError}
+            onReconnect={reconnectAccount}
             onOpenMessage={mail.handleOpenMessage}
             onCloseMessage={() => mail.setSelectedMessage(null)}
           />
@@ -206,6 +222,7 @@ export function EmailManagerPage() {
 
       <AddAccountModal
         open={addAccount.addAccountModalOpen}
+        error={mail.error}
         profileEmail={profile.email}
         provider={addAccount.provider}
         showAdvanced={addAccount.showAdvanced}

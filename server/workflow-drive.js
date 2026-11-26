@@ -4,13 +4,21 @@ import { db } from './db.js'
 import { appOrigin, hashToken, parseCookies, requireSameOrigin, requireUser, sessionCookieName } from './middleware/auth.js'
 import { decryptSocialToken, encryptSocialToken } from './utils/social-crypto.js'
 import { resolveValue } from '../shared/workflow-engine.js'
-import { storeWorkflowImage } from './workflow-media.js'
+import { storeWorkflowImage, storeWorkflowVideo } from './workflow-media.js'
 import { parseGoogleDriveLink } from '../shared/google-drive-link.js'
 
 const router=Router()
 const stateCookie='sibluudz_drive_oauth_state'
 const fileIdPattern=/^[\w-]{10,200}$/
 const maxFileBytes=12*1024*1024
+const maxVideoBytes=30*1024*1024
+const IMAGE_MIMES=['image/jpeg','image/png']
+const VIDEO_MIMES=['video/mp4','video/quicktime']
+function allowedMimesForFilter(mediaFilter='images') {
+  if(mediaFilter==='videos')return VIDEO_MIMES
+  if(mediaFilter==='all')return [...IMAGE_MIMES,...VIDEO_MIMES]
+  return IMAGE_MIMES
+}
 const clientId=()=>process.env.GOOGLE_DRIVE_CLIENT_ID||process.env.GOOGLE_CLIENT_ID||''
 const clientSecret=()=>process.env.GOOGLE_DRIVE_CLIENT_SECRET||process.env.GOOGLE_CLIENT_SECRET||''
 const redirectUri=()=>process.env.GOOGLE_DRIVE_REDIRECT_URI||`${appOrigin}/api/google-drive/callback`
@@ -48,18 +56,20 @@ export async function driveFileMetadata(account,fileId,{signal,resourceKey=''}={
   return response.json()
 }
 
-export async function driveFileBytes(account,fileId,{signal,resourceKey='',metadata}={}) {
+export async function driveFileBytes(account,fileId,{signal,resourceKey='',metadata,maxBytes}={}) {
   const meta=metadata||await driveFileMetadata(account,fileId,{signal,resourceKey})
   if(meta.capabilities?.canDownload===false)throw new Error('Pemilik file tidak mengizinkan unduhan.')
   if(meta.mimeType?.startsWith('application/vnd.google-apps.'))throw new Error('Google Docs/Sheets/Slides perlu diekspor; node ini hanya mengunduh file biasa.')
-  if(Number(meta.size)>maxFileBytes)throw new Error('File Google Drive melebihi batas 12 MB untuk VPS ini.')
+  const limit=maxBytes||(VIDEO_MIMES.includes(meta.mimeType)?maxVideoBytes:maxFileBytes)
+  const limitMb=Math.round(limit/(1024*1024))
+  if(Number(meta.size)>limit)throw new Error(`File Google Drive melebihi batas ${limitMb} MB untuk VPS ini.`)
   const response=await driveRequest(account,`files/${fileId}`,{query:{alt:'media',supportsAllDrives:'true'},resourceId:fileId,resourceKey,signal})
   const length=Number(response.headers.get('content-length')||0)
-  if(length>maxFileBytes){await response.body?.cancel();throw new Error('File Google Drive melebihi batas 12 MB.')}
+  if(length>limit){await response.body?.cancel();throw new Error(`File Google Drive melebihi batas ${limitMb} MB.`)}
   const reader=response.body.getReader()
   const chunks=[];let size=0
   try{
-    while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxFileBytes)throw new Error('File Google Drive melebihi batas 12 MB.');chunks.push(Buffer.from(value))}
+    while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit)throw new Error(`File Google Drive melebihi batas ${limitMb} MB.`);chunks.push(Buffer.from(value))}
   }finally{await reader.cancel().catch(()=>{})}
   return {meta,bytes:Buffer.concat(chunks)}
 }
@@ -68,9 +78,11 @@ function downloadUrl(accountId,fileId,resourceKey='') {
   return `/api/google-drive/download/${accountId}/${fileId}${resourceKey?`?resourceKey=${encodeURIComponent(resourceKey)}`:''}`
 }
 
-async function sharedFolderFiles(account,folderId,resourceKey,{name='',signal}={}) {
+async function sharedFolderFiles(account,folderId,resourceKey,{name='',mediaFilter='images',signal}={}) {
   const escaped=name.replace(/\\/g,'\\\\').replace(/'/g,"\\'")
-  const q=`'${folderId}' in parents and trashed = false and (mimeType = 'image/jpeg' or mimeType = 'image/png')${name?` and name contains '${escaped}'`:''}`
+  const mimes=allowedMimesForFilter(mediaFilter)
+  const mimeClause=mimes.map(mime=>`mimeType = '${mime}'`).join(' or ')
+  const q=`'${folderId}' in parents and trashed = false and (${mimeClause})${name?` and name contains '${escaped}'`:''}`
   const files=[]
   let pageToken=''
   for(let page=0;page<3;page++){
@@ -83,21 +95,34 @@ async function sharedFolderFiles(account,folderId,resourceKey,{name='',signal}={
   return {files,capped:Boolean(pageToken)}
 }
 
-export function chooseSharedFile(files,mode,name,randomIndex=upper=>randomInt(upper)) {
-  const eligible=files.filter(file=>['image/jpeg','image/png'].includes(file.mimeType)&&file.capabilities?.canDownload!==false)
+export function chooseSharedFile(files,mode,name,randomIndex=upper=>randomInt(upper),mediaFilter='images') {
+  const allowed=allowedMimesForFilter(mediaFilter)
+  const eligible=files.filter(file=>allowed.includes(file.mimeType)&&file.capabilities?.canDownload!==false)
   if(mode==='random'){
-    if(!eligible.length)throw new Error('Folder bersama tidak berisi gambar JPEG/PNG yang dapat diunduh.')
+    if(!eligible.length)throw new Error(mediaFilter==='videos'?'Folder bersama tidak berisi video MP4/MOV yang dapat diunduh.':'Folder bersama tidak berisi media JPEG/PNG/video yang dapat diunduh.')
     return {file:eligible[randomIndex(eligible.length)],candidateCount:eligible.length}
   }
   if(mode==='name'){
     const wanted=String(name||'').trim().toLocaleLowerCase()
-    if(!wanted)throw new Error('Isi nama gambar yang ingin dipilih.')
+    if(!wanted)throw new Error('Isi nama file yang ingin dipilih.')
     const matches=eligible.filter(file=>String(file.name||'').toLocaleLowerCase().includes(wanted))
-    if(!matches.length)throw new Error('Tidak ada gambar dengan nama tersebut di folder bersama.')
+    if(!matches.length)throw new Error('Tidak ada media dengan nama tersebut di folder bersama.')
     matches.sort((a,b)=>Number(String(b.name).toLocaleLowerCase()===wanted)-Number(String(a.name).toLocaleLowerCase()===wanted)||String(a.name).localeCompare(String(b.name)))
     return {file:matches[0],candidateCount:matches.length}
   }
-  throw new Error('Pilih cara memilih gambar: acak atau berdasarkan nama.')
+  throw new Error('Pilih cara memilih file: acak atau berdasarkan nama.')
+}
+
+async function storeDriveMediaFields(userId,meta,bytes) {
+  if(IMAGE_MIMES.includes(meta.mimeType)){
+    const stored=await storeWorkflowImage(userId,bytes.toString('base64'),meta.mimeType)
+    return {imageUrl:stored.imageUrl,imagePreviewUrl:stored.previewUrl,imageMime:stored.mimeType}
+  }
+  if(VIDEO_MIMES.includes(meta.mimeType)){
+    const stored=await storeWorkflowVideo(userId,bytes,meta.mimeType)
+    return {videoUrl:stored.videoUrl,videoPreviewUrl:stored.previewUrl,videoMime:stored.mimeType}
+  }
+  return {}
 }
 
 export async function runDriveNode({node,input},user,{signal}={}) {
@@ -105,6 +130,7 @@ export async function runDriveNode({node,input},user,{signal}={}) {
   const account=accountForUser(user.id,String(node.data.accountId||''))
   if(!account)throw new Error('Hubungkan dan pilih akun Google Drive pada node ini.')
   const operation=String(node.data.operation||'list')
+  const mediaFilter=String(node.data.mediaFilter||'images')
   const output=[]
   for(const item of input){
     if(operation==='shared'){
@@ -119,18 +145,14 @@ export async function runDriveNode({node,input},user,{signal}={}) {
       }else{
         const folder=await driveFileMetadata(account,shared.id,{signal,resourceKey:shared.resourceKey})
         if(folder.mimeType!=='application/vnd.google-apps.folder')throw new Error('Link yang dimasukkan bukan folder Google Drive.')
-        const found=await sharedFolderFiles(account,shared.id,shared.resourceKey,{name:mode==='name'?name:'',signal})
-        const picked=chooseSharedFile(found.files,mode,name)
+        const found=await sharedFolderFiles(account,shared.id,shared.resourceKey,{name:mode==='name'?name:'',mediaFilter,signal})
+        const picked=chooseSharedFile(found.files,mode,name,undefined,mediaFilter)
         selected=picked.file
         selection={mode,candidateCount:picked.candidateCount,capped:found.capped}
       }
       const key=String(selected.resourceKey||shared.type==='file'&&shared.resourceKey||'')
       const {meta,bytes}=await driveFileBytes(account,selected.id,{signal,resourceKey:key,metadata:selected})
-      const json={...item.json,driveFile:meta,driveSelection:selection,driveDownloadUrl:downloadUrl(account.id,selected.id,key)}
-      if(['image/jpeg','image/png'].includes(meta.mimeType)){
-        const stored=await storeWorkflowImage(user.id,bytes.toString('base64'),meta.mimeType)
-        Object.assign(json,{imageUrl:stored.imageUrl,imagePreviewUrl:stored.previewUrl,imageMime:stored.mimeType})
-      }
+      const json={...item.json,driveFile:meta,driveSelection:selection,driveDownloadUrl:downloadUrl(account.id,selected.id,key),...(await storeDriveMediaFields(user.id,meta,bytes))}
       output.push({json})
     }else if(operation==='list'){
       const search=String(resolveValue(node.data.search||'',item.json)).trim()
@@ -146,11 +168,7 @@ export async function runDriveNode({node,input},user,{signal}={}) {
         output.push({json:{...item.json,driveFile:meta,driveDownloadUrl:downloadUrl(account.id,fileId,meta.resourceKey)}})
       }else{
         const {meta,bytes}=await driveFileBytes(account,fileId,{signal})
-        const json={...item.json,driveFile:meta,driveDownloadUrl:downloadUrl(account.id,fileId,meta.resourceKey)}
-        if(['image/jpeg','image/png'].includes(meta.mimeType)){
-          const stored=await storeWorkflowImage(user.id,bytes.toString('base64'),meta.mimeType)
-          Object.assign(json,{imageUrl:stored.imageUrl,imagePreviewUrl:stored.previewUrl,imageMime:stored.mimeType})
-        }
+        const json={...item.json,driveFile:meta,driveDownloadUrl:downloadUrl(account.id,fileId,meta.resourceKey),...(await storeDriveMediaFields(user.id,meta,bytes))}
         output.push({json})
       }
     }else throw new Error('Tindakan Google Drive tidak didukung.')

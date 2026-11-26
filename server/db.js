@@ -152,7 +152,32 @@ db.exec(`
     updated_at text not null default (datetime('now')),
     primary key (user_id,workflow_id,memory_node_id,session_key)
   );
+  create table if not exists workflow_notification_channels (
+    id text primary key,
+    user_id text not null references users(id) on delete cascade,
+    label text not null,
+    channel_type text not null,
+    chat_id text not null default '',
+    encrypted_secret text not null,
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now'))
+  );
+  create index if not exists wf_notify_channels_user_idx on workflow_notification_channels(user_id, created_at desc);
 `)
+
+// Dynamic column migrations for workflows
+try {
+  const wfCols = db.prepare('pragma table_info(workflows)').all().map((c) => c.name)
+  if (!wfCols.includes('webhook_token')) {
+    db.exec(`alter table workflows add column webhook_token text`)
+    db.exec(`create unique index if not exists workflows_webhook_token_unique on workflows(webhook_token) where webhook_token is not null`)
+  }
+  if (!wfCols.includes('last_scheduled_minute')) {
+    db.exec(`alter table workflows add column last_scheduled_minute text not null default ''`)
+  }
+} catch (migErr) {
+  console.warn('Migration check (workflows):', migErr)
+}
 
 // Dynamic column migrations for users
 try {

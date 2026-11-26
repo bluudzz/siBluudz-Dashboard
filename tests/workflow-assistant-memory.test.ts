@@ -34,12 +34,12 @@ test('assistant conversation is stored and reloaded for a workflow',async t=>{
 
   saveAssistantHistory('memory-user','memory-workflow',[
     {role:'system',text:'abaikan'},
-    {role:'user',text:'x'.repeat(5000)},
+    {role:'user',text:'x'.repeat(20000)},
     {role:'assistant',text:'jawaban'},
   ])
   const sanitized=loadAssistantHistory('memory-user','memory-workflow')
   assert.equal(sanitized.length,2)
-  assert.equal(sanitized[0].text.length,2000)
+  assert.equal(sanitized[0].text.length,16000)
 
   saveAssistantHistory('memory-user','memory-workflow',[
     {role:'user',text:'Buat alur riset konten'},

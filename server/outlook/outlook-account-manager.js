@@ -5,6 +5,8 @@
  * lalu modul ini menukar refresh_token menjadi access_token untuk memanggil Microsoft Graph.
  */
 
+import { mailHtmlToText } from '../utils/mail-text.js'
+
 const TOKEN_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
 const GRAPH_MESSAGES_URL = 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages'
 const DEFAULT_SCOPE = 'offline_access https://graph.microsoft.com/Mail.Read'
@@ -15,7 +17,7 @@ const DEFAULT_MAX_RETRIES = 3
 export class OutlookAuthError extends Error {
   /**
    * @param {string} message
-   * @param {'INVALID_GRANT'|'TOKEN_FAILED'|'TIMEOUT'|'NETWORK'|'GRAPH_FAILED'|'GRAPH_UNAUTHORIZED'} code
+   * @param {'INVALID_GRANT'|'TOKEN_FAILED'|'TIMEOUT'|'NETWORK'|'GRAPH_FAILED'|'GRAPH_UNAUTHORIZED'|'ACCOUNT_MISMATCH'} code
    */
   constructor(message, code) {
     super(message)
@@ -168,6 +170,21 @@ export class OutlookAccountManager {
     return this.refreshToken()
   }
 
+  #checkMailbox(data) {
+    // Mail.Read can expose mailbox identity in metadata even when /me needs User.Read.
+    const encoded = data['@odata.context']?.match(/#users\('([^']+)'\)/)?.[1]
+    if (!encoded) return
+    const mailbox = decodeURIComponent(encoded)
+    if (!mailbox.includes('@')) return
+    if (mailbox.toLowerCase() !== this.email.trim().toLowerCase()) {
+      this.status = 'invalid'
+      this.invalidReason = `Token akun ${this.email} terhubung ke mailbox ${mailbox}. Hubungkan ulang akun Microsoft yang sesuai; refresh token saja tidak mengganti akun.`
+      throw new OutlookAuthError(this.invalidReason, 'ACCOUNT_MISMATCH')
+    }
+    this.status = 'valid'
+    this.invalidReason = null
+  }
+
   /**
    * Baca pesan inbox terbaru via Microsoft Graph.
    * @param {number} [limit] Jumlah pesan (1-50, default 5).
@@ -208,6 +225,7 @@ export class OutlookAccountManager {
       )
     }
     const data = await response.json()
+    this.#checkMailbox(data)
     return (Array.isArray(data.value) ? data.value : []).map((message) => ({
       id: message.id,
       subject: message.subject || '(Tanpa subjek)',
@@ -247,7 +265,7 @@ export class OutlookAccountManager {
     const accessToken = await this.#accessToken()
     const response = await this.#request(
       `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,receivedDateTime,bodyPreview,body,isRead`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}`, Prefer: 'outlook.body-content-type="text"' } }
     )
     if (response.status === 401) {
       throw new OutlookAuthError('Access token ditolak Microsoft Graph.', 'GRAPH_UNAUTHORIZED')
@@ -260,9 +278,10 @@ export class OutlookAccountManager {
       )
     }
     const data = await response.json()
+    this.#checkMailbox(data)
     const content = data.body?.content || ''
     const htmlText = data.body?.contentType === 'html' && typeof content === 'string'
-      ? content.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, ' ')
+      ? await mailHtmlToText(content)
       : content || data.bodyPreview || ''
     return {
       id: data.id,

@@ -57,6 +57,21 @@ test('research node validates AI query JSON and falls back when the plan is inva
   assert.equal(fallback[0].json.readCount,1)
 })
 
+test('research follows the latest upstream result instead of inherited query and topic fields',async()=>{
+  const read=async(url:string)=>url.includes('bing.com')||url.includes('news.google.com')
+    ?{status:200,body:'<rss><item><title>New source</title><link>https://example.com/new</link></item></rss>',contentType:'application/rss+xml'}
+    :{status:200,body:'New source with enough detailed information and practical examples to explain the current topic for the next workflow step.',contentType:'text/plain'}
+  for(const query of ['', '{{ $json.topic }}']){
+    const result=await runResearchNode({node:{data:{query,maxPages:1}},input:[{json:{topic:'Topik lama',query:'Pencarian lama',originalPrompt:'Perintah lama',output:'urban gardening'}}]},
+      {read,planQuery:async({topic,context}:any)=>{
+        assert.equal(topic,'urban gardening')
+        assert.equal(context,'urban gardening')
+        return '{"queries":["urban gardening official"]}'
+      }})
+    assert.equal(result[0].json.query,'urban gardening')
+  }
+})
+
 test('research balances angles and searches again when the first sources cannot be read',async()=>{
   const searched:string[]=[]
   const rss=(host:string,count:number)=>'<rss>'+Array.from({length:count},(_,index)=>`<item><title>Topic guide ${index}</title><link>https://${host}/article-${index}</link></item>`).join('')+'</rss>'

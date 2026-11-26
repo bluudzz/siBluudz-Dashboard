@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { calculateInvoiceTotal, formatMoney, isQuotation, parseMoney } from '../src/features/invoices/invoice-utils.ts'
+import { calculateInvoiceTotal, formatMoney, invoiceListSignature, isQuotation, parseMoney } from '../src/features/invoices/invoice-utils.ts'
 
 const base = { id: 'a', invoiceNumber: 'INV-1', docType: 'invoice', issueDate: '2026-01-01', items: [] }
 
@@ -30,4 +30,29 @@ test('isQuotation is case-insensitive', () => {
   assert.equal(isQuotation({ ...base, docType: 'quotation' }), true)
   assert.equal(isQuotation({ ...base, docType: 'Quotation' }), true)
   assert.equal(isQuotation({ ...base, docType: 'invoice' }), false)
+})
+
+test('invoiceListSignature ignores timestamps and key order while detecting real edits', () => {
+  const first = {
+    id: 'inv-1',
+    invoiceNumber: 'INV-1',
+    docType: 'invoice',
+    issueDate: '2026-01-01',
+    updatedAt: '2026-11-24T00:00:00Z',
+    items: [{ id: '1', name: 'Video', qty: 1, price: 500000 }],
+    to: { company: 'Acme', name: 'Budi' },
+  }
+  const reordered = {
+    to: { name: 'Budi', company: 'Acme' },
+    items: [{ price: 500000, qty: 1, name: 'Video', id: '1' }],
+    updatedAt: '2026-11-24T01:00:00Z',
+    issueDate: '2026-01-01',
+    docType: 'invoice',
+    invoiceNumber: 'INV-1',
+    id: 'inv-1',
+  }
+  assert.equal(invoiceListSignature([first as any]), invoiceListSignature([reordered as any]))
+
+  const edited = { ...first, to: { company: 'Acme', name: 'Budi Santoso' } }
+  assert.notEqual(invoiceListSignature([first as any]), invoiceListSignature([edited as any]))
 })
