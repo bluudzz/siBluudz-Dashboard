@@ -309,6 +309,33 @@
   object-fit: contain;
 }
 
+.rs-compare-img,
+.rs-compare-tag,
+.rs-compare-divider {
+  transition: opacity 0.2s ease;
+}
+
+.rs-compare:not(.is-ready) .rs-compare-img,
+.rs-compare:not(.is-ready) .rs-compare-tag,
+.rs-compare:not(.is-ready) .rs-compare-divider {
+  opacity: 0;
+}
+
+.rs-compare-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(110deg, #1d1b18 20%, #2b2722 45%, #1d1b18 70%);
+  background-size: 200% 100%;
+  animation: rs-shimmer 1.3s linear infinite;
+}
+
+@keyframes rs-shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}
+
 .rs-compare-after {
   will-change: clip-path;
 }

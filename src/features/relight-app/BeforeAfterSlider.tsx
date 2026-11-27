@@ -15,6 +15,27 @@ interface BeforeAfterSliderProps {
   ariaLabel?: string
 }
 
+function preloadAndDecode(src: string): Promise<void> {
+  if (!src) return Promise.resolve()
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.decoding = 'async'
+    const finish = () => {
+      if (typeof img.decode === 'function') {
+        void img.decode().catch(() => {}).finally(resolve)
+      } else {
+        resolve()
+      }
+    }
+    img.onload = finish
+    img.onerror = () => resolve()
+    img.src = src
+    if (img.complete && img.naturalWidth > 0) {
+      finish()
+    }
+  })
+}
+
 export function BeforeAfterSlider({
   beforeSrc,
   afterSrc,
@@ -29,8 +50,23 @@ export function BeforeAfterSlider({
   ariaLabel = 'Bandingkan foto sebelum dan sesudah relight',
 }: BeforeAfterSliderProps) {
   const [internalPos, setInternalPos] = React.useState(position ?? 52)
+  const pairKey = `${beforeSrc}||${afterSrc}`
+  const [readyKey, setReadyKey] = React.useState('')
+  const isReady = readyKey === pairKey
   const containerRef = React.useRef<HTMLDivElement>(null)
   const draggingPointerId = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    void Promise.all([preloadAndDecode(beforeSrc), preloadAndDecode(afterSrc)]).then(() => {
+      if (!cancelled) {
+        setReadyKey(pairKey)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [beforeSrc, afterSrc, pairKey])
 
   const currentPos = position !== undefined ? position : internalPos
 
@@ -106,7 +142,7 @@ export function BeforeAfterSlider({
   return (
     <div
       ref={containerRef}
-      className={`rs-compare ${fitClass} ${className}`.trim()}
+      className={`rs-compare ${fitClass}${isReady ? ' is-ready' : ''} ${className}`.trim()}
       role="slider"
       tabIndex={0}
       aria-label={ariaLabel}
@@ -122,14 +158,22 @@ export function BeforeAfterSlider({
       }}
       onKeyDown={handleKeyDown}
     >
-      <img src={beforeSrc} alt={beforeLabel} className="rs-compare-img" draggable={false} />
+      {!isReady && <div className="rs-compare-skeleton" aria-hidden="true" />}
+      <img
+        src={beforeSrc}
+        alt={beforeLabel}
+        className="rs-compare-img"
+        decoding="sync"
+        draggable={false}
+      />
       <img
         src={afterSrc}
         alt={afterLabel}
         className="rs-compare-img rs-compare-after"
+        decoding="sync"
         draggable={false}
         style={{
-          opacity: blendOpacity,
+          opacity: isReady ? blendOpacity : 0,
           clipPath: `inset(0 0 0 ${currentPos}%)`,
         }}
       />
