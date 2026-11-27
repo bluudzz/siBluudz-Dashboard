@@ -185,6 +185,41 @@ db.exec(`
     expires_at integer not null
   );
   create index if not exists downloader_proxy_tokens_exp_idx on downloader_proxy_tokens(expires_at);
+  create table if not exists relight_users (
+    id text primary key,
+    username text not null collate nocase unique,
+    email text collate nocase unique,
+    name text not null default '',
+    password_hash text not null,
+    is_active integer not null default 1,
+    daily_limit integer not null default 10,
+    note text not null default '',
+    last_login_at text,
+    created_at text not null default (datetime('now')),
+    updated_at text not null default (datetime('now'))
+  );
+  create table if not exists relight_sessions (
+    token_hash text primary key,
+    user_id text not null references relight_users(id) on delete cascade,
+    expires_at integer not null,
+    created_at text not null default (datetime('now'))
+  );
+  create index if not exists relight_sessions_user_idx on relight_sessions(user_id);
+  create table if not exists relight_usage_logs (
+    id text primary key,
+    user_id text not null references relight_users(id) on delete cascade,
+    preset text not null default 'strobist',
+    model text not null default '',
+    resolution text not null default '',
+    created_at text not null default (datetime('now'))
+  );
+  create index if not exists relight_usage_user_date_idx on relight_usage_logs(user_id, created_at);
+  create table if not exists relight_preset_samples (
+    preset_id text primary key,
+    before_filename text not null default '',
+    after_filename text not null default '',
+    updated_at text not null default (datetime('now'))
+  );
 `)
 
 // Dynamic column migrations for workflows

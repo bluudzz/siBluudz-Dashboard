@@ -14,6 +14,7 @@ import automationRoutes from './routes/automation.routes.js'
 import { workflowMediaRouter } from './workflow-media.js'
 import instagramRoutes from './routes/instagram.routes.js'
 import downloaderRoutes from './routes/downloader.routes.js'
+import { relightAdminRouter, relightPublicRouter } from './routes/relight.routes.js'
 import { googleDriveRouter } from './workflow-drive.js'
 import { workflowChannelsRouter } from './workflow-notify.js'
 import { startWorkflowScheduler } from './workflow-scheduler.js'
@@ -34,6 +35,8 @@ app.use('/api/outlook', outlookRoutes)
 app.use('/api/gmail', gmailRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/admin/relight', relightAdminRouter)
+app.use('/api/relight', relightPublicRouter)
 app.use('/api/workflows', automationRoutes)
 app.use('/api/workflow-media', workflowMediaRouter)
 app.use('/api/workflow-channels', workflowChannelsRouter)

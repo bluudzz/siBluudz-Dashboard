@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Save, User, Phone, Mail, Sliders, Bot, Users, AtSign, KeyRound, Check, AlertCircle } from 'lucide-react'
+import { Save, User, Phone, Mail, Sliders, Bot, Users, AtSign, KeyRound, Check, AlertCircle, Sun } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -9,9 +9,10 @@ import { useTheme } from '@/context/ThemeContext'
 import { useUser } from '@/context/UserContext'
 import { AdminAiSettingsCard } from './components/AdminAiSettingsCard'
 import { AdminUsersCard } from './components/AdminUsersCard'
+import { AdminRelightCard } from './components/AdminRelightCard'
 
 interface SettingsPageProps {
-  initialTab?: 'general' | 'ai' | 'users'
+  initialTab?: 'general' | 'ai' | 'users' | 'relight'
 }
 
 export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
@@ -19,8 +20,8 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
   const { profile, updateProfile, refreshAccount } = useUser()
   const isAdmin = profile.role === 'admin'
 
-  const [activeSubTab, setActiveSubTab] = React.useState<'general' | 'ai' | 'users'>(() => {
-    if (isAdmin && (initialTab === 'ai' || initialTab === 'users')) {
+  const [activeSubTab, setActiveSubTab] = React.useState<'general' | 'ai' | 'users' | 'relight'>(() => {
+    if (isAdmin && (initialTab === 'ai' || initialTab === 'users' || initialTab === 'relight')) {
       return initialTab
     }
     return 'general'
@@ -28,7 +29,7 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
 
   // Sync tab if prop changes
   React.useEffect(() => {
-    if (isAdmin && (initialTab === 'ai' || initialTab === 'users')) {
+    if (isAdmin && (initialTab === 'ai' || initialTab === 'users' || initialTab === 'relight')) {
       setActiveSubTab(initialTab)
     }
   }, [initialTab, isAdmin])
@@ -204,6 +205,31 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
               Admin
             </Badge>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('relight')}
+            className={cn(
+              'flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all cursor-pointer select-none',
+              activeSubTab === 'relight'
+                ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            )}
+          >
+            <Sun className={cn('h-4 w-4', activeSubTab === 'relight' ? 'text-primary-foreground' : 'text-amber-500')} />
+            Relight Studio
+            <Badge
+              variant="outline"
+              className={cn(
+                'text-[10px] py-0 px-1.5 transition-colors',
+                activeSubTab === 'relight'
+                  ? 'border-white/30 text-white bg-white/10'
+                  : 'border-amber-500/30 text-amber-500'
+              )}
+            >
+              Subdomain
+            </Badge>
+          </button>
         </div>
       )}
 
@@ -218,6 +244,13 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
       {isAdmin && activeSubTab === 'users' && (
         <div className="space-y-6">
           <AdminUsersCard />
+        </div>
+      )}
+
+      {/* Tab Konten: Relight Standalone Management (Admin Only) */}
+      {isAdmin && activeSubTab === 'relight' && (
+        <div className="space-y-6">
+          <AdminRelightCard onOpenAiConfig={() => setActiveSubTab('ai')} />
         </div>
       )}
 

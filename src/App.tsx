@@ -14,8 +14,19 @@ import { DownloaderPage } from '@/features/downloader/DownloaderPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
 import { AuthPage } from '@/features/auth/AuthPage'
+import { RelightStandaloneApp } from '@/features/relight-app/RelightStandaloneApp'
 import { useUser } from '@/context/UserContext'
 import type { InvoiceRecord } from '@/types/invoice'
+
+function isRelightStandaloneHost() {
+  if (typeof window === 'undefined') return false
+  const { hostname, pathname, search } = window.location
+  if (hostname.toLowerCase().startsWith('relight.')) return true
+  if (['localhost', '127.0.0.1'].includes(hostname)) {
+    return pathname.startsWith('/relight-studio') || new URLSearchParams(search).get('app') === 'relight'
+  }
+  return false
+}
 
 function DashboardContent() {
   const { isAuthenticated, authLoading, dataLoading, dataError, invoices, saveInvoices } = useUser()
@@ -165,6 +176,17 @@ function DashboardContent() {
 }
 
 export default function App() {
+  const standaloneRelight = isRelightStandaloneHost()
+  React.useEffect(() => {
+    if (standaloneRelight) {
+      document.title = 'Relight Studio — AI Photo Lighting'
+    }
+  }, [standaloneRelight])
+
+  if (standaloneRelight) {
+    return <RelightStandaloneApp />
+  }
+
   return (
     <ThemeProvider defaultTheme="dark" storageKey="sibluudz-theme">
       <UserProvider>
