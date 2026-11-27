@@ -5,7 +5,7 @@ import { Router } from 'express'
 import sharp from 'sharp'
 import { db, dataDirectory } from './db.js'
 
-const mediaDirectory = path.join(dataDirectory, 'workflow-media')
+export const mediaDirectory = path.join(dataDirectory, 'workflow-media')
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const MAX_VIDEO_BYTES = 30 * 1024 * 1024
 

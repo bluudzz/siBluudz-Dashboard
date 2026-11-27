@@ -17,6 +17,7 @@ import downloaderRoutes from './routes/downloader.routes.js'
 import { googleDriveRouter } from './workflow-drive.js'
 import { workflowChannelsRouter } from './workflow-notify.js'
 import { startWorkflowScheduler } from './workflow-scheduler.js'
+import { startGeneratedFilesCleanup } from './generated-cleanup.js'
 
 const app = express()
 const port = Number(process.env.API_PORT || 3001)
@@ -58,6 +59,7 @@ app.listen(port, '127.0.0.1', () => {
   console.log(`SQLite database: ${path.join(dataDirectory, 'sibluudz.sqlite')}`)
   console.log(`Google OAuth: ${googleEnabled ? 'configured' : 'not configured'}`)
   startWorkflowScheduler()
+  startGeneratedFilesCleanup()
   if (process.env.NODE_ENV !== 'test') {
     void syncNineRouterCatalogIfStale({ force: true }).catch((err) => {
       console.warn('Initial 9router model sync skipped:', err.message)
