@@ -183,6 +183,17 @@ router.delete('/:id',requireSameOrigin,requireUser,(req,res)=>{
   db.prepare('delete from workflows where id=? and user_id=?').run(req.params.id,req.user.id)
   res.status(204).end()
 })
+router.post('/:id/duplicate',requireSameOrigin,requireUser,(req,res)=>{
+  const row=findWorkflow(req.params.id,req.user.id)
+  if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})
+  const graph=normalizedWorkflow(row)
+  const customName=typeof req.body?.name==='string'?req.body.name.trim():''
+  const copyName=(customName||`${String(row.name||'Workflow').slice(0,150)} (Salinan)`).slice(0,160)
+  const id=randomUUID()
+  db.prepare('insert into workflows (id,user_id,name,description,nodes,edges,is_active,webhook_token) values (?,?,?,?,?,?,0,null)')
+    .run(id,req.user.id,copyName,row.description||'',JSON.stringify(graph.nodes),JSON.stringify(graph.edges))
+  res.status(201).json({id,name:copyName,description:row.description||'',is_active:0,isActive:false,webhookToken:''})
+})
 async function run(req,res,partial=false,chat=false){
   const workflow=findWorkflow(req.params.id,req.user.id)
   if(!workflow)return res.status(404).json({error:'Workflow tidak ditemukan.'})

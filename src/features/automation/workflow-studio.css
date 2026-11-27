@@ -564,3 +564,28 @@
 .wf-node.has-image .wf-node-footer { margin-top:0; padding:9px 14px; border:1px solid var(--wf-line); border-radius:0 0 10px 10px; background:var(--wf-ground); }
 .wf-node.has-image.is-selected { outline:none; }
 .wf-node.has-image.is-selected .wf-node-images img { outline:2px solid var(--wf-accent); outline-offset:3px; }
+
+/* Curved Bezier workflow edges, active flow states, edge actions, and MiniMap polish */
+.wf-canvas .wf-edge-path { stroke:var(--wf-control); stroke-width:2.2; stroke-linecap:round; transition:stroke .18s ease, stroke-width .18s ease; }
+.wf-canvas .wf-edge-path.is-ai { stroke:color-mix(in srgb,#8b7aab 72%,var(--wf-control)); stroke-width:1.9; }
+.wf-canvas .wf-edge-path.is-hovered,
+.wf-canvas .react-flow__edge:hover .wf-edge-path { stroke:var(--wf-accent); stroke-width:2.6; }
+.wf-canvas .wf-edge-path.is-selected { stroke:var(--wf-accent); stroke-width:2.8; }
+.wf-canvas .wf-edge-path.is-success { stroke:#288161; }
+.dark .wf-canvas .wf-edge-path.is-success { stroke:#4db88a; }
+.wf-canvas .wf-edge-path.is-error { stroke:#c95151; }
+.wf-canvas .wf-edge-path.is-running { stroke:var(--wf-accent); stroke-width:2.6; stroke-dasharray:8 5; animation:wf-edge-flow .65s linear infinite; }
+@keyframes wf-edge-flow { from { stroke-dashoffset:26; } to { stroke-dashoffset:0; } }
+.wf-canvas .react-flow__connection-path { stroke:var(--wf-accent); stroke-width:2.2; stroke-dasharray:6 4; stroke-linecap:round; }
+.wf-edge-overlay { position:absolute; z-index:6; display:inline-flex; flex-direction:column; align-items:center; gap:4px; }
+.wf-edge-branch { font-size:10px; font-weight:600; line-height:1; padding:3px 8px; border-radius:999px; background:var(--wf-sheet); border:1px solid var(--wf-line); color:var(--wf-muted); box-shadow:0 2px 8px #0001; white-space:nowrap; }
+.wf-edge-branch.is-success { border-color:#288161; color:#288161; }
+.dark .wf-edge-branch.is-success { border-color:#4db88a; color:#7dc7a7; }
+.wf-edge-branch.is-error { border-color:#c95151; color:#c95151; }
+.wf-edge-actions { display:inline-flex; align-items:center; gap:4px; padding:3px; border-radius:999px; background:var(--wf-sheet); border:1px solid var(--wf-line); box-shadow:0 6px 16px #0003; }
+.workflow-studio .wf-edge-btn { width:24px; height:24px; min-height:24px; min-width:24px; padding:0; border-radius:999px; border:1px solid var(--wf-line); background:var(--wf-sheet); color:var(--wf-ink); }
+.workflow-studio .wf-edge-btn-add:hover { background:var(--wf-accent); border-color:var(--wf-accent); color:#fff; }
+.workflow-studio .wf-edge-btn-del:hover { background:#dc2626; border-color:#dc2626; color:#fff; }
+.wf-editor-utilities > button[aria-pressed=true] { background:var(--wf-ground); color:var(--wf-accent); }
+.wf-canvas .react-flow__minimap { width:156px; height:102px; border:1px solid var(--wf-line); border-radius:10px; overflow:hidden; box-shadow:0 6px 20px #0002; }
+@media(max-width:600px){ .wf-editor-utilities > [aria-label="Peta mini"] { display:none; } }
