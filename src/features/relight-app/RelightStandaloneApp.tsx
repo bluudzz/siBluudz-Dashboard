@@ -542,7 +542,7 @@ export function RelightStandaloneApp() {
       <div className="rs-shell">
         <div className="rs-loading-screen">
           <Loader2 size={24} className="rs-spin" />
-          <span>Memuat Relight Studio...</span>
+          <span>Memuat Relight Studio by siBluudz...</span>
         </div>
       </div>
     )
@@ -582,7 +582,7 @@ export function RelightStandaloneApp() {
                     <Sun size={18} />
                   </span>
                   <div className="rs-brand-text">
-                    <strong>Relight Studio</strong>
+                    <strong>Relight Studio by siBluudz</strong>
                     <span>relight.sibluudz.my.id</span>
                   </div>
                 </div>
@@ -707,7 +707,7 @@ export function RelightStandaloneApp() {
               <Sun size={18} />
             </span>
             <div className="rs-brand-text">
-              <strong>Relight Studio</strong>
+              <strong>Relight Studio by siBluudz</strong>
               <span>AI Photo Lighting</span>
             </div>
           </div>

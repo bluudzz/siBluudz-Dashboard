@@ -179,7 +179,7 @@ export default function App() {
   const standaloneRelight = isRelightStandaloneHost()
   React.useEffect(() => {
     if (standaloneRelight) {
-      document.title = 'Relight Studio — AI Photo Lighting'
+      document.title = 'Relight Studio by siBluudz — AI Photo Lighting'
     }
   }, [standaloneRelight])
 

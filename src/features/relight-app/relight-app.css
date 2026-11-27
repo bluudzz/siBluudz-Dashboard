@@ -167,6 +167,17 @@
   }
 }
 
+@media (max-width: 430px) {
+  .rs-brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .rs-brand-text strong {
+    font-size: 13px;
+  }
+}
+
 @media (max-width: 399px) {
   .rs-brand-text span {
     display: none;
