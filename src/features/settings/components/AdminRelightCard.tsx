@@ -24,7 +24,9 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
 import { curateImageModels } from '../../../../shared/model-catalog.js'
+import { BeforeAfterSlider } from '@/features/relight-app/BeforeAfterSlider'
 import { resolvePresetSamples } from '@/features/relight-app/relight-sample-art'
+import '@/features/relight-app/relight-app.css'
 
 interface RelightAdminUser {
   id: string
@@ -121,9 +123,10 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
   const [resetBusy, setResetBusy] = React.useState(false)
   const [resetFeedback, setResetFeedback] = React.useState('')
 
-  // Sample upload state
+  // Sample upload & auto-generate state
   const [sampleBusyKey, setSampleBusyKey] = React.useState<string | null>(null)
   const [sampleMessage, setSampleMessage] = React.useState('')
+  const [batchProgress, setBatchProgress] = React.useState('')
 
   const fetchOverview = React.useCallback(async () => {
     setLoading(true)
@@ -331,30 +334,69 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
     }
   }
 
-  const handleUploadSample = async (presetId: string, side: 'before' | 'after', file: File | undefined) => {
+  const handleGenerateSample = async (presetId: string, presetLabel: string, file?: File) => {
+    if (file && file.size > 8 * 1024 * 1024) {
+      setSampleMessage('Ukuran foto contoh maksimal 8 MB.')
+      return
+    }
+    const busyKey = `${presetId}:generate`
+    setSampleBusyKey(busyKey)
+    setSampleMessage(
+      file
+        ? `Mengunggah foto & men-generate efek ${presetLabel}...`
+        : `Men-generate ulang efek ${presetLabel}...`
+    )
+    try {
+      const sourceImage = file ? await readFileAsDataUrl(file) : undefined
+      const res = await fetch(`/api/admin/relight/samples/${presetId}/generate`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sourceImage ? { sourceImage } : {}),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || `Gagal men-generate contoh ${presetLabel}.`)
+      setSampleMessage(`Contoh Before / After untuk ${presetLabel} berhasil di-generate (${data.model || '9router'}).`)
+      await fetchOverview()
+    } catch (err) {
+      setSampleMessage(err instanceof Error ? err.message : `Gagal men-generate contoh ${presetLabel}.`)
+    } finally {
+      setSampleBusyKey(null)
+    }
+  }
+
+  const handleGenerateAllFromSinglePhoto = async (file: File | undefined) => {
     if (!file) return
     if (file.size > 8 * 1024 * 1024) {
       setSampleMessage('Ukuran foto contoh maksimal 8 MB.')
       return
     }
-    const busyKey = `${presetId}:${side}`
-    setSampleBusyKey(busyKey)
+    setSampleBusyKey('batch:all')
     setSampleMessage('')
     try {
-      const dataUrl = await readFileAsDataUrl(file)
-      const res = await fetch(`/api/admin/relight/samples/${presetId}`, {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(side === 'before' ? { beforeImage: dataUrl } : { afterImage: dataUrl }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data?.error || 'Gagal mengunggah foto contoh.')
-      setSampleMessage(`Foto ${side.toUpperCase()} untuk ${data.sample?.label || presetId} diperbarui.`)
-      await fetchOverview()
+      const sourceImage = await readFileAsDataUrl(file)
+      let okCount = 0
+      for (let i = 0; i < samples.length; i += 1) {
+        const preset = samples[i]
+        setBatchProgress(`Memproses ${i + 1}/${samples.length}: ${preset.label}...`)
+        const res = await fetch(`/api/admin/relight/samples/${preset.id}/generate`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceImage }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(`${preset.label}: ${data?.error || 'gagal generate'}`)
+        }
+        okCount += 1
+        await fetchOverview()
+      }
+      setSampleMessage(`Berhasil men-generate Before / After untuk semua ${okCount} fitur dari 1 foto!`)
     } catch (err) {
-      setSampleMessage(err instanceof Error ? err.message : 'Gagal mengunggah foto contoh.')
+      setSampleMessage(err instanceof Error ? err.message : 'Proses generate massal terhenti.')
     } finally {
+      setBatchProgress('')
       setSampleBusyKey(null)
     }
   }
@@ -646,14 +688,34 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
 
       {/* Kelola Foto Contoh Before / After tiap Fitur */}
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <ImageIcon className="h-5 w-5 text-amber-500" />
-            <CardTitle>Foto Contoh Before / After (7 Fitur Relight)</CardTitle>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5 text-amber-500" />
+              <CardTitle>Foto Contoh Before / After (7 Fitur Relight)</CardTitle>
+            </div>
+            <CardDescription className="mt-1">
+              Cukup upload <strong>1 foto asli</strong> per fitur (atau 1 foto untuk semua fitur sekaligus). Server otomatis menyimpan foto asli di kiri (Before) dan men-generate hasil efek AI-nya di kanan (After) via 9router.
+            </CardDescription>
           </div>
-          <CardDescription>
-            Setiap kartu fitur di menu pemilihan <strong>relight.sibluudz.my.id</strong> menampilkan 1 perbandingan slider Before / After. Anda bisa mengganti foto contohnya dengan foto asli di sini.
-          </CardDescription>
+          <label
+            className={`inline-flex items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-xs transition-opacity shrink-0 ${
+              sampleBusyKey ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:opacity-90'
+            }`}
+          >
+            <Sparkles className={`h-3.5 w-3.5 ${sampleBusyKey === 'batch:all' ? 'animate-spin' : ''}`} />
+            <span>{batchProgress || '1 Foto → Generate Semua 7 Fitur'}</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+              disabled={Boolean(sampleBusyKey)}
+              onChange={(e) => {
+                void handleGenerateAllFromSinglePhoto(e.target.files?.[0])
+                e.currentTarget.value = ''
+              }}
+            />
+          </label>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -664,19 +726,28 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {samples.map((preset) => {
               const resolved = resolvePresetSamples(preset)
+              const isGeneratingThis = sampleBusyKey === `${preset.id}:generate`
+              const hasCustom = preset.hasCustomBefore || preset.hasCustomAfter
               return (
                 <div key={preset.id} className="rounded-xl border border-border p-3.5 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="font-semibold text-sm">{preset.label}</div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{preset.description}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{preset.label}</span>
+                        {hasCustom && (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5">
+                            Hasil AI Asli
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preset.description}</p>
                     </div>
-                    {(preset.hasCustomBefore || preset.hasCustomAfter) && (
+                    {hasCustom && (
                       <Button
                         type="button"
                         size="sm"
                         variant="ghost"
-                        disabled={sampleBusyKey === `${preset.id}:reset`}
+                        disabled={Boolean(sampleBusyKey)}
                         onClick={() => void handleResetSample(preset.id)}
                         title="Kembalikan contoh default"
                       >
@@ -685,52 +756,55 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1.5">
-                      <div className="aspect-[4/5] rounded-lg overflow-hidden border border-border bg-black/80 relative">
-                        <img src={resolved.beforeUrl} alt={`${preset.label} Before`} className="w-full h-full object-cover" />
-                        <span className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                          Before
-                        </span>
+                  <div className="aspect-[4/5] rounded-xl overflow-hidden border border-border bg-black/80 relative">
+                    <BeforeAfterSlider
+                      beforeSrc={resolved.beforeUrl}
+                      afterSrc={resolved.afterUrl}
+                      beforeLabel="Before"
+                      afterLabel="After"
+                      interactiveCard
+                      ariaLabel={`Pratinjau Before After ${preset.label}`}
+                    />
+                    {isGeneratingThis && (
+                      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/75 text-white text-xs font-semibold backdrop-blur-xs">
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        <span>Generating {preset.label}...</span>
                       </div>
-                      <label className="flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium cursor-pointer hover:bg-muted">
-                        <Upload className="h-3 w-3" />
-                        <span>{sampleBusyKey === `${preset.id}:before` ? 'Mengunggah...' : 'Ganti Before'}</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          hidden
-                          disabled={Boolean(sampleBusyKey)}
-                          onChange={(e) => {
-                            void handleUploadSample(preset.id, 'before', e.target.files?.[0])
-                            e.currentTarget.value = ''
-                          }}
-                        />
-                      </label>
-                    </div>
+                    )}
+                  </div>
 
-                    <div className="space-y-1.5">
-                      <div className="aspect-[4/5] rounded-lg overflow-hidden border border-border bg-black/80 relative">
-                        <img src={resolved.afterUrl} alt={`${preset.label} After`} className="w-full h-full object-cover" />
-                        <span className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                          After
-                        </span>
-                      </div>
-                      <label className="flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium cursor-pointer hover:bg-muted">
-                        <Upload className="h-3 w-3" />
-                        <span>{sampleBusyKey === `${preset.id}:after` ? 'Mengunggah...' : 'Ganti After'}</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          hidden
-                          disabled={Boolean(sampleBusyKey)}
-                          onChange={(e) => {
-                            void handleUploadSample(preset.id, 'after', e.target.files?.[0])
-                            e.currentTarget.value = ''
-                          }}
-                        />
-                      </label>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <label
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold transition-colors ${
+                        sampleBusyKey ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-muted'
+                      }`}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{isGeneratingThis ? 'Memproses...' : 'Upload 1 Foto & Generate'}</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        hidden
+                        disabled={Boolean(sampleBusyKey)}
+                        onChange={(e) => {
+                          void handleGenerateSample(preset.id, preset.label, e.target.files?.[0])
+                          e.currentTarget.value = ''
+                        }}
+                      />
+                    </label>
+
+                    {preset.hasCustomBefore && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={Boolean(sampleBusyKey)}
+                        onClick={() => void handleGenerateSample(preset.id, preset.label)}
+                        title="Generate ulang efek AI dari foto Before yang ada"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               )

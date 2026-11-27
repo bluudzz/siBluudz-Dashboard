@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdir, readFile, unlink } from 'node:fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
 import { dataDirectory, db, getNineRouterConfig, getSetting, setSetting } from '../db.js'
@@ -16,7 +16,12 @@ import {
   sessionDurationMs,
   verifyPassword,
 } from '../middleware/auth.js'
-import { buildRelightPrompt, RELIGHT_PROMPT_VERSION, relightPresets } from '../../shared/relight.js'
+import {
+  buildRelightPrompt,
+  defaultRelightSettings,
+  RELIGHT_PROMPT_VERSION,
+  relightPresets,
+} from '../../shared/relight.js'
 import {
   callNineRouterImageEdit,
   fetchNineRouterImageModels,
@@ -129,6 +134,18 @@ function buildSampleSummaryMap(samplesDir) {
   })
 }
 
+async function processImageBufferToSampleFile(inputBuffer, targetPath) {
+  const outputBuffer = await sharp(inputBuffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({ width: 1200, height: 1500, fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 88 })
+    .toBuffer()
+
+  await mkdir(path.dirname(targetPath), { recursive: true })
+  await writeFile(targetPath, outputBuffer)
+}
+
 async function processSampleImageToFile(dataUri, targetPath) {
   if (typeof dataUri !== 'string' || !/^data:image\/(png|jpe?g|webp);base64,/i.test(dataUri)) {
     throw new Error('Format foto contoh harus PNG, JPG, atau WEBP.')
@@ -141,16 +158,52 @@ async function processSampleImageToFile(dataUri, targetPath) {
   if (!inputBuffer.length || inputBuffer.length > 8 * 1024 * 1024) {
     throw new Error('Ukuran foto contoh maksimal 8 MB.')
   }
-  const outputBuffer = await sharp(inputBuffer, { limitInputPixels: 40_000_000 })
-    .rotate()
-    .resize({ width: 1200, height: 1500, fit: 'inside', withoutEnlargement: true })
-    .flatten({ background: '#ffffff' })
-    .jpeg({ quality: 88 })
-    .toBuffer()
+  await processImageBufferToSampleFile(inputBuffer, targetPath)
+}
 
-  await mkdir(path.dirname(targetPath), { recursive: true })
-  const { writeFile } = await import('node:fs/promises')
-  await writeFile(targetPath, outputBuffer)
+async function saveGeneratedImageToSampleFile(imageStr, targetPath) {
+  if (typeof imageStr !== 'string' || !imageStr) {
+    throw new Error('Model tidak mengembalikan gambar hasil generate.')
+  }
+  if (/^data:image\//i.test(imageStr)) {
+    const encoded = imageStr.slice(imageStr.indexOf(',') + 1)
+    const buffer = Buffer.from(encoded, 'base64')
+    if (!buffer.length) throw new Error('Data gambar hasil generate kosong.')
+    await processImageBufferToSampleFile(buffer, targetPath)
+    return
+  }
+  if (/^https?:\/\//i.test(imageStr)) {
+    const res = await fetch(imageStr, { signal: AbortSignal.timeout(30_000) })
+    if (!res.ok) throw new Error(`Gagal mengunduh gambar hasil generate (${res.status}).`)
+    const buffer = Buffer.from(await res.arrayBuffer())
+    if (!buffer.length) throw new Error('Gambar hasil generate kosong.')
+    await processImageBufferToSampleFile(buffer, targetPath)
+    return
+  }
+  throw new Error('Format output gambar model tidak didukung.')
+}
+
+async function resolveActiveRelightImageModel(deps = {}) {
+  let activeModel = getStandaloneImageModel() || getImageModelName()
+  if (!activeModel) {
+    const models = deps.resolveImageModels
+      ? await deps.resolveImageModels()
+      : await fetchNineRouterImageModels().catch(() => getCachedImageModels())
+    activeModel = models[0] || 'ag/gemini-3.1-flash-image'
+  }
+  return activeModel
+}
+
+function getHeroSampleSummary(samplesDir) {
+  const list = buildSampleSummaryMap(samplesDir)
+  const strobist = list.find((s) => s.id === 'strobist' && s.hasCustomBefore && s.hasCustomAfter)
+  const firstComplete = strobist || list.find((s) => s.hasCustomBefore && s.hasCustomAfter)
+  if (!firstComplete) return null
+  return {
+    label: firstComplete.label,
+    beforeUrl: firstComplete.beforeUrl,
+    afterUrl: firstComplete.afterUrl,
+  }
 }
 
 export function createRelightPublicRouter(deps = {}) {
@@ -188,14 +241,15 @@ export function createRelightPublicRouter(deps = {}) {
   }
 
   router.get('/auth/me', (req, res) => {
+    const heroSample = getHeroSampleSummary(samplesDir)
     const session = readRelightSessionUser(req)
     if (!session) {
       if (parseCookies(req.headers.cookie)[RELIGHT_COOKIE_NAME]) {
         clearRelightSessionCookie(res)
       }
-      return res.json({ authenticated: false })
+      return res.json({ authenticated: false, heroSample })
     }
-    res.json({ authenticated: true, user: formatRelightUser(session.user) })
+    res.json({ authenticated: true, user: formatRelightUser(session.user), heroSample })
   })
 
   router.post('/auth/login', requireRelightSameOrigin, rateLimitAuth, async (req, res, next) => {
@@ -329,13 +383,7 @@ export function createRelightPublicRouter(deps = {}) {
         })
       }
 
-      let activeModel = getStandaloneImageModel() || getImageModelName()
-      if (!activeModel) {
-        const models = deps.resolveImageModels
-          ? await deps.resolveImageModels()
-          : await fetchNineRouterImageModels().catch(() => getCachedImageModels())
-        activeModel = models[0] || 'ag/gemini-3.1-flash-image'
-      }
+      const activeModel = await resolveActiveRelightImageModel(deps)
 
       const resolution = /^(ag|antigravity)\/gemini-.*image/i.test(activeModel)
         ? requestedResolution === '4K'
@@ -680,6 +728,82 @@ export function createRelightAdminRouter(deps = {}) {
 
     const sample = buildSampleSummaryMap(samplesDir).find((item) => item.id === presetId)
     res.json({ sample })
+  })
+
+  router.post('/samples/:presetId/generate', requireSameOrigin, requireAdmin, async (req, res) => {
+    const { presetId } = req.params
+    if (!PRESET_IDS.has(presetId)) {
+      return res.status(404).json({ error: 'Preset tidak dikenali.' })
+    }
+
+    const config = getNineRouterConfig()
+    if (!config.apiKey) {
+      return res.status(503).json({ error: '9router belum dikonfigurasi. Isi API Key di tab Konfigurasi 9router AI.' })
+    }
+
+    const existing = db
+      .prepare('select before_filename from relight_preset_samples where preset_id = ?')
+      .get(presetId)
+    const beforeFilename = `${presetId}-before.jpg`
+    const beforePath = path.join(samplesDir, beforeFilename)
+    const afterFilename = `${presetId}-after.jpg`
+    const afterPath = path.join(samplesDir, afterFilename)
+
+    let sceneImage = typeof req.body?.sourceImage === 'string' ? req.body.sourceImage.trim() : ''
+    try {
+      if (sceneImage) {
+        await processSampleImageToFile(sceneImage, beforePath)
+      } else if (existing?.before_filename && path.basename(existing.before_filename) === existing.before_filename) {
+        const buf = await readFile(path.join(samplesDir, existing.before_filename))
+        sceneImage = `data:image/jpeg;base64,${buf.toString('base64')}`
+      } else {
+        return res.status(400).json({ error: 'Unggah 1 foto asli terlebih dahulu untuk di-generate.' })
+      }
+    } catch (err) {
+      return res.status(400).json({ error: err.message || 'Gagal membaca atau menyimpan foto Before.' })
+    }
+
+    try {
+      const activeModel = await resolveActiveRelightImageModel(deps)
+      const resolution = /^(ag|antigravity)\/gemini-.*image/i.test(activeModel) ? '2K' : undefined
+      const quality = /^(cx|codex)\//i.test(activeModel) ? 'high' : undefined
+      const prompt = buildRelightPrompt({ ...defaultRelightSettings, preset: presetId }, '', resolution)
+
+      const { image, model: usedModel } = deps.callImageEdit
+        ? await deps.callImageEdit({
+            ...config,
+            sceneImage,
+            prompt,
+            model: activeModel,
+            resolution,
+            quality,
+          })
+        : await callNineRouterImageEdit({
+            sceneImage,
+            prompt,
+            model: activeModel,
+            resolution,
+            quality,
+          })
+
+      await saveGeneratedImageToSampleFile(image, afterPath)
+
+      db.prepare(
+        `insert into relight_preset_samples (preset_id, before_filename, after_filename, updated_at)
+         values (?, ?, ?, datetime('now'))
+         on conflict(preset_id) do update set
+           before_filename = excluded.before_filename,
+           after_filename = excluded.after_filename,
+           updated_at = datetime('now')`
+      ).run(presetId, beforeFilename, afterFilename)
+
+      const sample = buildSampleSummaryMap(samplesDir).find((item) => item.id === presetId)
+      res.json({ sample, model: usedModel || activeModel })
+    } catch (err) {
+      console.error(`Admin sample generate error (${presetId}):`, err)
+      const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500
+      res.status(status).json({ error: err.message || 'Gagal men-generate hasil contoh fitur ini.' })
+    }
   })
 
   router.delete('/samples/:presetId', requireSameOrigin, requireAdmin, async (req, res) => {

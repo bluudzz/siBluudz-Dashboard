@@ -117,6 +117,11 @@ export function RelightStandaloneApp() {
   const [user, setUser] = React.useState<RelightUser | null>(null)
   const [configured, setConfigured] = React.useState(true)
   const [presets, setPresets] = React.useState<PresetShowcase[]>([])
+  const [heroSample, setHeroSample] = React.useState<{
+    label: string
+    beforeUrl: string
+    afterUrl: string
+  } | null>(null)
 
   // Login form state
   const [identifier, setIdentifier] = React.useState('')
@@ -222,15 +227,22 @@ export function RelightStandaloneApp() {
     let active = true
     fetch('/api/relight/auth/me', { credentials: 'same-origin' })
       .then((res) => res.json())
-      .then(async (data: { authenticated?: boolean; user?: RelightUser }) => {
-        if (!active) return
-        if (data?.authenticated && data.user) {
-          setUser(data.user)
-          await loadWorkspace()
-        } else {
-          setUser(null)
+      .then(
+        async (data: {
+          authenticated?: boolean
+          user?: RelightUser
+          heroSample?: { label: string; beforeUrl: string; afterUrl: string } | null
+        }) => {
+          if (!active) return
+          setHeroSample(data?.heroSample ?? null)
+          if (data?.authenticated && data.user) {
+            setUser(data.user)
+            await loadWorkspace()
+          } else {
+            setUser(null)
+          }
         }
-      })
+      )
       .catch(() => {
         if (active) setUser(null)
       })
@@ -538,7 +550,10 @@ export function RelightStandaloneApp() {
 
   // Stage 1: Standalone Login Page
   if (!user) {
-    const heroPreview = getPresetDefaultSamples('strobist')
+    const fallbackHero = getPresetDefaultSamples('strobist')
+    const heroPreview = heroSample
+      ? { beforeUrl: heroSample.beforeUrl, afterUrl: heroSample.afterUrl, label: heroSample.label }
+      : { beforeUrl: fallbackHero.beforeUrl, afterUrl: fallbackHero.afterUrl, label: 'Strobist' }
     return (
       <div className="rs-shell">
         <div className="rs-login-stage">
@@ -549,7 +564,7 @@ export function RelightStandaloneApp() {
                   beforeSrc={heroPreview.beforeUrl}
                   afterSrc={heroPreview.afterUrl}
                   beforeLabel="Asli"
-                  afterLabel="Strobist"
+                  afterLabel={heroPreview.label}
                 />
               </div>
               <div className="rs-login-showcase-caption">

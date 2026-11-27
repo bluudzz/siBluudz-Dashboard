@@ -57,7 +57,28 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
       },
     })
   )
-  app.use('/api/admin/relight', createRelightAdminRouter({ samplesDir }))
+  app.use(
+    '/api/admin/relight',
+    createRelightAdminRouter({
+      samplesDir,
+      callImageEdit: async ({ prompt }) => {
+        imageEditCalls += 1
+        capturedPrompt = prompt
+        return {
+          image: sampleDataUri,
+          model: 'ag/gemini-3.1-flash-image',
+          output: {
+            width: 24,
+            height: 24,
+            bytes: samplePng.length,
+            format: 'png',
+            requestedResolution: '2K',
+            resolutionMatched: true,
+          },
+        }
+      },
+    })
+  )
 
   const server = app.listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
@@ -267,6 +288,50 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
     headers: { Cookie: 'sibluudz_session=main-admin-tok', Origin: origin },
   })
   assert.equal(delSample.status, 204)
+
+  // Admin uploads 1 photo and auto-generates After sample for direct_flash
+  const genSampleRes = await fetch(`${origin}/api/admin/relight/samples/direct_flash/generate`, {
+    method: 'POST',
+    headers: {
+      Cookie: 'sibluudz_session=main-admin-tok',
+      Origin: origin,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sourceImage: sampleDataUri }),
+  })
+  assert.equal(genSampleRes.status, 200)
+  const genSampleJson = await genSampleRes.json()
+  assert.equal(genSampleJson.sample.hasCustomBefore, true)
+  assert.equal(genSampleJson.sample.hasCustomAfter, true)
+  assert.match(capturedPrompt, /Direct Flash/i)
+
+  const afterFetch = await fetch(`${origin}${genSampleJson.sample.afterUrl}`)
+  assert.equal(afterFetch.status, 200)
+  assert.equal(afterFetch.headers.get('content-type'), 'image/jpeg')
+
+  // Regenerate After from existing Before without re-uploading
+  const regenSampleRes = await fetch(`${origin}/api/admin/relight/samples/direct_flash/generate`, {
+    method: 'POST',
+    headers: {
+      Cookie: 'sibluudz_session=main-admin-tok',
+      Origin: origin,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  })
+  assert.equal(regenSampleRes.status, 200)
+
+  // Public /auth/me exposes heroSample when custom sample exists
+  const anonMe = await fetch(`${origin}/api/relight/auth/me`)
+  const anonMeJson = await anonMe.json()
+  assert.equal(anonMeJson.authenticated, false)
+  assert.equal(anonMeJson.heroSample?.label, 'Direct Flash')
+  assert.match(anonMeJson.heroSample?.afterUrl || '', /^\/api\/relight\/samples\/direct_flash\/after/)
+
+  await fetch(`${origin}/api/admin/relight/samples/direct_flash`, {
+    method: 'DELETE',
+    headers: { Cookie: 'sibluudz_session=main-admin-tok', Origin: origin },
+  })
 
   const delUser = await fetch(`${origin}/api/admin/relight/users/${createdUser.id}`, {
     method: 'DELETE',
