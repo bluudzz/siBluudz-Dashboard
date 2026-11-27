@@ -145,6 +145,21 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
   assert.equal(createdUser.username, 'klien_satu')
   assert.equal(createdUser.dailyLimit, 1)
 
+  // Cross-site Origin rejected, while mobile WebView omitted Origin with valid Referer succeeds
+  const crossOriginLogin = await fetch(`${origin}/api/relight/auth/login`, {
+    method: 'POST',
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: 'klien_satu', password: 'secret123' }),
+  })
+  assert.equal(crossOriginLogin.status, 403)
+
+  const refererOnlyLogin = await fetch(`${origin}/api/relight/auth/login`, {
+    method: 'POST',
+    headers: { Referer: `${origin}/`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: 'klien_satu', password: 'secret123' }),
+  })
+  assert.equal(refererOnlyLogin.status, 200)
+
   // Wrong password rejected
   const badLogin = await fetch(`${origin}/api/relight/auth/login`, {
     method: 'POST',

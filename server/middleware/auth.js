@@ -39,19 +39,74 @@ export function clearSessionCookie(res) {
   })
 }
 
-export function requireSameOrigin(req, res, next) {
+function isLocalDevOrigin(origin) {
+  if (process.env.NODE_ENV === 'production' || !origin) return false
+  try {
+    const parsed = new URL(origin)
+    return parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+function getMainAllowedOrigins() {
+  const clean = String(appOrigin || '').replace(/\/+$/, '')
+  const list = [clean]
+  try {
+    const parsed = new URL(clean)
+    if (parsed.protocol === 'https:' && !parsed.hostname.startsWith('www.')) {
+      list.push(`${parsed.protocol}//www.${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`)
+    }
+  } catch {
+    // ignore invalid APP_ORIGIN
+  }
+  return list
+}
+
+export function matchesAllowedOrigin(req, allowedOrigins = []) {
+  const normalized = allowedOrigins.map((item) => String(item || '').replace(/\/+$/, '')).filter(Boolean)
+  const isAllowedOriginValue = (value) => Boolean(value) && (normalized.includes(value) || isLocalDevOrigin(value))
+
   const origin = req.get('origin')
-  let isAllowedLocalOrigin = false
-  if (process.env.NODE_ENV !== 'production' && origin) {
+  if (origin) {
+    if (origin === 'null') return false
+    return isAllowedOriginValue(origin)
+  }
+
+  const secFetchSite = String(req.get('sec-fetch-site') || '').toLowerCase()
+  if (secFetchSite === 'cross-site') return false
+
+  const referer = req.get('referer')
+  if (referer) {
     try {
-      const parsed = new URL(origin)
-      isAllowedLocalOrigin = parsed.protocol === 'http:' &&
-        ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+      return isAllowedOriginValue(new URL(referer).origin)
     } catch {
-      isAllowedLocalOrigin = false
+      return false
     }
   }
-  if (origin !== appOrigin && !isAllowedLocalOrigin) {
+
+  if (secFetchSite === 'same-origin') {
+    const reqHost = String(req.hostname || '').toLowerCase()
+    const allowedHosts = normalized
+      .map((item) => {
+        try {
+          return new URL(item).hostname.toLowerCase()
+        } catch {
+          return ''
+        }
+      })
+      .filter(Boolean)
+    if (allowedHosts.includes(reqHost)) return true
+    if (process.env.NODE_ENV !== 'production' && ['localhost', '127.0.0.1', '::1'].includes(reqHost)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export function requireSameOrigin(req, res, next) {
+  if (!matchesAllowedOrigin(req, getMainAllowedOrigins())) {
     return res.status(403).json({ error: 'Permintaan lintas situs ditolak.' })
   }
   next()

@@ -8,6 +8,7 @@ import {
   hashPassword,
   hashToken,
   isValidEmail,
+  matchesAllowedOrigin,
   normalizeEmail,
   parseCookies,
   rateLimitAuth,
@@ -211,19 +212,7 @@ export function createRelightPublicRouter(deps = {}) {
   const samplesDir = deps.samplesDir || relightSamplesDir
 
   const requireRelightSameOrigin = (req, res, next) => {
-    const origin = req.get('origin')
-    const allowedOrigin = getRelightOrigin(deps.relightOrigin)
-    let isAllowedLocal = false
-    if (process.env.NODE_ENV !== 'production' && origin) {
-      try {
-        const parsed = new URL(origin)
-        isAllowedLocal =
-          parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-      } catch {
-        isAllowedLocal = false
-      }
-    }
-    if (origin !== allowedOrigin && !isAllowedLocal) {
+    if (!matchesAllowedOrigin(req, [getRelightOrigin(deps.relightOrigin)])) {
       return res.status(403).json({ error: 'Permintaan lintas situs ditolak.' })
     }
     next()
