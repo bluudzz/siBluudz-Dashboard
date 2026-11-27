@@ -740,15 +740,15 @@ export function RelightStandaloneApp() {
                 </div>
 
                 <div className="rs-control-group">
-                  <span className="rs-control-label">Arah Cahaya</span>
+                  <span className="rs-control-label">Warna Cahaya</span>
                   <div className="rs-seg-grid">
-                    {relightOptions.direction.map((opt) => (
+                    {relightOptions.temperature.map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
-                        className={`rs-seg-btn${settings.direction === opt.id ? ' is-active' : ''}`}
+                        className={`rs-seg-btn${settings.temperature === opt.id ? ' is-active' : ''}`}
                         disabled={processing}
-                        onClick={() => setSettings((prev) => ({ ...prev, direction: opt.id }))}
+                        onClick={() => setSettings((prev) => ({ ...prev, temperature: opt.id }))}
                       >
                         {opt.label}
                       </button>
@@ -789,15 +789,15 @@ export function RelightStandaloneApp() {
                   {advancedOpen && (
                     <div className="rs-advanced-box">
                       <div className="rs-control-group">
-                        <span className="rs-control-label">Warna Cahaya</span>
+                        <span className="rs-control-label">Arah Cahaya</span>
                         <div className="rs-seg-grid">
-                          {relightOptions.temperature.map((opt) => (
+                          {relightOptions.direction.map((opt) => (
                             <button
                               key={opt.id}
                               type="button"
-                              className={`rs-seg-btn${settings.temperature === opt.id ? ' is-active' : ''}`}
+                              className={`rs-seg-btn${settings.direction === opt.id ? ' is-active' : ''}`}
                               disabled={processing}
-                              onClick={() => setSettings((prev) => ({ ...prev, temperature: opt.id }))}
+                              onClick={() => setSettings((prev) => ({ ...prev, direction: opt.id }))}
                             >
                               {opt.label}
                             </button>
@@ -815,23 +815,6 @@ export function RelightStandaloneApp() {
                               className={`rs-seg-btn${settings.shadows === opt.id ? ' is-active' : ''}`}
                               disabled={processing}
                               onClick={() => setSettings((prev) => ({ ...prev, shadows: opt.id }))}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="rs-control-group">
-                        <span className="rs-control-label">Pola Bayangan</span>
-                        <div className="rs-seg-grid">
-                          {relightOptions.pattern.map((opt) => (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              className={`rs-seg-btn${settings.pattern === opt.id ? ' is-active' : ''}`}
-                              disabled={processing}
-                              onClick={() => setSettings((prev) => ({ ...prev, pattern: opt.id }))}
                             >
                               {opt.label}
                             </button>
