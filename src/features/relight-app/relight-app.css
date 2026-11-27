@@ -254,11 +254,11 @@
   backdrop-filter: blur(4px);
 }
 
-.rs-compare-tag.is-after {
+.rs-compare-tag.is-before {
   left: 10px;
 }
 
-.rs-compare-tag.is-before {
+.rs-compare-tag.is-after {
   right: 10px;
 }
 

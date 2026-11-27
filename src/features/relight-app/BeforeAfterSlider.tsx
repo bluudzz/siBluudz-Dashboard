@@ -130,12 +130,12 @@ export function BeforeAfterSlider({
         draggable={false}
         style={{
           opacity: blendOpacity,
-          clipPath: `inset(0 ${100 - currentPos}% 0 0)`,
+          clipPath: `inset(0 0 0 ${currentPos}%)`,
         }}
       />
 
-      <span className="rs-compare-tag is-after">{afterLabel}</span>
       <span className="rs-compare-tag is-before">{beforeLabel}</span>
+      <span className="rs-compare-tag is-after">{afterLabel}</span>
 
       <div className="rs-compare-divider" style={{ left: `${currentPos}%` }} aria-hidden="true">
         <span className="rs-compare-knob">
