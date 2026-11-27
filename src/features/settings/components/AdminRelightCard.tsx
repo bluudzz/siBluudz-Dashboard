@@ -132,7 +132,7 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/admin/relight/overview', { credentials: 'same-origin' })
+      const res = await fetch('/api/admin/relight/overview', { credentials: 'same-origin', cache: 'no-store' })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data) {
         throw new Error(data?.error || `Gagal memuat data Relight Studio (${res.status}).`)
@@ -154,7 +154,7 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
 
   React.useEffect(() => {
     let active = true
-    fetch('/api/admin/relight/overview', { credentials: 'same-origin' })
+    fetch('/api/admin/relight/overview', { credentials: 'same-origin', cache: 'no-store' })
       .then((res) => res.json().then((data) => ({ ok: res.ok, status: res.status, data })))
       .then(({ ok, status, data }) => {
         if (!active) return
@@ -314,6 +314,21 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
       setResetFeedback(err instanceof Error ? err.message : 'Gagal mereset kata sandi.')
     } finally {
       setResetBusy(false)
+    }
+  }
+
+  const handleResetUsage = async (target: RelightAdminUser) => {
+    if (!window.confirm(`Reset riwayat pemakaian "@${target.username}" menjadi 0 agar saldo kembali penuh (${target.dailyLimit})?`)) return
+    try {
+      const res = await fetch(`/api/admin/relight/users/${target.id}/reset-usage`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Gagal mereset pemakaian kuota.')
+      await fetchOverview()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mereset pemakaian kuota.')
     }
   }
 
@@ -539,7 +554,7 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
             </div>
 
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-foreground">Kuota Default / Hari</label>
+              <label className="text-xs font-semibold text-foreground">Saldo Kuota Default</label>
               <div className="flex gap-2">
                 <Input
                   type="number"
@@ -615,9 +630,11 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
                         {u.isActive ? 'Aktif' : 'Nonaktif'}
                       </Badge>
                       <Badge variant="outline">
-                        Hari ini: {u.usageToday}/{u.dailyLimit >= 9999 ? '∞' : u.dailyLimit}
+                        Sisa: {u.remaining >= 9999 ? '∞' : `${u.remaining}/${u.dailyLimit}`}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">Total: {u.usageTotal}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Terpakai: {u.usageTotal} (Hari ini: {u.usageToday})
+                      </span>
                     </div>
                     <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
                       {u.email && <span>{u.email}</span>}
@@ -655,6 +672,17 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
                     >
                       <Edit2 className="h-3.5 w-3.5 mr-1" />
                       Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleResetUsage(u)}
+                      disabled={u.usageTotal === 0}
+                      title="Reset hitungan terpakai agar saldo kembali penuh"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Reset Terpakai
                     </Button>
                     <Button
                       type="button"
@@ -864,7 +892,7 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
                   />
                 </div>
                 <div className="grid gap-1">
-                  <label className="text-xs font-semibold">Kuota / Hari</label>
+                  <label className="text-xs font-semibold">Saldo Kuota (9999 = ∞)</label>
                   <Input
                     type="number"
                     min={0}
@@ -916,7 +944,7 @@ export function AdminRelightCard({ onOpenAiConfig }: Props) {
                 <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
               </div>
               <div className="grid gap-1">
-                <label className="text-xs font-semibold">Kuota Harian (isi 9999 untuk Unlimited)</label>
+                <label className="text-xs font-semibold">Saldo Kuota (isi 9999 untuk Unlimited)</label>
                 <Input
                   type="number"
                   min={0}

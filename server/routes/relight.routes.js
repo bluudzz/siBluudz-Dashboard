@@ -73,14 +73,18 @@ function getStandaloneImageModel() {
 function formatRelightUser(user) {
   const usageRow = db
     .prepare(
-      `select count(*) as count from relight_usage_logs
-       where user_id = ? and date(created_at, 'localtime') = date('now', 'localtime')`
+      `select
+         count(*) as usage_total,
+         coalesce(sum(case when date(created_at, '+7 hours') = date('now', '+7 hours') then 1 else 0 end), 0) as usage_today
+       from relight_usage_logs
+       where user_id = ?`
     )
     .get(user.id)
-  const usageToday = Number(usageRow?.count || 0)
-  const dailyLimit = Number.isInteger(user.daily_limit) ? user.daily_limit : getDefaultDailyLimit()
-  const isUnlimited = dailyLimit >= 9999
-  const remaining = isUnlimited ? 9999 : Math.max(0, dailyLimit - usageToday)
+  const usageTotal = Number(usageRow?.usage_total || 0)
+  const usageToday = Number(usageRow?.usage_today || 0)
+  const quotaLimit = Number.isInteger(user.daily_limit) ? user.daily_limit : getDefaultDailyLimit()
+  const isUnlimited = quotaLimit >= 9999
+  const remaining = isUnlimited ? 9999 : Math.max(0, quotaLimit - usageTotal)
 
   return {
     id: user.id,
@@ -88,8 +92,10 @@ function formatRelightUser(user) {
     email: user.email || '',
     name: user.name || '',
     isActive: Boolean(user.is_active),
-    dailyLimit,
+    dailyLimit: quotaLimit,
+    quotaLimit,
     usageToday,
+    usageTotal,
     remaining,
     isUnlimited,
     note: user.note || '',
@@ -230,6 +236,7 @@ export function createRelightPublicRouter(deps = {}) {
   }
 
   router.get('/auth/me', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     const heroSample = getHeroSampleSummary(samplesDir)
     const session = readRelightSessionUser(req)
     if (!session) {
@@ -311,6 +318,7 @@ export function createRelightPublicRouter(deps = {}) {
   })
 
   router.get('/presets', requireRelightUser, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     const { apiKey } = getNineRouterConfig()
     res.json({
       configured: Boolean(apiKey),
@@ -327,12 +335,14 @@ export function createRelightPublicRouter(deps = {}) {
       }
 
       const formatted = formatRelightUser(req.relightUser)
-      if (!formatted.isUnlimited && formatted.usageToday >= formatted.dailyLimit) {
+      if (!formatted.isUnlimited && formatted.usageTotal >= formatted.quotaLimit) {
         return res.status(429).json({
-          error: `Kuota harian Relight Anda (${formatted.dailyLimit} foto/hari) sudah habis. Coba lagi besok atau hubungi admin.`,
+          error: `Saldo kuota Relight Anda (${formatted.quotaLimit} foto) sudah habis. Hubungi admin untuk isi ulang saldo.`,
           usage: {
             usageToday: formatted.usageToday,
-            dailyLimit: formatted.dailyLimit,
+            usageTotal: formatted.usageTotal,
+            dailyLimit: formatted.quotaLimit,
+            quotaLimit: formatted.quotaLimit,
             remaining: 0,
           },
         })
@@ -410,7 +420,8 @@ export function createRelightPublicRouter(deps = {}) {
       )
 
       const updatedUsageToday = formatted.usageToday + 1
-      const remaining = formatted.isUnlimited ? 9999 : Math.max(0, formatted.dailyLimit - updatedUsageToday)
+      const updatedUsageTotal = formatted.usageTotal + 1
+      const remaining = formatted.isUnlimited ? 9999 : Math.max(0, formatted.quotaLimit - updatedUsageTotal)
 
       res.json({
         image,
@@ -420,7 +431,9 @@ export function createRelightPublicRouter(deps = {}) {
         ...(warning ? { warning } : {}),
         usage: {
           usageToday: updatedUsageToday,
-          dailyLimit: formatted.dailyLimit,
+          usageTotal: updatedUsageTotal,
+          dailyLimit: formatted.quotaLimit,
+          quotaLimit: formatted.quotaLimit,
           remaining,
         },
       })
@@ -439,10 +452,11 @@ export function createRelightAdminRouter(deps = {}) {
   const samplesDir = deps.samplesDir || relightSamplesDir
 
   router.get('/overview', requireAdmin, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     const users = db
       .prepare(
         `select u.*,
-                (select count(*) from relight_usage_logs l where l.user_id = u.id and date(l.created_at, 'localtime') = date('now', 'localtime')) as usage_today,
+                (select count(*) from relight_usage_logs l where l.user_id = u.id and date(l.created_at, '+7 hours') = date('now', '+7 hours')) as usage_today,
                 (select count(*) from relight_usage_logs l where l.user_id = u.id) as usage_total
          from relight_users u
          order by u.created_at desc`
@@ -450,17 +464,19 @@ export function createRelightAdminRouter(deps = {}) {
       .all()
       .map((u) => {
         const usageToday = Number(u.usage_today || 0)
-        const dailyLimit = Number.isInteger(u.daily_limit) ? u.daily_limit : getDefaultDailyLimit()
+        const usageTotal = Number(u.usage_total || 0)
+        const quotaLimit = Number.isInteger(u.daily_limit) ? u.daily_limit : getDefaultDailyLimit()
         return {
           id: u.id,
           username: u.username,
           email: u.email || '',
           name: u.name || '',
           isActive: Boolean(u.is_active),
-          dailyLimit,
+          dailyLimit: quotaLimit,
+          quotaLimit,
           usageToday,
-          usageTotal: Number(u.usage_total || 0),
-          remaining: dailyLimit >= 9999 ? 9999 : Math.max(0, dailyLimit - usageToday),
+          usageTotal,
+          remaining: quotaLimit >= 9999 ? 9999 : Math.max(0, quotaLimit - usageTotal),
           note: u.note || '',
           lastLoginAt: u.last_login_at || '',
           createdAt: u.created_at || '',
@@ -642,6 +658,16 @@ export function createRelightAdminRouter(deps = {}) {
     } catch (error) {
       next(error)
     }
+  })
+
+  router.post('/users/:id/reset-usage', requireSameOrigin, requireAdmin, (req, res) => {
+    const targetId = req.params.id
+    const target = db.prepare('select * from relight_users where id = ?').get(targetId)
+    if (!target) {
+      return res.status(404).json({ error: 'User Relight tidak ditemukan.' })
+    }
+    db.prepare('delete from relight_usage_logs where user_id = ?').run(targetId)
+    res.json({ user: formatRelightUser(target) })
   })
 
   router.delete('/users/:id', requireSameOrigin, requireAdmin, (req, res) => {

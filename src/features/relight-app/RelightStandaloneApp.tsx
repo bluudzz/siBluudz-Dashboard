@@ -39,7 +39,9 @@ interface RelightUser {
   name: string
   isActive: boolean
   dailyLimit: number
+  quotaLimit?: number
   usageToday: number
+  usageTotal?: number
   remaining: number
   isUnlimited: boolean
 }
@@ -211,7 +213,7 @@ export function RelightStandaloneApp() {
   }, [])
 
   const loadWorkspace = React.useCallback(async () => {
-    const res = await fetch('/api/relight/presets', { credentials: 'same-origin' })
+    const res = await fetch('/api/relight/presets', { credentials: 'same-origin', cache: 'no-store' })
     if (!res.ok) return
     const data = (await res.json()) as {
       configured?: boolean
@@ -223,9 +225,34 @@ export function RelightStandaloneApp() {
     if (data.user) setUser(data.user)
   }, [])
 
+  const syncUserSession = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/relight/auth/me', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        authenticated?: boolean
+        user?: RelightUser
+        heroSample?: { label: string; beforeUrl: string; afterUrl: string } | null
+      }
+      if (data?.heroSample !== undefined) {
+        setHeroSample(data.heroSample ?? null)
+      }
+      if (data?.authenticated && data.user) {
+        setUser(data.user)
+      } else if (data?.authenticated === false) {
+        setUser(null)
+      }
+    } catch {
+      // ignore transient network errors during background quota sync
+    }
+  }, [])
+
   React.useEffect(() => {
     let active = true
-    fetch('/api/relight/auth/me', { credentials: 'same-origin' })
+    fetch('/api/relight/auth/me', { credentials: 'same-origin', cache: 'no-store' })
       .then((res) => res.json())
       .then(
         async (data: {
@@ -253,6 +280,37 @@ export function RelightStandaloneApp() {
       active = false
     }
   }, [loadWorkspace])
+
+  const isLoggedIn = Boolean(user)
+
+  React.useEffect(() => {
+    if (!isLoggedIn) return
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncUserSession()
+      }
+    }
+    window.addEventListener('focus', handleFocusOrVisible)
+    document.addEventListener('visibilitychange', handleFocusOrVisible)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void syncUserSession()
+      }
+    }, 20_000)
+    return () => {
+      window.removeEventListener('focus', handleFocusOrVisible)
+      document.removeEventListener('visibilitychange', handleFocusOrVisible)
+      window.clearInterval(timer)
+    }
+  }, [isLoggedIn, syncUserSession])
+
+  React.useEffect(() => {
+    if (!isLoggedIn) return
+    const timer = window.setTimeout(() => {
+      void syncUserSession()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [stage, isLoggedIn, syncUserSession])
 
   React.useEffect(() => {
     const root = viewportRef.current
@@ -440,7 +498,9 @@ export function RelightStandaloneApp() {
             ? {
                 ...prev,
                 usageToday: data.usage.usageToday,
+                usageTotal: data.usage.usageTotal ?? prev.usageTotal,
                 dailyLimit: data.usage.dailyLimit,
+                quotaLimit: data.usage.quotaLimit ?? data.usage.dailyLimit,
                 remaining: data.usage.remaining,
               }
             : prev
@@ -723,7 +783,7 @@ export function RelightStandaloneApp() {
               ) : (
                 <>
                   <span className="rs-quota-long">
-                    Sisa {user.remaining}/{user.dailyLimit} hari ini
+                    Sisa Kuota {user.remaining}/{user.dailyLimit}
                   </span>
                   <span className="rs-quota-short">
                     {user.remaining}/{user.dailyLimit}
@@ -1293,7 +1353,7 @@ export function RelightStandaloneApp() {
                     {processing
                       ? 'Sedang Memproses...'
                       : quotaDepleted
-                        ? 'Kuota Harian Habis'
+                        ? 'Saldo Kuota Habis'
                         : result
                           ? 'Proses Ulang'
                           : 'Proses Relight'}

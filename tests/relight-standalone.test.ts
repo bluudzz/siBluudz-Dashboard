@@ -209,7 +209,17 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
   assert.equal(fetchedSample.status, 200)
   assert.equal(fetchedSample.headers.get('content-type'), 'image/jpeg')
 
-  // Process 1st relight photo -> succeeds & consumes quota
+  // Separate second browser login shares the exact same remaining quota & sees no-store cache headers
+  const browser2Login = await fetch(`${origin}/api/relight/auth/login`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: 'klien_satu', password: 'secret123' }),
+  })
+  assert.equal(browser2Login.status, 200)
+  const relightToken2 = extractCookieValue(browser2Login, 'relight_session')
+  assert.ok(relightToken2)
+
+  // Process 1st relight photo in browser 1 -> consumes quota across ALL devices/browsers
   const proc1 = await fetch(`${origin}/api/relight/process`, {
     method: 'POST',
     headers: {
@@ -226,15 +236,25 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
   assert.equal(proc1.status, 200)
   const proc1Json = await proc1.json()
   assert.equal(proc1Json.usage.usageToday, 1)
+  assert.equal(proc1Json.usage.usageTotal, 1)
   assert.equal(proc1Json.usage.remaining, 0)
   assert.equal(imageEditCalls, 1)
   assert.match(capturedPrompt, /Softbox/i)
 
-  // 2nd relight photo same day -> blocked with 429 quota exceeded
+  const meBrowser2 = await fetch(`${origin}/api/relight/auth/me`, {
+    headers: { Cookie: `relight_session=${relightToken2}` },
+  })
+  assert.match(meBrowser2.headers.get('cache-control') || '', /no-store/i)
+  const meBrowser2Json = await meBrowser2.json()
+  assert.equal(meBrowser2Json.authenticated, true)
+  assert.equal(meBrowser2Json.user.remaining, 0)
+  assert.equal(meBrowser2Json.user.usageTotal, 1)
+
+  // 2nd relight photo -> blocked with 429 across browsers
   const proc2 = await fetch(`${origin}/api/relight/process`, {
     method: 'POST',
     headers: {
-      Cookie: `relight_session=${relightToken}`,
+      Cookie: `relight_session=${relightToken2}`,
       Origin: origin,
       'Content-Type': 'application/json',
     },
@@ -244,6 +264,27 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
     }),
   })
   assert.equal(proc2.status, 429)
+
+  // Persistent balance test: backfill usage log to 3 days ago -> still counts toward remaining!
+  db.prepare(`update relight_usage_logs set created_at = datetime('now', '-3 days') where user_id = ?`).run(
+    createdUser.id
+  )
+  const meAfterDays = await fetch(`${origin}/api/relight/auth/me`, {
+    headers: { Cookie: `relight_session=${relightToken}` },
+  })
+  const meAfterDaysJson = await meAfterDays.json()
+  assert.equal(meAfterDaysJson.user.usageTotal, 1)
+  assert.equal(meAfterDaysJson.user.remaining, 0)
+
+  // Admin can reset usage -> balance immediately restored
+  const resetUsageRes = await fetch(`${origin}/api/admin/relight/users/${createdUser.id}/reset-usage`, {
+    method: 'POST',
+    headers: { Cookie: 'sibluudz_session=main-admin-tok', Origin: origin },
+  })
+  assert.equal(resetUsageRes.status, 200)
+  const resetUsageJson = await resetUsageRes.json()
+  assert.equal(resetUsageJson.user.usageTotal, 0)
+  assert.equal(resetUsageJson.user.remaining, 1)
 
   // Admin disables user -> immediately revokes session and blocks login (403)
   const disableRes = await fetch(`${origin}/api/admin/relight/users/${createdUser.id}`, {
