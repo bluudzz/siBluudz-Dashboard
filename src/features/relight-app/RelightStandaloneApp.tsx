@@ -465,9 +465,21 @@ export function RelightStandaloneApp() {
           <div className="rs-header-actions">
             <span className={`rs-quota-pill${quotaDepleted ? ' is-empty' : ''}`}>
               <Sparkles size={13} />
-              <span>
-                {user.isUnlimited ? 'Kuota Unlimited' : `Sisa ${user.remaining}/${user.dailyLimit} hari ini`}
-              </span>
+              {user.isUnlimited ? (
+                <>
+                  <span className="rs-quota-long">Kuota Unlimited</span>
+                  <span className="rs-quota-short">Unlimited</span>
+                </>
+              ) : (
+                <>
+                  <span className="rs-quota-long">
+                    Sisa {user.remaining}/{user.dailyLimit} hari ini
+                  </span>
+                  <span className="rs-quota-short">
+                    {user.remaining}/{user.dailyLimit}
+                  </span>
+                </>
+              )}
             </span>
 
             <span className="rs-user-chip">
@@ -475,9 +487,14 @@ export function RelightStandaloneApp() {
               <span>{user.name || user.username}</span>
             </span>
 
-            <button type="button" className="rs-ghost-btn" onClick={() => void handleLogout()}>
+            <button
+              type="button"
+              className="rs-ghost-btn"
+              aria-label="Keluar"
+              onClick={() => void handleLogout()}
+            >
               <LogOut size={14} />
-              <span>Keluar</span>
+              <span className="rs-logout-label">Keluar</span>
             </button>
           </div>
         </div>
