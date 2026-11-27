@@ -2,6 +2,7 @@ import * as React from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowLeftRight,
   ChevronDown,
   ChevronUp,
   Download,
@@ -16,6 +17,8 @@ import {
   Sun,
   User,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import { defaultRelightSettings, relightOptions, relightPresets } from '../../../shared/relight.js'
 import type { RelightResolution, RelightSettings } from '../../../shared/relight.js'
@@ -73,6 +76,42 @@ const RESOLUTIONS: { id: ResolutionChoice; label: string }[] = [
   { id: '4K', label: '4K' },
 ]
 
+const MIN_ZOOM = 1
+const MAX_ZOOM = 8
+const ZOOM_STEP = 1.25
+
+function getRenderedImageSize(
+  viewportWidth: number,
+  viewportHeight: number,
+  naturalWidth: number,
+  naturalHeight: number
+) {
+  if (viewportWidth <= 0 || viewportHeight <= 0) return { width: 0, height: 0 }
+  if (naturalWidth <= 0 || naturalHeight <= 0) {
+    return { width: viewportWidth, height: viewportHeight }
+  }
+  const scale = Math.min(viewportWidth / naturalWidth, viewportHeight / naturalHeight)
+  return { width: naturalWidth * scale, height: naturalHeight * scale }
+}
+
+function clampPan(x: number, y: number, zoom: number, renderedWidth: number, renderedHeight: number) {
+  const maxX = Math.max(0, (renderedWidth * zoom) / 2)
+  const maxY = Math.max(0, (renderedHeight * zoom) / 2)
+  return {
+    x: Math.min(maxX, Math.max(-maxX, x)),
+    y: Math.min(maxY, Math.max(-maxY, y)),
+  }
+}
+
+function getViewportMetrics(el: HTMLElement | null) {
+  const box = el?.querySelector<HTMLElement>('.rs-zoom-comparison, .rs-zoom-photo-viewport') ?? el
+  if (!box) return null
+  const rect = box.getBoundingClientRect()
+  const img = box.querySelector('img')
+  const rendered = getRenderedImageSize(rect.width, rect.height, img?.naturalWidth ?? 0, img?.naturalHeight ?? 0)
+  return { rect, rendered }
+}
+
 export function RelightStandaloneApp() {
   const [authChecking, setAuthChecking] = React.useState(true)
   const [user, setUser] = React.useState<RelightUser | null>(null)
@@ -102,9 +141,69 @@ export function RelightStandaloneApp() {
   const [processing, setProcessing] = React.useState(false)
   const [exporting, setExporting] = React.useState(false)
   const [editorError, setEditorError] = React.useState('')
-  const [iosSheet, setIosSheet] = React.useState<{ url: string; filename: string; file: File } | null>(null)
+  const [iosSheet, setIosSheet] = React.useState<{
+    url: string
+    filename: string
+    file: File
+    bytes: number
+    ext: string
+  } | null>(null)
+  const [view, setView] = React.useState({ zoom: 1, x: 0, y: 0 })
+  const [panning, setPanning] = React.useState(false)
+  const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 })
+  const [naturalSize, setNaturalSize] = React.useState({ width: 0, height: 0 })
 
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const viewportRef = React.useRef<HTMLElement>(null)
+  const comparisonRef = React.useRef<HTMLDivElement>(null)
+  const dividerDragRef = React.useRef<number | null>(null)
+  const panStartRef = React.useRef<{
+    pointerId: number
+    clientX: number
+    clientY: number
+    startX: number
+    startY: number
+  } | null>(null)
+
+  const resetView = React.useCallback(() => {
+    panStartRef.current = null
+    setPanning(false)
+    setView({ zoom: 1, x: 0, y: 0 })
+  }, [])
+
+  const stepZoom = React.useCallback((direction: 1 | -1) => {
+    const metrics = getViewportMetrics(viewportRef.current)
+    const width = metrics?.rendered.width ?? 0
+    const height = metrics?.rendered.height ?? 0
+    setView((prev) => {
+      const nextZoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, direction > 0 ? prev.zoom * ZOOM_STEP : prev.zoom / ZOOM_STEP)
+      )
+      if (nextZoom < 1.02 && direction < 0) return { zoom: 1, x: 0, y: 0 }
+      const ratio = nextZoom / prev.zoom
+      const clamped = clampPan(prev.x * ratio, prev.y * ratio, nextZoom, width, height)
+      return { zoom: nextZoom, ...clamped }
+    })
+  }, [])
+
+  const updateCompareFromClientX = React.useCallback((clientX: number) => {
+    const rect = comparisonRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return
+    const pct = Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)))
+    setComparePos(pct)
+  }, [])
+
+  const handleCanvasImageLoad = React.useCallback((event: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = event.currentTarget
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      setNaturalSize((prev) =>
+        prev.width === naturalWidth && prev.height === naturalHeight
+          ? prev
+          : { width: naturalWidth, height: naturalHeight }
+      )
+    }
+  }, [])
 
   const loadWorkspace = React.useCallback(async () => {
     const res = await fetch('/api/relight/presets', { credentials: 'same-origin' })
@@ -144,11 +243,84 @@ export function RelightStandaloneApp() {
   }, [loadWorkspace])
 
   React.useEffect(() => {
+    const root = viewportRef.current
+    if (!root) return
+    const target = root.querySelector<HTMLElement>('.rs-zoom-comparison, .rs-zoom-photo-viewport') ?? root
+    const measure = () => {
+      const rect = target.getBoundingClientRect()
+      setViewportSize((prev) =>
+        prev.width === rect.width && prev.height === rect.height
+          ? prev
+          : { width: rect.width, height: rect.height }
+      )
+    }
+    measure()
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure)
+      observer.observe(target)
+      return () => observer.disconnect()
+    }
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [source, result, stage])
+
+  React.useEffect(() => {
+    const el = viewportRef.current
+    if (!el) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const metrics = getViewportMetrics(el)
+      if (!metrics) return
+      const clampedDelta = Math.max(-240, Math.min(240, event.deltaY))
+      const factor = Math.pow(1.0018, -clampedDelta)
+      const mx = event.clientX - (metrics.rect.left + metrics.rect.width / 2)
+      const my = event.clientY - (metrics.rect.top + metrics.rect.height / 2)
+      setView((prev) => {
+        const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.zoom * factor))
+        if (nextZoom < 1.02 && event.deltaY > 0) return { zoom: 1, x: 0, y: 0 }
+        const ratio = nextZoom / prev.zoom
+        const nextX = prev.x * ratio + mx * (1 - ratio)
+        const nextY = prev.y * ratio + my * (1 - ratio)
+        const clamped = clampPan(nextX, nextY, nextZoom, metrics.rendered.width, metrics.rendered.height)
+        return { zoom: nextZoom, ...clamped }
+      })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [source, result, stage])
+
+  React.useEffect(() => {
     if (!iosSheet) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIosSheet(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
     return () => {
+      document.removeEventListener('keydown', onKeyDown)
       URL.revokeObjectURL(iosSheet.url)
     }
   }, [iosSheet])
+
+  const openIosSaveSheet = React.useCallback((blob: Blob, filename: string, ext: string) => {
+    const file = new File([blob], filename, { type: blob.type || 'image/png' })
+    const url = URL.createObjectURL(blob)
+    setIosSheet({ url, filename, file, bytes: blob.size, ext })
+  }, [])
+
+  const sharePreparedFile = React.useCallback(
+    (file: File, filename: string, onFallback?: () => void) => {
+      try {
+        const sharePromise = navigator.share({ files: [file], title: filename })
+        void sharePromise.catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          onFallback?.()
+        })
+      } catch {
+        onFallback?.()
+      }
+    },
+    []
+  )
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -206,7 +378,10 @@ export function RelightStandaloneApp() {
       if (typeof reader.result === 'string') {
         setSource({ data: reader.result, name: file.name })
         setResult(null)
+        setNaturalSize({ width: 0, height: 0 })
+        setIosSheet(null)
         setEditorError('')
+        resetView()
       }
     }
     reader.onerror = () => setEditorError('Gagal membaca berkas foto.')
@@ -245,6 +420,8 @@ export function RelightStandaloneApp() {
       })
       setStrength(100)
       setComparePos(52)
+      setIosSheet(null)
+      resetView()
       if (data.usage) {
         setUser((prev) =>
           prev
@@ -267,32 +444,52 @@ export function RelightStandaloneApp() {
   const handleDownloadResult = async () => {
     if (!result || exporting) return
     const safeName = (result.source.name || 'relight-photo').replace(/\.[^.]+$/, '')
-    const filename = `${safeName}-${settings.preset}`
+    const filenameBase = `${safeName}-${settings.preset}`
+    const ios = isIOSDevice()
 
-    if (isIOSDevice()) {
-      const syncExport = prepareSyncRelightExport({
-        sourceDataUrl: result.source.data,
-        resultImageUrl: result.image,
-        strength,
-        resultFormat: result.format,
-      })
-      if (syncExport) {
-        const fullName = `${filename}.${syncExport.ext}`
-        const file = new File([syncExport.blob], fullName, { type: syncExport.blob.type || 'image/png' })
+    const syncExport = prepareSyncRelightExport({
+      sourceDataUrl: result.source.data,
+      resultImageUrl: result.image,
+      strength,
+      resultFormat: result.format,
+    })
+
+    if (syncExport) {
+      const fullName =
+        strength >= 100
+          ? `${filenameBase}.${syncExport.ext}`
+          : `${filenameBase}-${strength}pct.${syncExport.ext}`
+      setEditorError('')
+
+      if (ios) {
+        const file = new File([syncExport.blob], fullName, {
+          type: syncExport.blob.type || 'image/png',
+        })
         if (canShareFile(file)) {
-          try {
-            await navigator.share({ files: [file], title: fullName })
-            return
-          } catch (err) {
-            if (err instanceof DOMException && err.name === 'AbortError') return
-          }
+          sharePreparedFile(file, fullName, () =>
+            openIosSaveSheet(syncExport.blob, fullName, syncExport.ext)
+          )
+        } else {
+          openIosSaveSheet(syncExport.blob, fullName, syncExport.ext)
         }
-        setIosSheet({ url: URL.createObjectURL(syncExport.blob), filename: fullName, file })
         return
       }
+
+      const url = URL.createObjectURL(syncExport.blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fullName
+      document.body.appendChild(a)
+      a.click()
+      window.setTimeout(() => {
+        a.remove()
+        URL.revokeObjectURL(url)
+      }, 60_000)
+      return
     }
 
     setExporting(true)
+    setEditorError('')
     try {
       const exported = await exportRelightImage({
         sourceDataUrl: result.source.data,
@@ -302,10 +499,12 @@ export function RelightStandaloneApp() {
       })
       if (!exported) throw new Error('Gagal menyiapkan file foto untuk diunduh.')
 
-      const fullName = `${filename}.${exported.ext}`
-      if (isIOSDevice()) {
-        const file = new File([exported.blob], fullName, { type: exported.blob.type || 'image/png' })
-        setIosSheet({ url: URL.createObjectURL(exported.blob), filename: fullName, file })
+      const fullName =
+        strength >= 100
+          ? `${filenameBase}.${exported.ext}`
+          : `${filenameBase}-${strength}pct.${exported.ext}`
+      if (ios) {
+        openIosSaveSheet(exported.blob, fullName, exported.ext)
         return
       }
 
@@ -447,6 +646,42 @@ export function RelightStandaloneApp() {
 
   const activePreset = presetList.find((p) => p.id === settings.preset) || presetList[0]
   const quotaDepleted = !user.isUnlimited && user.remaining <= 0
+
+  const baseRendered = getRenderedImageSize(
+    viewportSize.width,
+    viewportSize.height,
+    naturalSize.width,
+    naturalSize.height
+  )
+  const isTransformed = view.zoom > 1 || view.x !== 0 || view.y !== 0
+  let zoomStyle: React.CSSProperties | undefined
+  if (isTransformed) {
+    if (baseRendered.width > 0 && baseRendered.height > 0) {
+      const stageWidth = Math.max(1, Math.round(baseRendered.width * view.zoom))
+      const stageHeight = Math.max(1, Math.round(baseRendered.height * view.zoom))
+      zoomStyle = {
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        width: `${stageWidth}px`,
+        height: `${stageHeight}px`,
+        marginLeft: `${Math.round(-stageWidth / 2 + view.x)}px`,
+        marginTop: `${Math.round(-stageHeight / 2 + view.y)}px`,
+      }
+    } else {
+      const pct = Math.round(view.zoom * 100)
+      zoomStyle = {
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        width: `${pct}%`,
+        height: `${pct}%`,
+        marginLeft: `${Math.round(view.x)}px`,
+        marginTop: `${Math.round(view.y)}px`,
+        transform: 'translate(-50%, -50%)',
+      }
+    }
+  }
 
   return (
     <div className="rs-shell">
@@ -646,22 +881,211 @@ export function RelightStandaloneApp() {
                   </div>
                 ) : (
                   <>
+                    <div className="rs-zoom-toolbar">
+                      <span className="rs-zoom-hint">
+                        {isTransformed
+                          ? 'Geser foto · klik ganda untuk reset'
+                          : 'Scroll untuk zoom · tarik pemisah di tengah'}
+                      </span>
+                      <div className="rs-zoom-controls" role="group" aria-label="Kontrol zoom foto">
+                        <button
+                          type="button"
+                          className="rs-zoom-btn"
+                          aria-label="Perkecil zoom"
+                          disabled={view.zoom <= MIN_ZOOM}
+                          onClick={() => stepZoom(-1)}
+                        >
+                          <ZoomOut size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="rs-zoom-reset"
+                          title="Reset zoom ke 100%"
+                          onClick={() => resetView()}
+                        >
+                          {Math.round(view.zoom * 100)}%
+                        </button>
+                        <button
+                          type="button"
+                          className="rs-zoom-btn"
+                          aria-label="Perbesar zoom"
+                          disabled={view.zoom >= MAX_ZOOM}
+                          onClick={() => stepZoom(1)}
+                        >
+                          <ZoomIn size={14} />
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="rs-viewer-box">
-                      {result ? (
-                        <BeforeAfterSlider
-                          beforeSrc={result.source.data}
-                          afterSrc={result.image}
-                          beforeLabel="Asli"
-                          afterLabel={activePreset.label}
-                          position={comparePos}
-                          onPositionChange={setComparePos}
-                          blendOpacity={strength / 100}
-                          objectFit="contain"
-                          ariaLabel="Bandingkan hasil relight dengan foto asli"
-                        />
-                      ) : (
-                        <img src={source.data} alt={source.name} className="rs-viewer-single" />
-                      )}
+                      <figure
+                        ref={viewportRef}
+                        className="rs-zoom-viewport"
+                        data-zoomed={view.zoom > 1}
+                        data-transformed={isTransformed}
+                        data-panning={panning}
+                        onDoubleClick={() => {
+                          if (isTransformed) resetView()
+                        }}
+                        onPointerDown={(event) => {
+                          if (event.pointerType === 'touch' && view.zoom <= 1) return
+                          if (event.button !== 0 && event.button !== 1) return
+                          const targetEl = event.target as HTMLElement | null
+                          if (targetEl?.closest('.rs-zoom-divider')) return
+                          event.preventDefault()
+                          panStartRef.current = {
+                            pointerId: event.pointerId,
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                            startX: view.x,
+                            startY: view.y,
+                          }
+                          event.currentTarget.setPointerCapture(event.pointerId)
+                          setPanning(true)
+                        }}
+                        onPointerMove={(event) => {
+                          const start = panStartRef.current
+                          if (!start || start.pointerId !== event.pointerId) return
+                          const metrics = getViewportMetrics(event.currentTarget)
+                          const width = metrics?.rendered.width ?? 0
+                          const height = metrics?.rendered.height ?? 0
+                          const dx = event.clientX - start.clientX
+                          const dy = event.clientY - start.clientY
+                          const clamped = clampPan(start.startX + dx, start.startY + dy, view.zoom, width, height)
+                          setView((prev) => ({ ...prev, ...clamped }))
+                        }}
+                        onPointerUp={(event) => {
+                          if (panStartRef.current?.pointerId !== event.pointerId) return
+                          panStartRef.current = null
+                          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                            event.currentTarget.releasePointerCapture(event.pointerId)
+                          }
+                          setPanning(false)
+                        }}
+                        onPointerCancel={(event) => {
+                          if (panStartRef.current?.pointerId !== event.pointerId) return
+                          panStartRef.current = null
+                          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                            event.currentTarget.releasePointerCapture(event.pointerId)
+                          }
+                          setPanning(false)
+                        }}
+                      >
+                        {result ? (
+                          <div ref={comparisonRef} className="rs-zoom-comparison">
+                            {/* Kanan: Hasil Relight (terlihat di kanan garis pembatas) */}
+                            <div className="rs-zoom-stage" style={zoomStyle}>
+                              <img
+                                src={result.source.data}
+                                alt="Foto dasar pembanding"
+                                decoding="sync"
+                                draggable={false}
+                                onLoad={handleCanvasImageLoad}
+                              />
+                              <img
+                                className="rs-zoom-blended"
+                                src={result.image}
+                                alt={`Hasil ${activePreset.label}`}
+                                style={{ opacity: strength / 100 }}
+                                decoding="sync"
+                                draggable={false}
+                              />
+                            </div>
+
+                            {/* Kiri: Foto Asli (dibatasi sampai garis tengah) */}
+                            <div
+                              className="rs-zoom-original"
+                              style={{ clipPath: `inset(0 ${100 - comparePos}% 0 0)` }}
+                            >
+                              <div className="rs-zoom-stage" style={zoomStyle}>
+                                <img
+                                  src={result.source.data}
+                                  alt="Foto asli"
+                                  decoding="sync"
+                                  draggable={false}
+                                />
+                              </div>
+                            </div>
+
+                            <span className="rs-compare-tag is-before">Asli</span>
+                            <span className="rs-compare-tag is-after">
+                              {strength < 100 ? `${activePreset.label} (${strength}%)` : activePreset.label}
+                            </span>
+
+                            <div
+                              className="rs-zoom-divider"
+                              role="slider"
+                              tabIndex={0}
+                              aria-label="Geser pembatas foto asli dan hasil"
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={comparePos}
+                              style={{ left: `${comparePos}%` }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => {
+                                if (event.button !== 0) return
+                                event.stopPropagation()
+                                event.preventDefault()
+                                dividerDragRef.current = event.pointerId
+                                event.currentTarget.setPointerCapture(event.pointerId)
+                                updateCompareFromClientX(event.clientX)
+                              }}
+                              onPointerMove={(event) => {
+                                if (dividerDragRef.current !== event.pointerId) return
+                                event.stopPropagation()
+                                updateCompareFromClientX(event.clientX)
+                              }}
+                              onPointerUp={(event) => {
+                                if (dividerDragRef.current !== event.pointerId) return
+                                event.stopPropagation()
+                                dividerDragRef.current = null
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                  event.currentTarget.releasePointerCapture(event.pointerId)
+                                }
+                              }}
+                              onPointerCancel={(event) => {
+                                if (dividerDragRef.current !== event.pointerId) return
+                                dividerDragRef.current = null
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                  event.currentTarget.releasePointerCapture(event.pointerId)
+                                }
+                              }}
+                              onKeyDown={(event) => {
+                                const step = event.shiftKey ? 10 : 2
+                                if (event.key === 'ArrowLeft') {
+                                  event.preventDefault()
+                                  setComparePos((prev) => Math.max(0, prev - step))
+                                } else if (event.key === 'ArrowRight') {
+                                  event.preventDefault()
+                                  setComparePos((prev) => Math.min(100, prev + step))
+                                } else if (event.key === 'Home') {
+                                  event.preventDefault()
+                                  setComparePos(0)
+                                } else if (event.key === 'End') {
+                                  event.preventDefault()
+                                  setComparePos(100)
+                                }
+                              }}
+                            >
+                              <span aria-hidden="true">
+                                <ArrowLeftRight size={15} />
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rs-zoom-photo-viewport">
+                            <div className="rs-zoom-stage" style={zoomStyle}>
+                              <img
+                                src={source.data}
+                                alt={source.name}
+                                decoding="sync"
+                                draggable={false}
+                                onLoad={handleCanvasImageLoad}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </figure>
 
                       {processing && (
                         <div className="rs-viewer-busy">
@@ -680,7 +1104,10 @@ export function RelightStandaloneApp() {
                           min={0}
                           max={100}
                           value={strength}
-                          onChange={(e) => setStrength(Number(e.target.value))}
+                          onChange={(e) => {
+                            setStrength(Number(e.target.value))
+                            setIosSheet(null)
+                          }}
                         />
                         <span>{strength}%</span>
                       </div>
@@ -864,10 +1291,26 @@ export function RelightStandaloneApp() {
       </main>
 
       {iosSheet && (
-        <div className="rs-modal-backdrop" role="dialog" aria-modal="true" aria-label="Simpan foto iOS">
+        <div
+          className="rs-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Simpan foto iOS"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIosSheet(null)
+          }}
+        >
           <div className="rs-modal">
             <div className="rs-modal-head">
-              <strong>Simpan Foto ke iPhone / iPad</strong>
+              <div>
+                <strong>Simpan Foto</strong>
+                <div className="rs-modal-meta">
+                  {iosSheet.ext.toUpperCase()} ·{' '}
+                  {iosSheet.bytes >= 1024 * 1024
+                    ? `${(iosSheet.bytes / (1024 * 1024)).toFixed(2)} MB`
+                    : `${Math.ceil(iosSheet.bytes / 1024)} KB`}
+                </div>
+              </div>
               <button
                 type="button"
                 className="rs-ghost-btn"
@@ -878,28 +1321,31 @@ export function RelightStandaloneApp() {
               </button>
             </div>
             <img src={iosSheet.url} alt={iosSheet.filename} className="rs-modal-preview" />
+            <p className="rs-modal-hint">
+              Tekan &amp; tahan gambar di atas lalu pilih <strong>Simpan ke Foto</strong>, atau ketuk tombol di bawah.
+            </p>
             <div className="rs-result-actions">
               {canShareFile(iosSheet.file) && (
                 <button
                   type="button"
                   className="rs-primary-btn"
                   style={{ flex: 1 }}
-                  onClick={() => {
-                    void navigator.share({ files: [iosSheet.file], title: iosSheet.filename }).catch(() => {})
-                  }}
+                  onClick={() => sharePreparedFile(iosSheet.file, iosSheet.filename)}
                 >
                   <Share2 size={15} />
-                  <span>Simpan / Bagikan</span>
+                  <span>Simpan ke Galeri / Bagikan</span>
                 </button>
               )}
               <a
                 href={iosSheet.url}
                 download={iosSheet.filename}
+                target="_blank"
+                rel="noreferrer"
                 className="rs-secondary-btn"
                 style={{ flex: 1, textDecoration: 'none' }}
               >
                 <Download size={15} />
-                <span>Unduh File</span>
+                <span>Unduh / Buka File</span>
               </a>
             </div>
           </div>
