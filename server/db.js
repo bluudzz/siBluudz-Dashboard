@@ -220,6 +220,25 @@ db.exec(`
     after_filename text not null default '',
     updated_at text not null default (datetime('now'))
   );
+  create table if not exists relight_history (
+    id text primary key,
+    user_id text not null references relight_users(id) on delete cascade,
+    preset text not null default 'strobist',
+    settings_json text not null default '{}',
+    instructions text not null default '',
+    resolution text not null default '',
+    model text not null default '',
+    source_name text not null default '',
+    before_filename text not null default '',
+    before_mime text not null default 'image/jpeg',
+    after_filename text not null default '',
+    after_mime text not null default 'image/png',
+    width integer,
+    height integer,
+    created_at text not null default (datetime('now'))
+  );
+  create index if not exists relight_history_user_date_idx on relight_history(user_id, created_at desc);
+  create index if not exists relight_history_created_idx on relight_history(created_at);
 `)
 
 // Dynamic column migrations for workflows

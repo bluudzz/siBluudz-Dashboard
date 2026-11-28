@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
@@ -41,11 +42,13 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
   const app = express()
   app.use(express.json({ limit: '16mb' }))
   const samplesDir = join(tempRoot, 'relight-samples')
+  const historyDir = join(tempRoot, 'relight-history')
 
   app.use(
     '/api/relight',
     createRelightPublicRouter({
       samplesDir,
+      historyDir,
       callImageEdit: async ({ prompt }) => {
         imageEditCalls += 1
         capturedPrompt = prompt
@@ -229,6 +232,7 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
     },
     body: JSON.stringify({
       sourceImage: sampleDataUri,
+      sourceName: 'potret-studio.png',
       settings: { preset: 'softbox', intensity: 'strong', direction: 'left' },
       resolution: '2K',
     }),
@@ -240,6 +244,76 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
   assert.equal(proc1Json.usage.remaining, 0)
   assert.equal(imageEditCalls, 1)
   assert.match(capturedPrompt, /Softbox/i)
+  assert.ok(proc1Json.historyItem?.id)
+  assert.match(proc1Json.historyItem.beforeUrl, /^\/api\/relight\/history\/.+\/image\/before/)
+  assert.match(proc1Json.historyItem.afterUrl, /^\/api\/relight\/history\/.+\/image\/after/)
+
+  // History lists saved item and serves Before + After images exclusively to owner
+  const histList1 = await fetch(`${origin}/api/relight/history`, {
+    headers: { Cookie: `relight_session=${relightToken}` },
+  })
+  assert.equal(histList1.status, 200)
+  const histList1Json = await histList1.json()
+  assert.equal(histList1Json.retentionDays, 14)
+  assert.equal(histList1Json.items.length, 1)
+  assert.equal(histList1Json.items[0].sourceName, 'potret-studio.png')
+  assert.equal(histList1Json.items[0].preset, 'softbox')
+
+  const beforeImgRes = await fetch(`${origin}${histList1Json.items[0].beforeUrl}`, {
+    headers: { Cookie: `relight_session=${relightToken}` },
+  })
+  assert.equal(beforeImgRes.status, 200)
+  assert.equal(beforeImgRes.headers.get('content-type'), 'image/png')
+
+  const afterImgRes = await fetch(`${origin}${histList1Json.items[0].afterUrl}`, {
+    headers: { Cookie: `relight_session=${relightToken}` },
+  })
+  assert.equal(afterImgRes.status, 200)
+  assert.equal(afterImgRes.headers.get('content-type'), 'image/png')
+
+  // Unauthenticated / another Relight user cannot see or delete user 1's history
+  const anonHistRes = await fetch(`${origin}${histList1Json.items[0].afterUrl}`)
+  assert.equal(anonHistRes.status, 401)
+
+  const createOtherRes = await fetch(`${origin}/api/admin/relight/users`, {
+    method: 'POST',
+    headers: {
+      Cookie: 'sibluudz_session=main-admin-tok',
+      Origin: origin,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: 'Studio Lain',
+      username: 'klien_dua',
+      password: 'secret123',
+      dailyLimit: 5,
+    }),
+  })
+  assert.equal(createOtherRes.status, 201)
+  const { user: otherUser } = await createOtherRes.json()
+  const otherLogin = await fetch(`${origin}/api/relight/auth/login`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: 'klien_dua', password: 'secret123' }),
+  })
+  const otherToken = extractCookieValue(otherLogin, 'relight_session')
+  const otherHistList = await fetch(`${origin}/api/relight/history`, {
+    headers: { Cookie: `relight_session=${otherToken}` },
+  })
+  assert.deepEqual((await otherHistList.json()).items, [])
+  const otherImgRes = await fetch(`${origin}${histList1Json.items[0].afterUrl}`, {
+    headers: { Cookie: `relight_session=${otherToken}` },
+  })
+  assert.equal(otherImgRes.status, 404)
+  const otherDelRes = await fetch(`${origin}/api/relight/history/${histList1Json.items[0].id}`, {
+    method: 'DELETE',
+    headers: { Cookie: `relight_session=${otherToken}`, Origin: origin },
+  })
+  assert.equal(otherDelRes.status, 404)
+  await fetch(`${origin}/api/admin/relight/users/${otherUser.id}`, {
+    method: 'DELETE',
+    headers: { Cookie: 'sibluudz_session=main-admin-tok', Origin: origin },
+  })
 
   const meBrowser2 = await fetch(`${origin}/api/relight/auth/me`, {
     headers: { Cookie: `relight_session=${relightToken2}` },
@@ -337,6 +411,49 @@ test('standalone Relight Studio isolates auth/users from main dashboard, enforce
     body: JSON.stringify({ identifier: 'klien_satu', password: 'newpass456' }),
   })
   assert.equal(reloginRes.status, 200)
+  const reloginToken = extractCookieValue(reloginRes, 'relight_session')
+
+  // Seed an expired (15-day-old) history record and ensure GET /history and image fetch hide it immediately
+  await writeFile(join(historyDir, 'expired-sample-after.png'), samplePng)
+  db.prepare(
+    `insert into relight_history (id, user_id, preset, after_filename, after_mime, created_at)
+     values (?, ?, ?, ?, ?, datetime('now', '-15 days'))`
+  ).run('hist-expired-15d', createdUser.id, 'strobist', 'expired-sample-after.png', 'image/png')
+
+  const histAfter15d = await fetch(`${origin}/api/relight/history`, {
+    headers: { Cookie: `relight_session=${reloginToken}` },
+  })
+  const histAfter15dJson = await histAfter15d.json()
+  assert.equal(
+    histAfter15dJson.items.some((item: { id: string }) => item.id === 'hist-expired-15d'),
+    false
+  )
+  const expiredImgFetch = await fetch(`${origin}/api/relight/history/hist-expired-15d/image/after`, {
+    headers: { Cookie: `relight_session=${reloginToken}` },
+  })
+  assert.equal(expiredImgFetch.status, 404)
+
+  // Manual delete removes DB row & files on disk without erasing usage quota logs
+  const usageBeforeDelete = db
+    .prepare('select count(*) as cnt from relight_usage_logs where user_id = ?')
+    .get(createdUser.id) as { cnt: number }
+  const histIdToDelete = proc1Json.historyItem.id as string
+  const delHistRes = await fetch(`${origin}/api/relight/history/${histIdToDelete}`, {
+    method: 'DELETE',
+    headers: { Cookie: `relight_session=${reloginToken}`, Origin: origin },
+  })
+  assert.equal(delHistRes.status, 204)
+  assert.equal(existsSync(join(historyDir, `${histIdToDelete}-before.png`)), false)
+  assert.equal(existsSync(join(historyDir, `${histIdToDelete}-after.png`)), false)
+
+  const histAfterDelete = await fetch(`${origin}/api/relight/history`, {
+    headers: { Cookie: `relight_session=${reloginToken}` },
+  })
+  assert.deepEqual((await histAfterDelete.json()).items, [])
+  const usageAfterDelete = db
+    .prepare('select count(*) as cnt from relight_usage_logs where user_id = ?')
+    .get(createdUser.id) as { cnt: number }
+  assert.equal(usageAfterDelete.cnt, usageBeforeDelete.cnt)
 
   // Admin deletes sample and user cleanly
   const delSample = await fetch(`${origin}/api/admin/relight/samples/strobist`, {

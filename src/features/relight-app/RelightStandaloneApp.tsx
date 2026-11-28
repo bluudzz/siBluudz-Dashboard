@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  History,
   ImagePlus,
   Loader2,
   LogOut,
@@ -29,6 +30,7 @@ import {
   prepareSyncRelightExport,
 } from '@/features/ai-generator/relight-export'
 import { BeforeAfterSlider } from './BeforeAfterSlider'
+import { RelightHistoryView, type RelightHistoryItem } from './RelightHistoryView'
 import { getPresetDefaultSamples, resolvePresetSamples } from './relight-sample-art'
 import './relight-app.css'
 
@@ -69,8 +71,23 @@ interface RelightOutput {
   warning?: string
 }
 
-type Stage = 'picker' | 'editor'
+type Stage = 'picker' | 'editor' | 'history'
 type ResolutionChoice = 'auto' | Exclude<RelightResolution, '1K'>
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+      } else {
+        reject(new Error('Gagal membaca data gambar.'))
+      }
+    }
+    reader.onerror = () => reject(new Error('Gagal membaca berkas gambar.'))
+    reader.readAsDataURL(blob)
+  })
+}
 
 const RESOLUTIONS: { id: ResolutionChoice; label: string }[] = [
   { id: 'auto', label: 'Otomatis' },
@@ -160,6 +177,15 @@ export function RelightStandaloneApp() {
   const [viewportSize, setViewportSize] = React.useState({ width: 0, height: 0 })
   const [naturalSize, setNaturalSize] = React.useState({ width: 0, height: 0 })
 
+  // History state
+  const [historyItems, setHistoryItems] = React.useState<RelightHistoryItem[]>([])
+  const [historyLoading, setHistoryLoading] = React.useState(false)
+  const [historyError, setHistoryError] = React.useState('')
+  const [historyRetentionDays, setHistoryRetentionDays] = React.useState(14)
+  const [deletingHistoryId, setDeletingHistoryId] = React.useState<string | null>(null)
+  const [openingHistoryId, setOpeningHistoryId] = React.useState<string | null>(null)
+  const [downloadingHistoryId, setDownloadingHistoryId] = React.useState<string | null>(null)
+
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const viewportRef = React.useRef<HTMLElement>(null)
   const comparisonRef = React.useRef<HTMLDivElement>(null)
@@ -209,6 +235,41 @@ export function RelightStandaloneApp() {
           ? prev
           : { width: naturalWidth, height: naturalHeight }
       )
+    }
+  }, [])
+
+  const loadHistory = React.useCallback(async (quiet = false) => {
+    if (!quiet) setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const res = await fetch('/api/relight/history', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        if (res.status === 401) {
+          setUser(null)
+          return
+        }
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || 'Gagal memuat riwayat Relight.')
+      }
+      const data = (await res.json()) as {
+        retentionDays?: number
+        items?: RelightHistoryItem[]
+      }
+      if (typeof data.retentionDays === 'number' && data.retentionDays > 0) {
+        setHistoryRetentionDays(data.retentionDays)
+      }
+      if (Array.isArray(data.items)) {
+        setHistoryItems(data.items)
+      }
+    } catch (err) {
+      if (!quiet) {
+        setHistoryError(err instanceof Error ? err.message : 'Gagal memuat riwayat Relight.')
+      }
+    } finally {
+      if (!quiet) setHistoryLoading(false)
     }
   }, [])
 
@@ -264,7 +325,7 @@ export function RelightStandaloneApp() {
           setHeroSample(data?.heroSample ?? null)
           if (data?.authenticated && data.user) {
             setUser(data.user)
-            await loadWorkspace()
+            await Promise.all([loadWorkspace(), loadHistory()])
           } else {
             setUser(null)
           }
@@ -279,7 +340,7 @@ export function RelightStandaloneApp() {
     return () => {
       active = false
     }
-  }, [loadWorkspace])
+  }, [loadHistory, loadWorkspace])
 
   const isLoggedIn = Boolean(user)
 
@@ -308,9 +369,12 @@ export function RelightStandaloneApp() {
     if (!isLoggedIn) return
     const timer = window.setTimeout(() => {
       void syncUserSession()
+      if (stage === 'history') {
+        void loadHistory(true)
+      }
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [stage, isLoggedIn, syncUserSession])
+  }, [stage, isLoggedIn, loadHistory, syncUserSession])
 
   React.useEffect(() => {
     const root = viewportRef.current
@@ -410,7 +474,7 @@ export function RelightStandaloneApp() {
       setUser(data.user)
       setPassword('')
       setStage('picker')
-      await loadWorkspace()
+      await Promise.all([loadWorkspace(), loadHistory()])
     } catch (err) {
       setLoginError(err instanceof Error ? err.message : 'Gagal masuk ke Relight Studio.')
     } finally {
@@ -422,10 +486,138 @@ export function RelightStandaloneApp() {
     await fetch('/api/relight/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {})
     setUser(null)
     setPresets([])
+    setHistoryItems([])
+    setHistoryError('')
     setSource(null)
     setResult(null)
     setStage('picker')
   }
+
+  const handleOpenHistoryInEditor = React.useCallback(
+    async (item: RelightHistoryItem) => {
+      if (openingHistoryId) return
+      setOpeningHistoryId(item.id)
+      setHistoryError('')
+      setEditorError('')
+      try {
+        const afterPromise = fetch(item.afterUrl, { credentials: 'same-origin' })
+        const beforePromise = item.beforeUrl ? fetch(item.beforeUrl, { credentials: 'same-origin' }) : Promise.resolve(null)
+        const [afterRes, beforeRes] = await Promise.all([afterPromise, beforePromise])
+        if (!afterRes.ok) {
+          throw new Error('Foto hasil tidak lagi tersedia atau sudah melewati batas 14 hari.')
+        }
+        const afterDataUrl = await blobToDataUrl(await afterRes.blob())
+        let beforeDataUrl = afterDataUrl
+        if (beforeRes && beforeRes.ok) {
+          beforeDataUrl = await blobToDataUrl(await beforeRes.blob())
+        }
+
+        const nextSource: SourcePhoto = {
+          data: beforeDataUrl,
+          name: item.sourceName || `relight-${item.preset}.png`,
+        }
+        setSettings({
+          ...defaultRelightSettings,
+          ...(item.settings || {}),
+          preset: item.preset || defaultRelightSettings.preset,
+        })
+        setInstructions(item.instructions || '')
+        setResolution(item.resolution === '2K' || item.resolution === '4K' ? item.resolution : 'auto')
+        setSource(nextSource)
+        setResult({
+          image: afterDataUrl,
+          source: nextSource,
+          model: item.model || '',
+          format: item.afterFormat,
+        })
+        setStrength(100)
+        setComparePos(52)
+        setNaturalSize({ width: 0, height: 0 })
+        setIosSheet(null)
+        resetView()
+        setStage('editor')
+      } catch (err) {
+        setHistoryError(err instanceof Error ? err.message : 'Gagal membuka riwayat ke editor.')
+      } finally {
+        setOpeningHistoryId(null)
+      }
+    },
+    [openingHistoryId, resetView]
+  )
+
+  const handleDownloadHistoryItem = React.useCallback(
+    async (item: RelightHistoryItem) => {
+      if (!item.afterUrl || downloadingHistoryId) return
+      setDownloadingHistoryId(item.id)
+      setHistoryError('')
+      try {
+        const res = await fetch(item.afterUrl, { credentials: 'same-origin' })
+        if (!res.ok) {
+          throw new Error('Foto tidak lagi tersedia atau sudah melewati batas 14 hari.')
+        }
+        const blob = await res.blob()
+        const safeName = (item.sourceName || 'relight-photo').replace(/\.[^.]+$/, '')
+        const ext = blob.type.includes('jpeg')
+          ? 'jpg'
+          : blob.type.includes('webp')
+            ? 'webp'
+            : item.afterFormat === 'jpeg'
+              ? 'jpg'
+              : item.afterFormat || 'png'
+        const fullName = `${safeName}-${item.preset}.${ext}`
+
+        if (isIOSDevice()) {
+          const file = new File([blob], fullName, { type: blob.type || 'image/png' })
+          if (canShareFile(file)) {
+            sharePreparedFile(file, fullName, () => openIosSaveSheet(blob, fullName, ext))
+          } else {
+            openIosSaveSheet(blob, fullName, ext)
+          }
+          return
+        }
+
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fullName
+        document.body.appendChild(a)
+        a.click()
+        window.setTimeout(() => {
+          a.remove()
+          URL.revokeObjectURL(url)
+        }, 60_000)
+      } catch (err) {
+        setHistoryError(err instanceof Error ? err.message : 'Gagal mengunduh foto riwayat.')
+      } finally {
+        setDownloadingHistoryId(null)
+      }
+    },
+    [downloadingHistoryId, openIosSaveSheet, sharePreparedFile]
+  )
+
+  const handleDeleteHistoryItem = React.useCallback(
+    async (id: string) => {
+      if (deletingHistoryId) return
+      setDeletingHistoryId(id)
+      setHistoryError('')
+      try {
+        const res = await fetch(`/api/relight/history/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        })
+        if (!res.ok && res.status !== 204) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data?.error || 'Gagal menghapus riwayat.')
+        }
+        setHistoryItems((prev) => prev.filter((item) => item.id !== id))
+      } catch (err) {
+        setHistoryError(err instanceof Error ? err.message : 'Gagal menghapus riwayat.')
+      } finally {
+        setDeletingHistoryId(null)
+      }
+    },
+    [deletingHistoryId]
+  )
 
   const handleChoosePreset = (presetId: string) => {
     setSettings((prev) => ({ ...prev, preset: presetId }))
@@ -469,6 +661,7 @@ export function RelightStandaloneApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceImage: source.data,
+          sourceName: source.name,
           settings,
           instructions,
           ...(resolution !== 'auto' ? { resolution } : {}),
@@ -488,6 +681,10 @@ export function RelightStandaloneApp() {
         format: data.output?.format,
         warning: data.warning,
       })
+      if (data.historyItem) {
+        const savedItem = data.historyItem as RelightHistoryItem
+        setHistoryItems((prev) => [savedItem, ...prev.filter((entry) => entry.id !== savedItem.id)])
+      }
       setStrength(100)
       setComparePos(52)
       setIosSheet(null)
@@ -792,6 +989,28 @@ export function RelightStandaloneApp() {
               )}
             </span>
 
+            <button
+              type="button"
+              className={`rs-ghost-btn rs-history-btn${stage === 'history' ? ' is-active' : ''}`}
+              aria-label="Riwayat Relight"
+              aria-pressed={stage === 'history'}
+              disabled={processing}
+              onClick={() => {
+                if (stage === 'history') {
+                  setStage('picker')
+                } else {
+                  setStage('history')
+                  void loadHistory()
+                }
+              }}
+            >
+              <History size={14} />
+              <span className="rs-history-btn-label">Riwayat</span>
+              {historyItems.length > 0 && (
+                <span className="rs-history-count">{historyItems.length}</span>
+              )}
+            </button>
+
             <span className="rs-user-chip">
               <User size={13} />
               <span>{user.name || user.username}</span>
@@ -816,6 +1035,24 @@ export function RelightStandaloneApp() {
             <AlertTriangle size={16} />
             <span>Mesin AI 9router belum dikonfigurasi oleh admin. Hubungi administrator untuk mengaktifkan proses edit.</span>
           </div>
+        )}
+
+        {/* Stage: History View (14-day retention) */}
+        {stage === 'history' && (
+          <RelightHistoryView
+            items={historyItems}
+            loading={historyLoading}
+            error={historyError}
+            retentionDays={historyRetentionDays}
+            deletingId={deletingHistoryId}
+            openingId={openingHistoryId}
+            downloadingId={downloadingHistoryId}
+            onRefresh={() => void loadHistory()}
+            onBackToStudio={() => setStage('picker')}
+            onOpenInEditor={(item) => void handleOpenHistoryInEditor(item)}
+            onDownload={(item) => void handleDownloadHistoryItem(item)}
+            onDelete={(id) => void handleDeleteHistoryItem(id)}
+          />
         )}
 
         {/* Stage 2: Feature Selection Gallery with Before/After Slider */}

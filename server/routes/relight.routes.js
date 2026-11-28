@@ -29,14 +29,19 @@ import {
   getCachedImageModels,
   getImageModelName,
 } from './ai.routes.js'
+import { GENERATED_RETENTION_DAYS, relightHistoryDirectory } from '../generated-cleanup.js'
 
 const RELIGHT_COOKIE_NAME = 'relight_session'
 const RELIGHT_DEFAULT_LIMIT_KEY = 'relight_default_daily_limit'
 const RELIGHT_IMAGE_MODEL_KEY = 'relight_standalone_image_model'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,30}$/
 const PRESET_IDS = new Set(relightPresets.map((preset) => preset.id))
+const PRESET_LABEL_MAP = new Map(relightPresets.map((preset) => [preset.id, preset.label]))
+const HISTORY_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export const relightSamplesDir = path.join(dataDirectory, 'relight-samples')
+export const relightHistoryDir = relightHistoryDirectory
 
 function getRelightOrigin(overrideOrigin) {
   return String(overrideOrigin || process.env.RELIGHT_APP_ORIGIN || 'https://relight.sibluudz.my.id').replace(/\/+$/, '')
@@ -201,6 +206,143 @@ async function resolveActiveRelightImageModel(deps = {}) {
   return activeModel
 }
 
+function formatSqliteUtc(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function parseSqliteUtcMs(raw) {
+  if (!raw) return Date.now()
+  const iso = String(raw).includes('T') ? String(raw) : `${String(raw).replace(' ', 'T')}Z`
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? Date.now() : ms
+}
+
+function formatToMime(format) {
+  const f = String(format || '').toLowerCase()
+  if (f === 'jpeg' || f === 'jpg') return 'image/jpeg'
+  if (f === 'webp') return 'image/webp'
+  return 'image/png'
+}
+
+function mimeToFormat(mime) {
+  const m = String(mime || '').toLowerCase()
+  if (m.includes('jpeg') || m.includes('jpg')) return 'jpeg'
+  if (m.includes('webp')) return 'webp'
+  return 'png'
+}
+
+function mimeToExtension(mime) {
+  const fmt = mimeToFormat(mime)
+  return fmt === 'jpeg' ? 'jpg' : fmt
+}
+
+async function decodeImageBuffer(imageStr) {
+  if (typeof imageStr !== 'string' || !imageStr) {
+    throw new Error('Data gambar hasil relight kosong.')
+  }
+  let buffer
+  if (/^data:image\//i.test(imageStr)) {
+    const encoded = imageStr.slice(imageStr.indexOf(',') + 1)
+    buffer = Buffer.from(encoded, 'base64')
+  } else if (/^https?:\/\//i.test(imageStr)) {
+    const res = await fetch(imageStr, { signal: AbortSignal.timeout(30_000) })
+    if (!res.ok) throw new Error(`Gagal mengunduh gambar hasil generate (${res.status}).`)
+    buffer = Buffer.from(await res.arrayBuffer())
+  } else {
+    throw new Error('Format output gambar model tidak didukung.')
+  }
+  if (!buffer.length) throw new Error('Data gambar hasil generate kosong.')
+  const meta = await sharp(buffer, { limitInputPixels: 40_000_000 }).metadata()
+  return {
+    buffer,
+    mimeType: formatToMime(meta.format),
+    width: meta.width ?? null,
+    height: meta.height ?? null,
+  }
+}
+
+function formatRelightHistoryRow(row, nowMs = Date.now()) {
+  const createdMs = parseSqliteUtcMs(row.created_at)
+  const retentionMs = GENERATED_RETENTION_DAYS * DAY_MS
+  const expiresMs = createdMs + retentionMs
+  const daysRemaining = Math.max(1, Math.ceil((expiresMs - nowMs) / DAY_MS))
+  let parsedSettings = {}
+  try {
+    parsedSettings = JSON.parse(row.settings_json || '{}')
+  } catch {
+    parsedSettings = {}
+  }
+  const preset = row.preset || 'strobist'
+  const versionParam = row.created_at ? `?v=${encodeURIComponent(row.created_at)}` : ''
+  return {
+    id: row.id,
+    preset,
+    presetLabel: PRESET_LABEL_MAP.get(preset) || preset,
+    settings: parsedSettings,
+    instructions: row.instructions || '',
+    resolution: row.resolution || '',
+    model: row.model || '',
+    sourceName: row.source_name || '',
+    width: Number.isInteger(row.width) ? row.width : null,
+    height: Number.isInteger(row.height) ? row.height : null,
+    beforeUrl: row.before_filename ? `/api/relight/history/${row.id}/image/before${versionParam}` : '',
+    afterUrl: row.after_filename ? `/api/relight/history/${row.id}/image/after${versionParam}` : '',
+    afterFormat: mimeToFormat(row.after_mime),
+    createdAt: new Date(createdMs).toISOString(),
+    expiresAt: new Date(expiresMs).toISOString(),
+    daysRemaining,
+  }
+}
+
+async function saveRelightHistoryEntry({
+  historyDir,
+  userId,
+  settings,
+  instructions,
+  resolution,
+  model,
+  sourceName,
+  sourceBuffer,
+  sourceMime,
+  resultImageStr,
+}) {
+  const id = randomUUID()
+  const afterDecoded = await decodeImageBuffer(resultImageStr)
+  const cleanBeforeMime = formatToMime(mimeToFormat(sourceMime))
+  const beforeFilename = `${id}-before.${mimeToExtension(cleanBeforeMime)}`
+  const afterFilename = `${id}-after.${mimeToExtension(afterDecoded.mimeType)}`
+
+  await mkdir(historyDir, { recursive: true })
+  await writeFile(path.join(historyDir, beforeFilename), sourceBuffer)
+  await writeFile(path.join(historyDir, afterFilename), afterDecoded.buffer)
+
+  const preset = String(settings?.preset || 'strobist')
+  db.prepare(
+    `insert into relight_history (
+       id, user_id, preset, settings_json, instructions, resolution, model, source_name,
+       before_filename, before_mime, after_filename, after_mime, width, height
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    userId,
+    preset,
+    JSON.stringify(settings || {}),
+    String(instructions || '').slice(0, 1000),
+    resolution || '',
+    model || '',
+    String(sourceName || '').slice(0, 140),
+    beforeFilename,
+    cleanBeforeMime,
+    afterFilename,
+    afterDecoded.mimeType,
+    afterDecoded.width,
+    afterDecoded.height
+  )
+
+  const savedRow = db.prepare('select * from relight_history where id = ?').get(id)
+  return savedRow ? formatRelightHistoryRow(savedRow) : null
+}
+
 function getHeroSampleSummary(samplesDir) {
   const list = buildSampleSummaryMap(samplesDir)
   const strobist = list.find((s) => s.id === 'strobist' && s.hasCustomBefore && s.hasCustomAfter)
@@ -216,6 +358,7 @@ function getHeroSampleSummary(samplesDir) {
 export function createRelightPublicRouter(deps = {}) {
   const router = Router()
   const samplesDir = deps.samplesDir || relightSamplesDir
+  const historyDir = deps.historyDir || relightHistoryDir
 
   const requireRelightSameOrigin = (req, res, next) => {
     if (!matchesAllowedOrigin(req, [getRelightOrigin(deps.relightOrigin)])) {
@@ -348,7 +491,13 @@ export function createRelightPublicRouter(deps = {}) {
         })
       }
 
-      const { sourceImage, settings = {}, instructions = '', resolution: requestedResolution } = req.body || {}
+      const {
+        sourceImage,
+        sourceName = '',
+        settings = {},
+        instructions = '',
+        resolution: requestedResolution,
+      } = req.body || {}
       if (requestedResolution !== undefined && !['1K', '2K', '4K'].includes(requestedResolution)) {
         return res.status(400).json({ error: 'Resolusi harus 1K, 2K, atau 4K.' })
       }
@@ -360,18 +509,20 @@ export function createRelightPublicRouter(deps = {}) {
       }
 
       let prompt
+      let sourceBuffer
+      let sourceMetadata
       try {
         prompt = buildRelightPrompt(settings, instructions, requestedResolution)
         const encoded = sourceImage.slice(sourceImage.indexOf(',') + 1)
         if (encoded.length > 8 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
           throw new Error('Foto sumber tidak valid atau melebihi 6 MB.')
         }
-        const buffer = Buffer.from(encoded, 'base64')
-        if (buffer.length > 6 * 1024 * 1024) {
+        sourceBuffer = Buffer.from(encoded, 'base64')
+        if (sourceBuffer.length > 6 * 1024 * 1024) {
           throw new Error('Ukuran foto maksimal 6 MB.')
         }
-        const metadata = await sharp(buffer, { limitInputPixels: 40_000_000 }).metadata()
-        if (!['png', 'jpeg', 'webp'].includes(metadata.format) || (metadata.pages || 1) > 1) {
+        sourceMetadata = await sharp(sourceBuffer, { limitInputPixels: 40_000_000 }).metadata()
+        if (!['png', 'jpeg', 'webp'].includes(sourceMetadata.format) || (sourceMetadata.pages || 1) > 1) {
           throw new Error('Gunakan satu foto PNG/JPG/WEBP statis.')
         }
       } catch (validationErr) {
@@ -419,6 +570,24 @@ export function createRelightPublicRouter(deps = {}) {
         resolution || ''
       )
 
+      let historyItem = null
+      try {
+        historyItem = await saveRelightHistoryEntry({
+          historyDir,
+          userId: req.relightUser.id,
+          settings,
+          instructions,
+          resolution: resolution || '',
+          model: usedModel || activeModel,
+          sourceName: typeof sourceName === 'string' ? sourceName.trim().slice(0, 140) : '',
+          sourceBuffer,
+          sourceMime: formatToMime(sourceMetadata.format),
+          resultImageStr: image,
+        })
+      } catch (historyErr) {
+        console.warn('Gagal menyimpan riwayat Relight:', historyErr?.message || historyErr)
+      }
+
       const updatedUsageToday = formatted.usageToday + 1
       const updatedUsageTotal = formatted.usageTotal + 1
       const remaining = formatted.isUnlimited ? 9999 : Math.max(0, formatted.quotaLimit - updatedUsageTotal)
@@ -428,6 +597,7 @@ export function createRelightPublicRouter(deps = {}) {
         model: usedModel || activeModel,
         promptVersion: RELIGHT_PROMPT_VERSION,
         output,
+        ...(historyItem ? { historyItem } : {}),
         ...(warning ? { warning } : {}),
         usage: {
           usageToday: updatedUsageToday,
@@ -441,6 +611,83 @@ export function createRelightPublicRouter(deps = {}) {
       console.error('Standalone Relight error:', error)
       const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600 ? error.status : 500
       res.status(status).json({ error: error.message || 'Gagal memproses relight foto.' })
+    }
+  })
+
+  router.get('/history', requireRelightUser, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    const nowMs = Date.now()
+    const cutoffIso = formatSqliteUtc(nowMs - GENERATED_RETENTION_DAYS * DAY_MS)
+    const rows = db
+      .prepare(
+        `select *
+         from relight_history
+         where user_id = ? and created_at >= ?
+         order by created_at desc, rowid desc
+         limit 60`
+      )
+      .all(req.relightUser.id, cutoffIso)
+
+    res.json({
+      retentionDays: GENERATED_RETENTION_DAYS,
+      items: rows.map((row) => formatRelightHistoryRow(row, nowMs)),
+    })
+  })
+
+  router.get('/history/:id/image/:side', requireRelightUser, async (req, res) => {
+    const { id, side } = req.params
+    if (!HISTORY_ID_PATTERN.test(id) || !['before', 'after'].includes(side)) {
+      return res.status(404).end()
+    }
+    const cutoffIso = formatSqliteUtc(Date.now() - GENERATED_RETENTION_DAYS * DAY_MS)
+    const row = db
+      .prepare('select * from relight_history where id = ? and user_id = ? and created_at >= ?')
+      .get(id, req.relightUser.id, cutoffIso)
+    if (!row) return res.status(404).end()
+
+    const filename = side === 'before' ? row.before_filename : row.after_filename
+    const mimeType = side === 'before' ? row.before_mime : row.after_mime
+    if (!filename || path.basename(filename) !== filename) {
+      return res.status(404).end()
+    }
+
+    try {
+      const content = await readFile(path.join(historyDir, filename))
+      res.setHeader('Content-Type', mimeType || 'image/png')
+      res.setHeader('Cache-Control', 'private, max-age=3600')
+      res.setHeader('X-Content-Type-Options', 'nosniff')
+      res.end(content)
+    } catch {
+      res.status(404).end()
+    }
+  })
+
+  router.delete('/history/:id', requireRelightSameOrigin, requireRelightUser, async (req, res, next) => {
+    try {
+      const { id } = req.params
+      if (!HISTORY_ID_PATTERN.test(id)) {
+        return res.status(404).json({ error: 'Riwayat tidak ditemukan.' })
+      }
+      const row = db
+        .prepare('select before_filename, after_filename from relight_history where id = ? and user_id = ?')
+        .get(id, req.relightUser.id)
+      if (!row) {
+        return res.status(404).json({ error: 'Riwayat tidak ditemukan.' })
+      }
+
+      db.prepare('delete from relight_history where id = ? and user_id = ?').run(id, req.relightUser.id)
+
+      for (const filename of [row.before_filename, row.after_filename]) {
+        if (filename && path.basename(filename) === filename) {
+          await unlink(path.join(historyDir, filename)).catch((err) => {
+            if (err?.code !== 'ENOENT') throw err
+          })
+        }
+      }
+
+      res.status(204).end()
+    } catch (error) {
+      next(error)
     }
   })
 

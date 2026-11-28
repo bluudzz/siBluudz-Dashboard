@@ -13,9 +13,11 @@ test('cleanupExpiredGeneratedFiles removes generated media files and history old
 
   const { db } = await import('../server/db.js')
   const { mediaDirectory } = await import('../server/workflow-media.js')
-  const { cleanupExpiredGeneratedFiles, GENERATED_RETENTION_DAYS } = await import(
-    '../server/generated-cleanup.js'
-  )
+  const {
+    cleanupExpiredGeneratedFiles,
+    GENERATED_RETENTION_DAYS,
+    relightHistoryDirectory,
+  } = await import('../server/generated-cleanup.js')
 
   t.after(() => db.close())
 
@@ -156,11 +158,56 @@ test('cleanupExpiredGeneratedFiles removes generated media files and history old
     expiredIso
   )
 
-  const summary = await cleanupExpiredGeneratedFiles({ now, mediaDir: mediaDirectory })
+  // Relight history: 15d -> deleted (+ files), 13d -> kept (+ files); usage logs untouched
+  await mkdir(relightHistoryDirectory, { recursive: true })
+  db.prepare('insert into relight_users (id, username, password_hash) values (?,?,?)').run(
+    'rl-clean-user',
+    'rl_cleaner',
+    'hash'
+  )
+  const rlOldBefore = path.join(relightHistoryDirectory, 'rl-old-before.jpg')
+  const rlOldAfter = path.join(relightHistoryDirectory, 'rl-old-after.png')
+  const rlFreshBefore = path.join(relightHistoryDirectory, 'rl-fresh-before.jpg')
+  const rlFreshAfter = path.join(relightHistoryDirectory, 'rl-fresh-after.png')
+  const rlOldOrphan = path.join(relightHistoryDirectory, 'rl-orphan-old.png')
+  const rlFreshOrphan = path.join(relightHistoryDirectory, 'rl-orphan-fresh.png')
+  await Promise.all([
+    writeFile(rlOldBefore, Buffer.from('rl-old-before')),
+    writeFile(rlOldAfter, Buffer.from('rl-old-after')),
+    writeFile(rlFreshBefore, Buffer.from('rl-fresh-before')),
+    writeFile(rlFreshAfter, Buffer.from('rl-fresh-after')),
+    writeFile(rlOldOrphan, Buffer.from('rl-orphan-old')),
+    writeFile(rlFreshOrphan, Buffer.from('rl-orphan-fresh')),
+  ])
+  await utimes(rlOldOrphan, oldDate, oldDate)
+
+  db.prepare(
+    `insert into relight_history (id, user_id, preset, before_filename, after_filename, created_at)
+     values (?,?,?,?,?,?)`
+  ).run('rl-hist-old', 'rl-clean-user', 'strobist', 'rl-old-before.jpg', 'rl-old-after.png', expiredIso)
+  db.prepare(
+    `insert into relight_history (id, user_id, preset, before_filename, after_filename, created_at)
+     values (?,?,?,?,?,?)`
+  ).run('rl-hist-fresh', 'rl-clean-user', 'softbox', 'rl-fresh-before.jpg', 'rl-fresh-after.png', freshIso)
+  db.prepare('insert into relight_usage_logs (id, user_id, preset, created_at) values (?,?,?,?)').run(
+    'rl-usage-old',
+    'rl-clean-user',
+    'strobist',
+    expiredIso
+  )
+
+  const summary = await cleanupExpiredGeneratedFiles({
+    now,
+    mediaDir: mediaDirectory,
+    relightHistoryDir: relightHistoryDirectory,
+  })
 
   assert.equal(summary.deletedMediaFiles, 1)
   assert.equal(summary.deletedMediaRows, 1)
   assert.equal(summary.deletedOrphanFiles, 1)
+  assert.equal(summary.deletedRelightHistoryFiles, 2)
+  assert.equal(summary.deletedRelightHistoryRows, 1)
+  assert.equal(summary.deletedRelightHistoryOrphans, 1)
   assert.equal(summary.deletedAiHistory, 1)
   assert.equal(summary.deletedWorkflowRuns, 1)
   assert.equal(summary.deletedDownloaderHistory, 1)
@@ -170,6 +217,18 @@ test('cleanupExpiredGeneratedFiles removes generated media files and history old
   assert.equal(existsSync(oldOrphanFile), false)
   assert.equal(existsSync(freshMediaFile), true)
   assert.equal(existsSync(freshOrphanFile), true)
+  assert.equal(existsSync(rlOldBefore), false)
+  assert.equal(existsSync(rlOldAfter), false)
+  assert.equal(existsSync(rlOldOrphan), false)
+  assert.equal(existsSync(rlFreshBefore), true)
+  assert.equal(existsSync(rlFreshAfter), true)
+  assert.equal(existsSync(rlFreshOrphan), true)
+
+  assert.deepEqual(
+    db.prepare('select id from relight_history').all().map((r) => r.id),
+    ['rl-hist-fresh']
+  )
+  assert.equal(db.prepare('select count(*) as cnt from relight_usage_logs').get().cnt, 1)
 
   assert.deepEqual(
     db.prepare('select token from workflow_media').all().map((r) => r.token),

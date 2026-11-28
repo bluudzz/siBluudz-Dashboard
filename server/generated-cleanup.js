@@ -1,8 +1,9 @@
 import { readdir, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
-import { db } from './db.js'
+import { dataDirectory, db } from './db.js'
 import { mediaDirectory } from './workflow-media.js'
 
+export const relightHistoryDirectory = path.join(dataDirectory, 'relight-history')
 export const GENERATED_RETENTION_DAYS = 14
 export const GENERATED_RETENTION_MS = GENERATED_RETENTION_DAYS * 24 * 60 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -18,6 +19,7 @@ export async function cleanupExpiredGeneratedFiles({
   retentionDays = GENERATED_RETENTION_DAYS,
   dbInstance = db,
   mediaDir = mediaDirectory,
+  relightHistoryDir = relightHistoryDirectory,
 } = {}) {
   const cutoffMs = now - retentionDays * 24 * 60 * 60 * 1000
   const cutoffIso = formatSqliteUtc(cutoffMs)
@@ -69,6 +71,56 @@ export async function cleanupExpiredGeneratedFiles({
     if (err?.code !== 'ENOENT') throw err
   }
 
+  const expiredRelight = dbInstance
+    .prepare('select id, before_filename, after_filename from relight_history where created_at < ?')
+    .all(cutoffIso)
+
+  const deleteRelightStmt = dbInstance.prepare('delete from relight_history where id = ?')
+  let deletedRelightHistoryFiles = 0
+  let deletedRelightHistoryRows = 0
+
+  for (const row of expiredRelight) {
+    for (const filename of [row.before_filename, row.after_filename]) {
+      if (filename && path.basename(filename) === filename) {
+        try {
+          await unlink(path.join(relightHistoryDir, filename))
+          deletedRelightHistoryFiles += 1
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err
+        }
+      }
+    }
+    deletedRelightHistoryRows += deleteRelightStmt.run(row.id).changes
+  }
+
+  let deletedRelightHistoryOrphans = 0
+  try {
+    const relightEntries = await readdir(relightHistoryDir, { withFileTypes: true })
+    const activeRelightFiles = new Set()
+    for (const row of dbInstance
+      .prepare('select before_filename, after_filename from relight_history')
+      .all()) {
+      if (row.before_filename) activeRelightFiles.add(row.before_filename)
+      if (row.after_filename) activeRelightFiles.add(row.after_filename)
+    }
+
+    for (const entry of relightEntries) {
+      if (!entry.isFile() || activeRelightFiles.has(entry.name)) continue
+      const fullPath = path.join(relightHistoryDir, entry.name)
+      try {
+        const info = await stat(fullPath)
+        if (info.mtimeMs < cutoffMs) {
+          await unlink(fullPath)
+          deletedRelightHistoryOrphans += 1
+        }
+      } catch (err) {
+        if (err?.code !== 'ENOENT') throw err
+      }
+    }
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err
+  }
+
   const deletedAiHistory = dbInstance
     .prepare('delete from ai_history where created_at < ?')
     .run(cutoffIso).changes
@@ -87,6 +139,9 @@ export async function cleanupExpiredGeneratedFiles({
     deletedMediaFiles,
     deletedMediaRows,
     deletedOrphanFiles,
+    deletedRelightHistoryFiles,
+    deletedRelightHistoryRows,
+    deletedRelightHistoryOrphans,
     deletedAiHistory,
     deletedWorkflowRuns,
     deletedDownloaderHistory,
@@ -107,6 +162,9 @@ export function startGeneratedFilesCleanup({
         summary.deletedMediaFiles +
         summary.deletedMediaRows +
         summary.deletedOrphanFiles +
+        summary.deletedRelightHistoryFiles +
+        summary.deletedRelightHistoryRows +
+        summary.deletedRelightHistoryOrphans +
         summary.deletedAiHistory +
         summary.deletedWorkflowRuns +
         summary.deletedDownloaderHistory +
