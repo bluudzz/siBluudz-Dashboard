@@ -19,11 +19,16 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
 
   const { db } = await import('../server/db.js')
   const { storeWorkflowImage } = await import('../server/workflow-media.js')
-  const { runVideoNode } = await import('../server/workflow-google-flow.js')
+  const { runVideoNode, getGoogleFlowPaths } = await import('../server/workflow-google-flow.js')
   const { runImageNode } = await import('../server/workflow-image.js')
   const { validateGraph } = await import('../shared/workflow-engine.js')
   const { inspectWorkflow } = await import('../shared/workflow-readiness.js')
   const { default: sharp } = await import('sharp')
+
+  const flowPaths = getGoogleFlowPaths()
+  assert.ok(flowPaths.profileDir.endsWith('google-flow-chrome-profile'))
+  assert.ok(flowPaths.cliPath.endsWith('cli.js'))
+  assert.equal(flowPaths.cdpUrl, 'http://127.0.0.1:9222')
 
   t.after(() => {
     db.close()

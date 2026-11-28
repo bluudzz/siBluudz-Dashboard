@@ -11,8 +11,10 @@ import { activeRuns, executeStoredWorkflow, normalizedWorkflow, sanitizeGraph } 
 import {
   beginGoogleFlowConnection,
   completeGoogleFlowConnection,
+  ensurePersistentFlowChrome,
   getGoogleFlowStatus,
   inspectGoogleFlowAccount,
+  savePersistentBrowserAccount,
 } from '../workflow-google-flow.js'
 
 const router = Router()
@@ -152,6 +154,23 @@ router.post('/google-flow/connect/complete', requireSameOrigin, requireUser, asy
     }))
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal menyelesaikan koneksi Google Flow.' })
+  }
+})
+router.post('/google-flow/connect/browser', requireSameOrigin, requireUser, async (_req, res) => {
+  try {
+    res.json(await ensurePersistentFlowChrome({ openFlowUrl: true }))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal membuka Chrome login permanen.' })
+  }
+})
+router.post('/google-flow/connect/save-browser', requireSameOrigin, requireUser, async (req, res) => {
+  try {
+    res.json(await savePersistentBrowserAccount({
+      accountId: req.body?.accountId,
+      label: req.body?.label,
+    }))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal menyimpan akun Google Flow dari Chrome.' })
   }
 })
 router.get('/:id',requireUser,(req,res)=>{

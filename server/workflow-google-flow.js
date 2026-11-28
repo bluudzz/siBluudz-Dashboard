@@ -1,12 +1,18 @@
+import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import sharp from 'sharp'
 import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { dataDirectory } from './db.js'
 import { resolveWorkflowMediaFilePath, storeWorkflowImage, storeWorkflowVideo } from './workflow-media.js'
 import { resolveValue, workflowInput } from '../shared/workflow-engine.js'
+
+const execFileAsync = promisify(execFile)
+const DEFAULT_FLOW_CDP_PORT = Number(process.env.GOOGLE_FLOW_CDP_PORT || 9222)
+const DEFAULT_FLOW_CDP_URL = `http://127.0.0.1:${DEFAULT_FLOW_CDP_PORT}`
 
 const IN_PROGRESS_STATUSES = new Set([
   'created',
@@ -48,16 +54,118 @@ function findSystemChromePath() {
 export function getGoogleFlowPaths() {
   const rootDir = process.env.GOOGLE_FLOW_MCP_DIR || path.join(dataDirectory, 'google-flow-mcp')
   const entryPath = process.env.GOOGLE_FLOW_MCP_ENTRY || path.join(rootDir, 'dist', 'index.js')
+  const cliPath = path.join(rootDir, 'dist', 'cli.js')
   const extensionDir = path.join(rootDir, 'extension')
   const outputDir = path.join(dataDirectory, 'google-flow-output')
+  const profileDir = process.env.GOOGLE_FLOW_PROFILE_DIR || path.join(dataDirectory, 'google-flow-chrome-profile')
   const chromePath = findSystemChromePath()
   return {
     installed: existsSync(entryPath),
     rootDir,
     entryPath,
+    cliPath,
     extensionDir,
     outputDir,
+    profileDir,
+    cdpUrl: DEFAULT_FLOW_CDP_URL,
     chromePath,
+  }
+}
+
+async function isCdpReachable(cdpUrl = DEFAULT_FLOW_CDP_URL) {
+  try {
+    const response = await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(1200) })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+export async function ensurePersistentFlowChrome({ openFlowUrl = true } = {}) {
+  const paths = getGoogleFlowPaths()
+  if (!paths.chromePath) {
+    throw new Error('Google Chrome tidak ditemukan di komputer ini.')
+  }
+  await mkdir(paths.profileDir, { recursive: true })
+  if (await isCdpReachable(paths.cdpUrl)) {
+    return {
+      started: false,
+      alreadyRunning: true,
+      cdpUrl: paths.cdpUrl,
+      profileDir: paths.profileDir,
+    }
+  }
+
+  // Launch regular Chrome with a dedicated user-data-dir (no --enable-automation)
+  // so Google keeps the signed-in session persistently across restarts.
+  const child = spawn(
+    paths.chromePath,
+    [
+      `--remote-debugging-port=${DEFAULT_FLOW_CDP_PORT}`,
+      `--user-data-dir=${paths.profileDir}`,
+      '--profile-directory=Default',
+      '--no-first-run',
+      '--no-default-browser-check',
+      ...(openFlowUrl ? ['https://labs.google/fx/tools/flow'] : []),
+    ],
+    { detached: true, stdio: 'ignore', windowsHide: false },
+  )
+  child.unref()
+
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    if (await isCdpReachable(paths.cdpUrl)) {
+      return {
+        started: true,
+        alreadyRunning: false,
+        cdpUrl: paths.cdpUrl,
+        profileDir: paths.profileDir,
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+
+  throw new Error(
+    `Chrome gagal membuka port koneksi lokal (${DEFAULT_FLOW_CDP_PORT}). Jika ada jendela Chrome profil Flow yang terbuka sebelumnya, tutup dulu lalu coba lagi.`,
+  )
+}
+
+export async function savePersistentBrowserAccount({ accountId = 'personal', label = 'Google Flow Pro' } = {}) {
+  const paths = getGoogleFlowPaths()
+  if (!paths.installed || !existsSync(paths.cliPath)) {
+    throw new Error('Google Flow MCP belum terpasang di komputer ini.')
+  }
+  if (!(await isCdpReachable(paths.cdpUrl))) {
+    await ensurePersistentFlowChrome({ openFlowUrl: true })
+  }
+
+  const cleanId = String(accountId || 'personal').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40) || 'personal'
+  const cleanLabel = String(label || 'Google Flow Pro').trim().slice(0, 80) || 'Google Flow Pro'
+
+  try {
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [paths.cliPath, 'account', 'connect', cleanId, cleanLabel, '--cdp', paths.cdpUrl, '--wait', '20'],
+      {
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          ...(paths.chromePath ? { FLOW_MCP_BROWSER_EXECUTABLE: paths.chromePath } : {}),
+        },
+      },
+    )
+    await closeGoogleFlowClient()
+    return {
+      accountId: cleanId,
+      label: cleanLabel,
+      cdpUrl: paths.cdpUrl,
+      profileDir: paths.profileDir,
+      output: String(stdout || '').trim(),
+    }
+  } catch (error) {
+    const stderr = typeof error?.stderr === 'string' ? error.stderr.trim() : ''
+    const message = stderr || (error instanceof Error ? error.message : 'Gagal menyimpan akun Chrome Google Flow.')
+    throw new Error(message)
   }
 }
 
@@ -151,9 +259,11 @@ export async function callFlowTool(name, args = {}, { timeoutMs = 120_000, signa
 
 export async function getGoogleFlowStatus() {
   const paths = getGoogleFlowPaths()
+  const chromeRunning = await isCdpReachable(paths.cdpUrl)
   if (!paths.installed) {
     return {
       ...paths,
+      chromeRunning,
       accounts: [],
       defaultAccountId: '',
       bridgeError: '',
@@ -164,6 +274,7 @@ export async function getGoogleFlowStatus() {
     const accounts = Array.isArray(data?.accounts) ? data.accounts : []
     return {
       ...paths,
+      chromeRunning,
       accounts,
       defaultAccountId: typeof data?.defaultAccountId === 'string' ? data.defaultAccountId : '',
       bridgeError: '',
@@ -171,6 +282,7 @@ export async function getGoogleFlowStatus() {
   } catch (error) {
     return {
       ...paths,
+      chromeRunning,
       accounts: [],
       defaultAccountId: '',
       bridgeError: error instanceof Error ? error.message : 'Gagal menghubungi Google Flow MCP.',
@@ -178,8 +290,22 @@ export async function getGoogleFlowStatus() {
   }
 }
 
+async function ensureChromeIfCdpAccount(accountId = '') {
+  const status = await getGoogleFlowStatus()
+  if (!status.installed || status.chromeRunning) return
+  const accounts = status.accounts || []
+  const target = (accountId && accounts.find(a => a.id === accountId))
+    || (status.defaultAccountId && accounts.find(a => a.id === status.defaultAccountId))
+    || accounts.find(a => a.connectionStatus === 'connected')
+    || accounts[0]
+  if (target?.browserMode === 'attach_cdp' && target.cdpUrl === status.cdpUrl) {
+    await ensurePersistentFlowChrome({ openFlowUrl: false })
+  }
+}
+
 export async function inspectGoogleFlowAccount(accountId = '') {
   const id = String(accountId || '').trim()
+  await ensureChromeIfCdpAccount(id)
   return callFlowTool('flow_inspect_account', id ? { accountId: id } : {}, { timeoutMs: 90_000 })
 }
 
@@ -347,6 +473,9 @@ export async function runVideoNode(
   await mkdir(targetOutputDir, { recursive: true })
 
   const accountId = String(node.data.accountId || '').trim()
+  if (callTool === callFlowTool) {
+    await ensureChromeIfCdpAccount(accountId)
+  }
   const model = String(node.data.model || 'ui-default').trim() || 'ui-default'
   const aspectRatio = String(node.data.aspectRatio || 'ui-default').trim() || 'ui-default'
   const upscale = String(node.data.upscale || 'none').trim() || 'none'
@@ -421,6 +550,9 @@ export async function runFlowImageNode(
   await mkdir(targetOutputDir, { recursive: true })
 
   const accountId = String(node.data.accountId || '').trim()
+  if (callTool === callFlowTool) {
+    await ensureChromeIfCdpAccount(accountId)
+  }
   const model = String(node.data.model || 'ui-default').trim() || 'ui-default'
   const aspectRatio = String(node.data.aspectRatio || 'ui-default').trim() || 'ui-default'
   const flowProject = String(node.data.flowProject || '').trim()
