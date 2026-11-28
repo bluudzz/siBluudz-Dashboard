@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ReactFlow, ReactFlowProvider, Controls, Background, MiniMap, ConnectionLineType, applyNodeChanges, applyEdgeChanges, addEdge, MarkerType, type Edge, type NodeChange, type EdgeChange, type Connection, type ReactFlowInstance, type OnConnectEnd } from '@xyflow/react'
+import { ReactFlow, ReactFlowProvider, Controls, Background, ConnectionLineType, applyNodeChanges, applyEdgeChanges, addEdge, MarkerType, type Edge, type NodeChange, type EdgeChange, type Connection, type ReactFlowInstance, type OnConnectEnd } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Play, Square, Save, Plus, Undo2, Redo2, Download, Upload, X, Search, Trash2, Copy, Workflow, Maximize2, RefreshCw, Send, BookOpen, Pencil, MoreHorizontal, Check, AlertTriangle, HelpCircle, Bot, ScrollText, Power, LayoutGrid, Map as MapIcon, CopyPlus } from 'lucide-react'
+import { Play, Square, Save, Plus, Undo2, Redo2, Download, Upload, X, Search, Trash2, Copy, Workflow, Maximize2, RefreshCw, Send, BookOpen, Pencil, MoreHorizontal, Check, AlertTriangle, HelpCircle, Bot, ScrollText, Power, LayoutGrid, CopyPlus } from 'lucide-react'
 import { TriggerNode, AiAgentNode, SetNode, SplitOutNode, IfNode, ChatTriggerNode, ChatModelNode, MemoryNode, ToolNode } from './CustomNodes'
 import { WorkflowEdge, type WorkflowEdgeData } from './WorkflowEdge'
 import { layoutWorkflowNodes } from './workflow-layout'
@@ -24,17 +24,6 @@ function branchLabelForHandle(handle?: string | null): string {
   if (handle === 'case3') return 'Case 3'
   if (handle === 'fallback') return 'Lainnya'
   return ''
-}
-
-function minimapNodeColor(type?: string): string {
-  if (isTrigger(type || '')) return '#d4822a'
-  if (type === 'aiAgent' || isSubNode(type || '') || type === 'aiVision') return '#818cf8'
-  if (type === 'if' || type === 'switch' || type === 'wait') return '#c68a38'
-  if (type === 'approval' || type === 'notify' || type === 'googleDrive') return '#288161'
-  if (type === 'imageGenerate' || type === 'imageEdit') return '#9b75c8'
-  if (type === 'videoGenerate') return '#e05d7c'
-  if (type === 'instagram') return '#d26a95'
-  return '#5289b6'
 }
 
 type EdgeFlowState = NonNullable<WorkflowEdgeData['flowState']>
@@ -144,7 +133,6 @@ function Studio() {
   const progressCursor=useRef(0)
   const [undoStack,setUndoStack]=useState<Snapshot[]>([])
   const [redoStack,setRedoStack]=useState<Snapshot[]>([])
-  const [minimapOpen,setMinimapOpen]=useState(true)
   const [hoveredEdgeId,setHoveredEdgeId]=useState<string|null>(null)
   const [paletteTarget,setPaletteTarget]=useState<PaletteTarget>(null)
   const edgeHoverTimer=useRef<ReturnType<typeof setTimeout>|null>(null)
@@ -633,7 +621,7 @@ function Studio() {
         <div className="wf-editor-navigation"><nav aria-label="Tampilan workflow"><button aria-pressed={tab==='editor'} onClick={()=>setTab('editor')}>Editor</button><button aria-pressed={tab==='executions'} disabled={busy||!workflowId} onClick={()=>{setTab('executions');if(!historyLoaded)void loadRuns()}}>Riwayat pengujian</button><button aria-pressed={tab==='logs'} disabled={busy||!workflowId} onClick={()=>{setTab('logs');if(!historyLoaded)void loadRuns()}}>Log</button></nav>{tab==='editor'&&<button aria-label="Tambah node" className="wf-add-node" disabled={busy||!workflowId} onClick={()=>{setPaletteTarget(null);setSearch('');setPalette(true)}}><Plus size={15}/><span>Tambah node</span></button>}</div>
         <div className="wf-editor-utilities">
           {tab==='editor'&&<><button aria-label="Asisten AI workflow" aria-expanded={assistantOpen} disabled={!workflowId} onClick={()=>{setAssistantOpen(value=>!value);setDetailOpen(false)}}><Bot size={15}/><span>Asisten AI</span></button><button aria-label="Periksa alur" aria-expanded={readinessOpen} aria-controls="wf-readiness" disabled={!workflowId} onClick={()=>setReadinessOpen(value=>!value)}>{blockingIssues.length?<AlertTriangle size={15}/>:<Check size={15}/>}<span>Periksa alur</span>{blockingIssues.length>0&&<span className="wf-readiness-count">{blockingIssues.length}</span>}</button>{nodes.some(node=>node.type==='chatTrigger')&&<button aria-expanded={chatOpen} onClick={()=>setChatOpen(value=>!value)}>Uji chat</button>}<button aria-label="Cara pakai" title="Cara pakai" className="wf-help-button" aria-expanded={guideOpen} aria-controls="wf-usage-guide" onClick={()=>setGuideOpen(value=>!value)}><BookOpen size={15}/><span>Cara pakai</span></button><span className="wf-toolbar-divider"/>
-          <button aria-label="Undo" title="Urungkan perubahan (Ctrl+Z)" disabled={busy||!undoStack.length} onClick={undo}><Undo2 size={16}/></button><button aria-label="Redo" title="Ulangi perubahan (Ctrl+Y)" disabled={busy||!redoStack.length} onClick={redo}><Redo2 size={16}/></button><button aria-label="Duplikat node terpilih" title="Duplikat node terpilih (Ctrl+D)" disabled={busy||!selectedNode} onClick={duplicate}><Copy size={15}/></button><button aria-label="Rapikan alur" title="Rapikan posisi node otomatis" disabled={busy||nodes.length<2} onClick={autoLayout}><LayoutGrid size={15}/></button><button aria-label="Peta mini" aria-pressed={minimapOpen} title="Tampilkan atau sembunyikan peta mini" onClick={()=>setMinimapOpen(value=>!value)}><MapIcon size={15}/></button><button aria-label="Pas-kan kanvas" title="Pas-kan kanvas" onClick={()=>void flow.current?.fitView({padding:.4,maxZoom:1,duration:200})}><Maximize2 size={16}/></button></>}
+          <button aria-label="Undo" title="Urungkan perubahan (Ctrl+Z)" disabled={busy||!undoStack.length} onClick={undo}><Undo2 size={16}/></button><button aria-label="Redo" title="Ulangi perubahan (Ctrl+Y)" disabled={busy||!redoStack.length} onClick={redo}><Redo2 size={16}/></button><button aria-label="Duplikat node terpilih" title="Duplikat node terpilih (Ctrl+D)" disabled={busy||!selectedNode} onClick={duplicate}><Copy size={15}/></button><button aria-label="Rapikan alur" title="Rapikan posisi node otomatis" disabled={busy||nodes.length<2} onClick={autoLayout}><LayoutGrid size={15}/></button><button aria-label="Pas-kan kanvas" title="Pas-kan kanvas" onClick={()=>void flow.current?.fitView({padding:.4,maxZoom:1,duration:200})}><Maximize2 size={16}/></button></>}
           <details ref={workflowMenu} className="wf-workflow-menu" onKeyDown={event=>{if(event.key==='Escape')event.currentTarget.open=false}}><summary aria-label="Menu workflow" title="Menu workflow"><MoreHorizontal size={18}/></summary><div><button disabled={busy||!workflowId} onClick={()=>{if(workflowMenu.current)workflowMenu.current.open=false;void duplicateWorkflow()}}><CopyPlus size={15}/>Duplikat workflow</button><button disabled={busy||!workflowId} onClick={()=>{if(workflowMenu.current)workflowMenu.current.open=false;fileInput.current?.click()}}><Upload size={15}/>Impor workflow</button><button disabled={!workflowId} onClick={()=>{if(workflowMenu.current)workflowMenu.current.open=false;exportGraph()}}><Download size={15}/>Ekspor workflow</button><button className="wf-danger" disabled={busy||!workflowId} onClick={()=>{if(workflowMenu.current)workflowMenu.current.open=false;void deleteWorkflow()}}><Trash2 size={15}/>Hapus workflow</button></div></details>
         </div>
       </div>
@@ -693,7 +681,6 @@ function Studio() {
             >
               <Background gap={24} size={1.5} color="var(--wf-control)"/>
               <Controls showInteractive={false}/>
-              {minimapOpen&&<MiniMap pannable zoomable nodeColor={node=>minimapNodeColor(node.type)}/>}
             </ReactFlow>
           })()}
           {!nodes.length&&<div className="wf-empty-canvas"><Workflow size={28}/><h2>{workflowId?'Mulai dengan trigger':'Buat workflow pertama'}</h2><p>{workflowId?'Tambahkan node pemicu, lalu hubungkan langkah berikutnya.':'Pilih template alur data atau mulai dari kanvas kosong.'}</p><button disabled={busy} onClick={()=>{if(workflowId){setPaletteTarget(null);setSearch('');setPalette(true)}else setNewOpen(true)}}><Plus size={16}/>{workflowId?'Tambah node':'Workflow baru'}</button></div>}

@@ -587,9 +587,6 @@
 .workflow-studio .wf-edge-btn { width:24px; height:24px; min-height:24px; min-width:24px; padding:0; border-radius:999px; border:1px solid var(--wf-line); background:var(--wf-sheet); color:var(--wf-ink); }
 .workflow-studio .wf-edge-btn-add:hover { background:var(--wf-accent); border-color:var(--wf-accent); color:#fff; }
 .workflow-studio .wf-edge-btn-del:hover { background:#dc2626; border-color:#dc2626; color:#fff; }
-.wf-editor-utilities > button[aria-pressed=true] { background:var(--wf-ground); color:var(--wf-accent); }
-.wf-canvas .react-flow__minimap { width:156px; height:102px; border:1px solid var(--wf-line); border-radius:10px; overflow:hidden; box-shadow:0 6px 20px #0002; }
-@media(max-width:600px){ .wf-editor-utilities > [aria-label="Peta mini"] { display:none; } }
 
 .wf-result-media video { display:block; width:100%; max-height:360px; border-radius:6px; background:#000; }
 .wf-flow-box { display:grid; gap:10px; padding:12px; border:1px solid var(--wf-line); border-radius:8px; background:var(--wf-ground); margin-bottom:14px; }
