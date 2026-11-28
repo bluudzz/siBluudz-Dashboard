@@ -105,7 +105,7 @@ export function WorkflowHistoryPanel({
     <div className="wf-executions">
       <header>
         <div>
-          <h2>Riwayat pengujian</h2>
+          <h2>Riwayat Pengujian</h2>
           <p className="wf-muted">Pilih mulai uji di kiri, klik node di panel atas untuk melihat hasil atau error, lalu klik Show uji untuk mengembalikannya ke kanvas workflow.</p>
         </div>
         <button type="button" disabled={runsLoading} onClick={onRefresh}>
