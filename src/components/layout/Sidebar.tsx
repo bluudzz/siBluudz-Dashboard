@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { navigationSections } from './navData'
 import { Badge } from '@/components/ui/Badge'
 import { useUser } from '@/context/UserContext'
+import { isLocalhostOrigin } from '@/lib/localHost'
 import { cn } from '@/lib/utils'
 import {
   Layers,
+  Lock,
   X,
   Zap,
 } from 'lucide-react'
@@ -29,6 +31,7 @@ export function Sidebar({
   const collapsed = autoCollapse && !hovered && !focused
   const { profile } = useUser()
   const isPro = profile.tier === 'pro' || profile.role === 'admin'
+  const isLocalHost = isLocalhostOrigin()
   const visibleSections = navigationSections.filter((section) => !section.adminOnly || profile.role === 'admin')
 
   return (
@@ -105,22 +108,25 @@ export function Sidebar({
                 {section.items.map((item) => {
                   const Icon = item.icon
                   const isActive = activeTab === item.id
+                  const isLockedLocalOnly = item.id === 'automation' && !isLocalHost
 
                   return (
                     <button
                       key={item.id}
-                      aria-label={item.title}
+                      aria-label={isLockedLocalOnly ? `${item.title} (Terkunci, khusus localhost)` : item.title}
                       aria-current={isActive ? 'page' : undefined}
                       onClick={() => {
                         setActiveTab(item.id)
                         if (mobileOpen) setMobileOpen(false)
                       }}
-                      title={collapsed && !mobileOpen ? item.title : undefined}
+                      title={collapsed && !mobileOpen ? (isLockedLocalOnly ? `${item.title} (Terkunci · Localhost)` : item.title) : undefined}
                       className={cn(
                         'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer',
                         isActive
                           ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
-                          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                          : isLockedLocalOnly
+                            ? 'text-muted-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                       )}
                     >
                       <Icon
@@ -133,7 +139,18 @@ export function Sidebar({
                       {(!collapsed || mobileOpen) && (
                         <>
                           <span className="flex-1 truncate text-left">{item.title}</span>
-                          {item.badge && (
+                          {isLockedLocalOnly ? (
+                            <Badge
+                              variant={isActive ? 'outline' : 'secondary'}
+                              className={cn(
+                                'inline-flex items-center gap-1 text-[10px] px-1.5 py-0 font-normal shrink-0',
+                                isActive && 'border-sidebar-border text-sidebar-accent-foreground'
+                              )}
+                            >
+                              <Lock className="h-2.5 w-2.5" />
+                              Lokal
+                            </Badge>
+                          ) : item.badge && (
                             <Badge
                               variant={isActive ? 'outline' : 'secondary'}
                               className={cn(

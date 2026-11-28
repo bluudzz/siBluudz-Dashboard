@@ -16,8 +16,10 @@ import {
   Download,
   Users,
   Mail,
+  Lock,
 } from 'lucide-react'
 import { useUser } from '@/context/UserContext'
+import { isLocalhostOrigin } from '@/lib/localHost'
 
 interface CommandDialogProps {
   open: boolean
@@ -45,6 +47,8 @@ export function CommandDialog({ open, onClose, onSelectTab }: CommandDialogProps
 
   if (!open) return null
 
+  const isLocalHost = isLocalhostOrigin()
+
   const navigationCommands = [
     { title: 'App Launcher (Home)', tab: 'overview', icon: LayoutGrid, category: 'Launchpad' },
     { title: 'Favorit Pinned', tab: 'favorites', icon: Star, category: 'Launchpad' },
@@ -54,7 +58,12 @@ export function CommandDialog({ open, onClose, onSelectTab }: CommandDialogProps
     { title: 'Utilities & Scraper', tab: 'cat-utility', icon: Wrench, category: 'Kategori' },
     { title: 'AI Generator', tab: 'ai-generator', icon: Sparkles, category: 'Aplikasi' },
     { title: 'Downloader (TikTok & Instagram)', tab: 'downloader', icon: Download, category: 'Aplikasi' },
-    { title: 'Auto Workflow Studio (n8n Bot)', tab: 'automation', icon: Terminal, category: 'Aplikasi' },
+    {
+      title: isLocalHost ? 'Auto Workflow Studio (n8n Bot)' : 'Auto Workflow Studio (Terkunci · Khusus Localhost)',
+      tab: 'automation',
+      icon: isLocalHost ? Terminal : Lock,
+      category: 'Aplikasi',
+    },
     { title: 'AI Generator → Prompt Studio', tab: 'prompt-studio', icon: Sparkles, category: 'Tool AI' },
     { title: 'Email Manager', tab: 'email-manager', icon: Mail, category: 'Aplikasi' },
     { title: 'Invoice App (Daftar & Builder)', tab: 'invoice', icon: Receipt, category: 'Aplikasi' },

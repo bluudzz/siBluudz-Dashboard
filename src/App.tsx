@@ -13,6 +13,8 @@ import { AiGeneratorPage } from '@/features/ai-generator/AiGeneratorPage'
 import { DownloaderPage } from '@/features/downloader/DownloaderPage'
 import { EmailManagerPage } from '@/features/mail/EmailManagerPage'
 import { WorkflowStudioPage } from '@/features/automation/WorkflowStudioPage'
+import { WorkflowLocalOnlyLock } from '@/features/automation/WorkflowLocalOnlyLock'
+import { isLocalhostOrigin } from '@/lib/localHost'
 import { AuthPage } from '@/features/auth/AuthPage'
 import { RelightStandaloneApp } from '@/features/relight-app/RelightStandaloneApp'
 import { useUser } from '@/context/UserContext'
@@ -94,6 +96,8 @@ function DashboardContent() {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Memuat data akun...</div>
   }
 
+  const isLocalWorkflowUnlocked = isLocalhostOrigin()
+
   const renderActivePage = () => {
     switch (activeTab) {
       case 'overview':
@@ -120,7 +124,9 @@ function DashboardContent() {
       case 'downloader':
         return <DownloaderPage />
       case 'automation':
-        return <WorkflowStudioPage />
+        return isLocalWorkflowUnlocked
+          ? <WorkflowStudioPage />
+          : <WorkflowLocalOnlyLock onGoHome={() => setActiveTab('overview')} />
       case 'email-manager':
         return <EmailManagerPage />
       case 'admin-users':

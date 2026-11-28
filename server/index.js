@@ -17,6 +17,7 @@ import downloaderRoutes from './routes/downloader.routes.js'
 import { relightAdminRouter, relightPublicRouter } from './routes/relight.routes.js'
 import { googleDriveRouter } from './workflow-drive.js'
 import { workflowChannelsRouter } from './workflow-notify.js'
+import { isLocalWorkflowEnvironment } from './middleware/local-workflow.js'
 import { startWorkflowScheduler } from './workflow-scheduler.js'
 import { startGeneratedFilesCleanup } from './generated-cleanup.js'
 
@@ -61,7 +62,11 @@ app.listen(port, '127.0.0.1', () => {
   console.log(`Local API running at http://127.0.0.1:${port}`)
   console.log(`SQLite database: ${path.join(dataDirectory, 'sibluudz.sqlite')}`)
   console.log(`Google OAuth: ${googleEnabled ? 'configured' : 'not configured'}`)
-  startWorkflowScheduler()
+  if (isLocalWorkflowEnvironment()) {
+    startWorkflowScheduler()
+  } else {
+    console.log('Workflow scheduler: locked (local-only mode)')
+  }
   startGeneratedFilesCleanup()
   if (process.env.NODE_ENV !== 'test') {
     void syncNineRouterCatalogIfStale({ force: true }).catch((err) => {

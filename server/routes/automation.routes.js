@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
+import { requireLocalWorkflow } from '../middleware/local-workflow.js'
 import { validateGraph } from '../../shared/workflow-engine.js'
 import { decodeWorkflowRun } from '../workflow-history.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
@@ -9,6 +10,7 @@ import { proposeWorkflowChange, loadAssistantHistory, clearAssistantHistory } fr
 import { activeRuns, executeStoredWorkflow, normalizedWorkflow, sanitizeGraph } from '../workflow-scheduler.js'
 
 const router = Router()
+router.use(requireLocalWorkflow)
 const findWorkflow = (id, userId) => db.prepare('select * from workflows where id = ? and user_id = ?').get(id, userId)
 const parse = value => JSON.parse(value || '[]')
 
