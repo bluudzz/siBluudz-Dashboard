@@ -6,6 +6,7 @@ import { TriggerNode, AiAgentNode, SetNode, SplitOutNode, IfNode, ChatTriggerNod
 import { WorkflowEdge, type WorkflowEdgeData } from './WorkflowEdge'
 import { layoutWorkflowNodes } from './workflow-layout'
 import { DataViewer, NodeSettingsPanel } from './NodeSettingsPanel'
+import { WorkflowHistoryPanel } from './WorkflowHistoryPanel'
 import { WorkflowAssistantPanel } from './WorkflowAssistantPanel'
 import { iconForWorkflowNode } from './workflow-node-icons'
 import { catalog, availableCatalog, ports, serializableGraph, graphStamp, workflowRequest, workflowNodeImages, type StudioNode, type WorkflowItem, type RunItem, type ExecutionResult } from './workflow-model'
@@ -158,9 +159,6 @@ function Studio() {
   const issues=useMemo(()=>inspectWorkflow(nodes,edges),[nodes,edges])
   const blockingIssues=issues.filter(issue=>issue.severity==='error')
   const selectedNode=nodes.find(node=>node.id===selectedId)
-  const viewedRun=runs.find(run=>run.id===viewedRunId)
-  const viewedResults=viewedRun?.result?.nodeResults||{}
-  const viewedResult=viewedResults[viewedNodeId]
   const logResult=logSelection?runs.find(run=>run.id===logSelection.runId)?.result?.nodeResults?.[logSelection.nodeId]:undefined
 
   const loadDetail=useCallback(async(id:string)=>{
@@ -579,12 +577,27 @@ function Studio() {
     window.addEventListener('keydown',onKeyDown)
     return()=>window.removeEventListener('keydown',onKeyDown)
   },[tab,palette,newOpen,confirmState,logSelection])
+  const defaultNodeForRun=(run?:RunItem)=>{
+    const entries=Object.values(run?.result?.nodeResults||{})
+    const failed=entries.find(entry=>entry.status==='error')
+    if(failed)return failed.nodeId
+    if(entries[0])return entries[0].nodeId
+    return nodes.find(node=>!isSubNode(node.type))?.id||''
+  }
   const loadRuns=async()=>{
     if(!workflowId)return
     setRunsLoading(true);setHistoryError('')
-    try{const data=await workflowRequest<{runs:RunItem[]}>('/'+workflowId+'/runs');setRuns(data.runs);setViewedRunId(data.runs[0]?.id||'');setViewedNodeId(Object.keys(data.runs[0]?.result?.nodeResults||{})[0]||'');setHistoryLoaded(true)}
+    try{const data=await workflowRequest<{runs:RunItem[]}>('/'+workflowId+'/runs');setRuns(data.runs);setViewedRunId(data.runs[0]?.id||'');setViewedNodeId(defaultNodeForRun(data.runs[0]));setHistoryLoaded(true)}
     catch(err){setHistoryError(err instanceof Error?err.message:'Riwayat gagal dimuat.')}
     finally{setRunsLoading(false)}
+  }
+  const restoreRunToWorkflow=(run:RunItem)=>{
+    const results=run.result?.nodeResults||{}
+    setNodes(prev=>prev.map(node=>({...node,data:{...node.data,running:false,status:undefined,result:results[node.id]}})))
+    setDetailOpen(false)
+    setTab('editor')
+    const timeText=new Date(run.started_at.includes('T')?run.started_at:`${run.started_at.replace(' ','T')}Z`).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})
+    setNotice(`Hasil pengujian (${timeText}) ditampilkan kembali ke kanvas workflow.`)
   }
   const exportGraph=()=>{
     const url=URL.createObjectURL(new Blob([JSON.stringify({format:'sibluudz.workflow',version:1,name,...serializableGraph(nodes,edges)},null,2)],{type:'application/json'}))
@@ -704,13 +717,19 @@ function Studio() {
         </div>
         {chatOpen&&<section className="wf-test-chat" aria-label="Uji chat workflow"><header><div><h3>Uji chat</h3><p>Setiap pesan menjalankan workflow dan memakai kuota model 9router.</p></div><button disabled={busy} onClick={()=>{setChatMessages([]);setChatSession(crypto.randomUUID())}}>Sesi baru</button><button type="button" className="wf-section-close" aria-label="Tutup uji chat" onClick={()=>setChatOpen(false)}><X size={16}/></button></header><div className="wf-chat-messages" aria-live="polite">{!chatMessages.length?<p className="wf-muted">Pilih Model AI, tambahkan Memory bila percakapan perlu diingat, lalu kirim pesan.</p>:chatMessages.map((message,index)=><article key={index} className={message.role==='Error'?'wf-error':''}><strong>{message.role}</strong><p>{message.text}</p></article>)}{busyKind==='chat'&&<p role="status">AI Agent sedang memproses…</p>}</div><form onSubmit={event=>void sendChat(event)}><label className="wf-field"><span>Pesan untuk AI Agent</span><textarea rows={2} maxLength={16000} value={chatMessage} disabled={busy} onChange={event=>setChatMessage(event.target.value)} placeholder="Contoh: Buat rencana carousel 3 slide untuk produk saya"/></label><button className="wf-primary" disabled={busy||!chatMessage.trim()} type="submit"><Send size={15}/>Kirim</button></form></section>}
         <div className="wf-canvas-footer"><span className="wf-footer-left"><span>{nodes.length} node · {edges.length} koneksi</span>{flowConn&&<span className={'wf-footer-flow-pill '+(flowConn.connected?'is-connected':'is-disconnected')}><span className="wf-flow-dot"/>{flowConn.connected?'Flow Terhubung':'Flow Tidak Terhubung'}</span>}</span><span>Garis utuh: alur data · Garis putus: sub-node AI · Tarik kabel ke area kosong untuk tambah node</span></div>
-      </div>:tab==='executions'?<div className="wf-executions">
-         <header><div><h2>Riwayat pengujian</h2><p className="wf-muted">Pilih pengujian untuk melihat langkah, input, dan outputnya.</p></div><button disabled={runsLoading} onClick={()=>void loadRuns()}><RefreshCw size={14}/>Muat ulang</button></header>
-        {runsLoading?<p role="status">Memuat riwayat…</p>:!runs.length?<div className="wf-empty-history"><h3>Belum ada eksekusi</h3><p>Klik Jalankan alur di editor untuk merekam input dan output node.</p></div>:<div className="wf-history-grid">
-           <div className="wf-run-list" aria-label="Daftar pengujian">{runs.map(item=><button key={item.id} aria-pressed={viewedRunId===item.id} onClick={()=>{setViewedRunId(item.id);setViewedNodeId(Object.keys(item.result?.nodeResults||{})[0]||'')}}><strong><span className={'wf-history-status status-'+item.status}>{item.status==='error'?'Error':item.status==='cancelled'?'Dihentikan':item.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span> · {triggerTypeLabel(item.trigger_type)}</strong><span>{new Date(item.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})}</span><span>{Object.keys(item.result?.nodeResults||{}).length} node diperiksa</span></button>)}</div>
-           <section className="wf-run-detail"><header className="wf-run-detail-header"><div><h3>Detail pengujian</h3>{viewedRun&&<p className="wf-muted">{new Date(viewedRun.started_at.replace(' ','T')+'Z').toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · {triggerTypeLabel(viewedRun.trigger_type)}</p>}</div>{viewedRun&&<span className={'wf-history-status status-'+viewedRun.status}>{viewedRun.status==='error'?'Error':viewedRun.status==='cancelled'?'Dihentikan':viewedRun.status==='waiting_approval'?'Menunggu persetujuan':'Selesai'}</span>}</header>{!Object.keys(viewedResults).length?<p>Pengujian ini belum memiliki rincian input dan output per node.</p>:<><label className="wf-field"><span>Pilih node untuk diperiksa</span><select value={viewedNodeId} onChange={e=>setViewedNodeId(e.target.value)}>{Object.values(viewedResults).map(result=><option key={result.nodeId} value={result.nodeId}>{result.label} · {liveStatusText(result.status)}</option>)}</select></label>{viewedResult&&<><p className="wf-history-node-meta">{liveStatusText(viewedResult.status)} <span>· {viewedResult.durationMs} ms · {viewedResult.output.length} hasil</span></p>{viewedResult.error&&<p role="alert" className="wf-error">{viewedResult.error}</p>}<div className="wf-history-output"><h4>Hasil langkah</h4><DataViewer items={viewedResult.output}/></div><details className="wf-history-input" key={`${viewedRunId}-${viewedNodeId}`}><summary>Bahan masuk <span>{viewedResult.input.length} item</span></summary>{viewedResult.input.length?<DataViewer items={viewedResult.input}/>:<p className="wf-muted">Langkah pemicu ini memulai alur tanpa bahan masuk.</p>}</details></>}</>}</section>
-        </div>}
-      </div>:<div className="wf-executions wf-log-panel">
+      </div>:tab==='executions'?<WorkflowHistoryPanel
+        runs={runs}
+        runsLoading={runsLoading}
+        nodes={nodes}
+        viewedRunId={viewedRunId}
+        viewedNodeId={viewedNodeId}
+        onRefresh={()=>void loadRuns()}
+        onSelectRun={item=>{setViewedRunId(item.id);setViewedNodeId(defaultNodeForRun(item))}}
+        onSelectNode={setViewedNodeId}
+        onRestoreRun={restoreRunToWorkflow}
+        triggerTypeLabel={triggerTypeLabel}
+        liveStatusText={liveStatusText}
+      />:<div className="wf-executions wf-log-panel">
         <header><div><h2>Log</h2><p className="wf-muted">Catatan keberhasilan, error, notifikasi, dan status setiap langkah workflow.</p></div><button disabled={runsLoading} onClick={()=>void loadRuns()}><RefreshCw size={14}/>Muat ulang</button></header>
         {runsLoading?<p role="status">Memuat log…</p>:!workflowLogs.length?<div className="wf-empty-history"><ScrollText size={22}/><h3>Belum ada log</h3><p>Log akan muncul setelah workflow atau satu langkah dijalankan.</p></div>:<div className="wf-log-list" aria-label="Log workflow">{workflowLogs.map((log,index)=><article key={`${log.runId}-${log.time}-${index}`} className={'wf-log-entry status-'+log.status} role="button" tabIndex={0} aria-label={`Lihat hasil ${log.step}`} onClick={()=>setLogSelection(log)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setLogSelection(log)}}}><div className="wf-log-icon">{log.status==='success'?<Check size={15}/>:log.status==='error'?<AlertTriangle size={15}/>:<ScrollText size={15}/>}</div><div className="wf-log-copy"><div><strong>{log.step}</strong><span className="wf-log-status">{log.status}</span></div><p>{log.message}</p><small>{new Date(log.time).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})} · Pengujian {log.runId.slice(0,8)}</small></div></article>)}</div>}
       </div>}
