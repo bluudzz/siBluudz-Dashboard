@@ -8,6 +8,12 @@ import { decodeWorkflowRun } from '../workflow-history.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
 import { proposeWorkflowChange, loadAssistantHistory, clearAssistantHistory } from '../workflow-assistant.js'
 import { activeRuns, executeStoredWorkflow, normalizedWorkflow, sanitizeGraph } from '../workflow-scheduler.js'
+import {
+  beginGoogleFlowConnection,
+  completeGoogleFlowConnection,
+  getGoogleFlowStatus,
+  inspectGoogleFlowAccount,
+} from '../workflow-google-flow.js'
 
 const router = Router()
 router.use(requireLocalWorkflow)
@@ -115,6 +121,38 @@ router.post('/hooks/:token', async (req, res) => {
 router.get('/', requireUser, (req,res)=>{
   const workflows=db.prepare('select id,name,description,is_active,webhook_token,created_at,updated_at from workflows where user_id = ? order by updated_at desc').all(req.user.id)
   res.json({workflows,capabilities:{simulation:true,scheduler:true,webhooks:true,externalIntegrations:true}})
+})
+router.get('/google-flow/status', requireUser, async (_req, res) => {
+  try {
+    res.json(await getGoogleFlowStatus())
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Gagal memeriksa status Google Flow MCP.' })
+  }
+})
+router.post('/google-flow/inspect', requireSameOrigin, requireUser, async (req, res) => {
+  try {
+    res.json(await inspectGoogleFlowAccount(String(req.body?.accountId || '')))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal memeriksa akun Google Flow.' })
+  }
+})
+router.post('/google-flow/connect/begin', requireSameOrigin, requireUser, async (req, res) => {
+  try {
+    res.json(await beginGoogleFlowConnection({ accountId: req.body?.accountId, label: req.body?.label }))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal memulai koneksi Google Flow.' })
+  }
+})
+router.post('/google-flow/connect/complete', requireSameOrigin, requireUser, async (req, res) => {
+  try {
+    res.json(await completeGoogleFlowConnection({
+      connectionId: req.body?.connectionId,
+      accountId: req.body?.accountId,
+      label: req.body?.label,
+    }))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal menyelesaikan koneksi Google Flow.' })
+  }
 })
 router.get('/:id',requireUser,(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)

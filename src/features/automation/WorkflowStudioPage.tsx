@@ -32,6 +32,7 @@ function minimapNodeColor(type?: string): string {
   if (type === 'if' || type === 'switch' || type === 'wait') return '#c68a38'
   if (type === 'approval' || type === 'notify' || type === 'googleDrive') return '#288161'
   if (type === 'imageGenerate' || type === 'imageEdit') return '#9b75c8'
+  if (type === 'videoGenerate') return '#e05d7c'
   if (type === 'instagram') return '#d26a95'
   return '#5289b6'
 }
@@ -83,6 +84,7 @@ const nodeTypes={
   googleDrive:SetNode,
   imageGenerate:SetNode,
   imageEdit:SetNode,
+  videoGenerate:SetNode,
   aiVision:SetNode,
   instagram:SetNode,
   notify:SetNode,

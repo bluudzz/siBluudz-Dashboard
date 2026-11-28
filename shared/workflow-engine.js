@@ -5,7 +5,7 @@ export const WORKFLOW_NODE_TYPES = new Set([
   'set', 'splitOut', 'merge', 'jsonParse',
   'if', 'switch', 'wait', 'approval',
   'searchContent', 'httpRequest', 'apiRequest', 'googleDrive',
-  'imageGenerate', 'imageEdit', 'aiVision', 'aiAgent',
+  'imageGenerate', 'imageEdit', 'videoGenerate', 'aiVision', 'aiAgent',
   'instagram', 'notify',
 ])
 export const CONDITION_OPERATORS = ['equals', 'notEquals', 'contains', 'notContains', 'startsWith', 'gt', 'lt', 'exists', 'isEmpty']
@@ -309,7 +309,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         usedLive = true
         result.message = node.type === 'searchContent' ? 'Informasi dan isi sumber berhasil diambil; gunakan hanya halaman yang berhasil dibaca.' : node.type==='googleDrive'?'File Google Drive berhasil dibaca.':node.type==='apiRequest'?'Permintaan HTTP selesai; lihat status dan respons di Output.':'Respons halaman/API berhasil diambil.'
       }
-      else if (node.type === 'imageGenerate' || node.type === 'imageEdit' || node.type === 'aiVision' || node.type === 'instagram' || node.type === 'notify') {
+      else if (node.type === 'imageGenerate' || node.type === 'imageEdit' || node.type === 'videoGenerate' || node.type === 'aiVision' || node.type === 'instagram' || node.type === 'notify') {
         if (!live) throw new Error('Langkah ini hanya dapat diuji lewat backend.')
         if (node.type === 'instagram' && ['publish', 'reels', 'stories'].includes(data.operation || 'publish')) {
           const parents = new Set()
@@ -324,6 +324,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         usedLive = true
         result.message = node.type === 'imageGenerate' ? 'Gambar dibuat dengan model 9router; periksa hasil sebelum publikasi.'
           : node.type === 'imageEdit' ? 'Gambar selesai diolah; periksa hasil sebelum langkah berikutnya.'
+          : node.type === 'videoGenerate' ? 'Video selesai dibuat lewat Google Flow; periksa pratinjau sebelum langkah berikutnya.'
           : node.type === 'aiVision' ? 'Gambar selesai dianalisis oleh AI Vision.'
           : node.type === 'notify' ? 'Notifikasi berhasil dikirim.'
           : 'Operasi Instagram selesai; lihat ID dan status post pada hasil.'

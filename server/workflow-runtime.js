@@ -3,6 +3,7 @@ import { runExternalNode } from './workflow-external.js'
 import { runApiRequestNode } from './workflow-api-request.js'
 import { runImageNode } from './workflow-image.js'
 import { runImageEditNode } from './workflow-image-edit.js'
+import { runVideoNode } from './workflow-google-flow.js'
 import { runVisionNode } from './workflow-vision.js'
 import { runInstagramNode } from './workflow-instagram.js'
 import { runPromptTrigger } from './workflow-prompt-trigger.js'
@@ -44,6 +45,7 @@ export function createWorkflowRuntime(user, workflowId, signal) {
     if (context.kind === 'promptTrigger') return runPromptTrigger(context,user,{signal})
     if (context.kind === 'imageGenerate') return runImageNode(context,user,{signal})
     if (context.kind === 'imageEdit') return runImageEditNode(context,user,{signal})
+    if (context.kind === 'videoGenerate') return runVideoNode(context,user,{signal})
     if (context.kind === 'aiVision') return runVisionNode(context,user,{signal})
     if (context.kind === 'instagram') return runInstagramNode(context,user,workflowId)
     if (context.kind === 'googleDrive') return runDriveNode(context,user,{signal})

@@ -1,15 +1,17 @@
 import { useState } from 'react'
-import { Check, Copy, ExternalLink, Image as ImageIcon } from 'lucide-react'
+import { Check, Copy, ExternalLink, Film, Image as ImageIcon } from 'lucide-react'
 import type { DataItem } from '../../../shared/workflow-engine'
 import { dataLabel } from './SimpleDataEditor'
-import { workflowImagePreview } from './workflow-model'
+import { workflowImagePreview, workflowVideoPreview } from './workflow-model'
 
 const imageKeys=new Set(['imageUrl','imagePreviewUrl','imageMime','imageModel'])
+const videoKeys=new Set(['videoUrl','videoPreviewUrl','videoMime','videoModel'])
 const contractFields:Record<string,string[]>={
   searchContent:['query','queries','followUpQueries','coverage','sources','pages','sourceCount','readCount','note'],
   aiAgent:['output','summary','facts','recommendations','agentModel','toolSteps'],
   imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','prompt'],
   imageEdit:['imageUrl','imagePreviewUrl','imageMime','editMode','editedWidth','editedHeight','imageModel','imagePrompt'],
+  videoGenerate:['videoPrompt','videoModel','videoAspectRatio','videoDurationSeconds','videoResolution','localVideoPath','videoJobId'],
   aiVision:['visionPassed','visionScore','visionSummary','visionIssues','visionModel','output'],
   apiRequest:['statusCode','method','url','responseBody','output'],
   notify:['notificationStatus','notificationChannel','notificationMessage'],
@@ -43,16 +45,18 @@ export function WorkflowDataViewer({items,nodeType}:{items:DataItem[];nodeType?:
     {!items.length?<div className="wf-result-empty">Belum ada hasil. Jalankan langkah ini untuk melihat datanya.</div>:technical?<pre tabIndex={0}>{JSON.stringify(items,null,2)}</pre>:<div className="wf-readable-results">{items.slice(0,20).map((item,index)=>{
       const json=item.json||{}
       const image=workflowImagePreview(json)
+      const video=workflowVideoPreview(json)
       const preferred=contractFields[nodeType||'']
-      const entries=Object.entries(json).filter(([key])=>!imageKeys.has(key)&&!key.startsWith('_')).sort(([a],[b])=>{if(!preferred)return 0;const ai=preferred.indexOf(a),bi=preferred.indexOf(b);return (ai<0?999:ai)-(bi<0?999:bi)})
+      const entries=Object.entries(json).filter(([key])=>!imageKeys.has(key)&&!videoKeys.has(key)&&!key.startsWith('_')).sort(([a],[b])=>{if(!preferred)return 0;const ai=preferred.indexOf(a),bi=preferred.indexOf(b);return (ai<0?999:ai)-(bi<0?999:bi)})
       const shown=entries.slice(0,5)
       const rest=entries.slice(5)
       return <article key={index} className="wf-result-card">
         <div className="wf-result-card-heading"><strong>{items.length>1?`Hasil ${index+1}`:'Hasil langkah'}</strong>{Boolean(json.instagramStatus)&&<span>{String(json.instagramStatus==='published'?'Terbit':json.instagramStatus==='already_published'?'Sudah terbit':json.instagramStatus)}</span>}</div>
+        {video&&<div className="wf-result-media"><video controls playsInline preload="metadata" src={video}/><a href={video} target="_blank" rel="noopener noreferrer"><Film size={14}/> Buka / unduh video <ExternalLink size={13}/></a></div>}
         {image&&<div className="wf-result-media"><img src={image} alt={`Pratinjau gambar ${index+1}`} loading="lazy" referrerPolicy="no-referrer"/><a href={image} target="_blank" rel="noopener noreferrer"><ImageIcon size={14}/> Buka gambar <ExternalLink size={13}/></a></div>}
         {shown.length>0&&<dl>{shown.map(([key,value])=><div key={key}><dt>{dataLabel(key)}</dt><dd><ResultValue name={key} value={value}/></dd></div>)}</dl>}
         {rest.length>0&&<details className="wf-result-more"><summary>Lihat {rest.length} informasi lain</summary><dl>{rest.map(([key,value])=><div key={key}><dt>{dataLabel(key)}</dt><dd><ResultValue name={key} value={value}/></dd></div>)}</dl></details>}
-        {!image&&!entries.length&&<p className="wf-muted">Langkah selesai tanpa data tampilan.</p>}
+        {!video&&!image&&!entries.length&&<p className="wf-muted">Langkah selesai tanpa data tampilan.</p>}
       </article>
     })}{items.length>20&&<p className="wf-muted">Menampilkan 20 hasil pertama. Semua hasil tersedia di tab Data.</p>}</div>}
   </div>

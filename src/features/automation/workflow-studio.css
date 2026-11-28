@@ -194,6 +194,7 @@
 .wf-kind-switch { --node-hue:#c68a38; --node-tint:#c68a3819; }
 .wf-kind-wait { --node-hue:#8d7a64; --node-tint:#8d7a6419; }
 .wf-kind-imageEdit { --node-hue:#a963c9; --node-tint:#a963c91c; }
+.wf-kind-videoGenerate { --node-hue:#e05d7c; --node-tint:#e05d7c1c; }
 .wf-kind-aiVision { --node-hue:#6e7cf0; --node-tint:#6e7cf01c; }
 .wf-kind-notify { --node-hue:#2b9f78; --node-tint:#2b9f781c; }
 .wf-webhook-box { display:grid; gap:8px; padding:12px; border:1px solid var(--wf-line); border-radius:8px; background:var(--wf-ground); margin-bottom:14px; }
@@ -589,3 +590,15 @@
 .wf-editor-utilities > button[aria-pressed=true] { background:var(--wf-ground); color:var(--wf-accent); }
 .wf-canvas .react-flow__minimap { width:156px; height:102px; border:1px solid var(--wf-line); border-radius:10px; overflow:hidden; box-shadow:0 6px 20px #0002; }
 @media(max-width:600px){ .wf-editor-utilities > [aria-label="Peta mini"] { display:none; } }
+
+.wf-result-media video { display:block; width:100%; max-height:360px; border-radius:6px; background:#000; }
+.wf-flow-box { display:grid; gap:10px; padding:12px; border:1px solid var(--wf-line); border-radius:8px; background:var(--wf-ground); margin-bottom:14px; }
+.wf-flow-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.wf-flow-header strong { font-size:13px; }
+.workflow-studio .wf-flow-header button,
+.workflow-studio .wf-flow-actions button { min-height:32px; padding:5px 10px; font-size:12px; }
+.wf-flow-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.wf-flow-box > .wf-field { margin:4px 0; }
+.wf-flow-ext-row { display:flex; gap:6px; align-items:center; }
+.wf-flow-ext-row input { flex:1; min-width:0; font-size:11px; padding:6px 8px; }
+.workflow-studio .wf-flow-ext-row button { flex:none; min-height:32px; min-width:32px; padding:6px; }

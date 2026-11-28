@@ -7,6 +7,7 @@ import type { DataItem } from '../../../shared/workflow-engine'
 import { SimpleDataEditor, dataLabel, friendlyPrompt, technicalPrompt } from './SimpleDataEditor'
 import { InstagramAccountSettings } from './InstagramAccountSettings'
 import { GoogleDriveSettings } from './GoogleDriveSettings'
+import { GoogleFlowSettings } from './GoogleFlowSettings'
 import { NotificationChannelSettings } from './NotificationChannelSettings'
 import { WorkflowDataViewer } from './WorkflowDataViewer'
 import { NodeInputPanel } from './NodeInputPanel'
@@ -34,6 +35,7 @@ const nodeHelp:Record<string,string>={
   googleDrive:'Lihat atau unduh gambar dan video dari Google Drive Anda.',
   imageGenerate:'Buat gambar dari prompt menggunakan model gambar 9router.',
   imageEdit:'Format gambar ke rasio Instagram (4:5/1:1/9:16) dengan teks overlay atau edit memakai AI.',
+  videoGenerate:'Buat video Veo / Omni Flash memakai Google Flow MCP lokal dengan kuota akun Google Anda.',
   aiVision:'Periksa kualitas visual atau analisis isi gambar memakai AI Vision.',
   instagram:'Terbitkan gambar, carousel, Reel, atau Story; baca komentar; atau lihat statistik akun Instagram profesional.',
   notify:'Kirim pesan atau ringkasan hasil workflow ke Telegram, Discord, atau Webhook.',
@@ -227,6 +229,22 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
           <p className="wf-inline-note">Item yang tidak cocok dengan jalur 1–3 otomatis diteruskan ke jalur <strong>lain (fallback)</strong>.</p>
         </>}
         {node.type==='imageGenerate'&&<><label className="wf-field"><span>Model gambar</span>{imageModelIds.length?<select disabled={busy} value={str('model')} onChange={event=>update('model',event.target.value)}><option value="">Pilih model gambar…</option>{str('model')&&!imageModelIds.includes(str('model'))&&<option value={str('model')}>{formatModelLabel(str('model'))} (tidak tersedia di 9router)</option>}{imageModelIds.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select>:<input value={str('model')} disabled={busy} onChange={event=>update('model',event.target.value)} placeholder="ID model gambar dari 9router"/>}</label>{field('prompt','Prompt gambar (opsional)','Kosong = gunakan prompt dari langkah sebelumnya',true)}</>}
+        {node.type==='videoGenerate'&&<>
+          <GoogleFlowSettings
+            accountId={str('accountId')}
+            model={str('model')||'ui-default'}
+            aspectRatio={str('aspectRatio')||'9:16'}
+            upscale={str('upscale')||'none'}
+            busy={busy}
+            onChangeAccount={id=>update('accountId',id)}
+            onChangeModel={m=>update('model',m)}
+            onChangeAspectRatio={r=>update('aspectRatio',r)}
+            onChangeUpscale={u=>update('upscale',u)}
+          />
+          {field('prompt','Prompt video (opsional)','Kosong = ambil prompt dari langkah sebelumnya',true)}
+          {checkbox('useInputImage','Gunakan gambar langkah sebelumnya sebagai Start Frame / referensi (jika ada)',data.useInputImage!==false)}
+          {field('flowProject','Nama Project Flow (opsional)','Kosong = pakai atau buat project otomatis')}
+        </>}
         {node.type==='imageEdit'&&<>
           {choice('editMode','Mode edit gambar',['igFormat','aiEdit'])}
           {(str('editMode')||'igFormat')==='igFormat'
@@ -255,7 +273,7 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
           
            {str('executionMode')!=='live'&&<p className="wf-inline-note">Mode pratinjau hanya menampilkan konfigurasi dan prompt.</p>}
          </>}
-         <details className="wf-advanced" open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)}><summary>Pengaturan lanjutan (opsional)</summary>{node.type==='aiAgent'&&field('role','Peran AI','Analyst')}{node.type==='splitOut'&&<section className="wf-copy-rule"><h3>Aturan tambahan untuk AI Agent</h3><p className="wf-muted">Aturan ini sudah mengikuti jumlah output di atas. Salin lalu tempel ke kolom “Tugas AI” pada AI Agent.</p><textarea readOnly rows={11} value={splitOutAgentRule(splitCount)}/><button type="button" onClick={()=>void copySplitRule()}>{ruleCopied?<Check size={14}/>:<Copy size={14}/>} {ruleCopied?'Aturan tersalin':'Salin aturan'}</button></section>}{checkbox('disabled','Lewati langkah ini')}{['set','aiAgent','apiRequest','notify','imageEdit','aiVision'].includes(node.type||'')&&<p className="wf-expression-help">Ekspresi teknis: <code>{'{{ $json.namaField }}'}</code>.</p>}<button disabled={busy} className="wf-danger" onClick={()=>onDelete(node.id)}><Trash2 size={14}/>Hapus langkah</button></details>
+         <details className="wf-advanced" open={advanced} onToggle={event=>setAdvanced(event.currentTarget.open)}><summary>Pengaturan lanjutan (opsional)</summary>{node.type==='aiAgent'&&field('role','Peran AI','Analyst')}{node.type==='videoGenerate'&&<>{field('referenceImagePath','Path file referensi lokal (opsional)','Contoh: C:\\Users\\...\\frame.jpg')}{field('timeoutSeconds','Batas tunggu render (detik)','480')}</>}{node.type==='splitOut'&&<section className="wf-copy-rule"><h3>Aturan tambahan untuk AI Agent</h3><p className="wf-muted">Aturan ini sudah mengikuti jumlah output di atas. Salin lalu tempel ke kolom “Tugas AI” pada AI Agent.</p><textarea readOnly rows={11} value={splitOutAgentRule(splitCount)}/><button type="button" onClick={()=>void copySplitRule()}>{ruleCopied?<Check size={14}/>:<Copy size={14}/>} {ruleCopied?'Aturan tersalin':'Salin aturan'}</button></section>}{checkbox('disabled','Lewati langkah ini')}{['set','aiAgent','apiRequest','notify','imageEdit','videoGenerate','aiVision'].includes(node.type||'')&&<p className="wf-expression-help">Ekspresi teknis: <code>{'{{ $json.namaField }}'}</code>.</p>}<button disabled={busy} className="wf-danger" onClick={()=>onDelete(node.id)}><Trash2 size={14}/>Hapus langkah</button></details>
       </section>
       <section className={'wf-io '+(tab==='results'?'is-current':'')}><h3>Output</h3><p className="wf-muted">{result?({success:'Berhasil',simulated:'Pratinjau',error:'Perlu diperbaiki',skipped:'Dilewati',pinned:'Memakai hasil tersimpan',waiting:'Menunggu persetujuan'}[result.status])+' · '+result.durationMs+' ms':isSubNode(node.type)?'Bagian ini digunakan oleh AI Agent. Buka AI Agent untuk melihat hasilnya.':'Klik Uji langkah untuk melihat hasilnya di sini.'}</p>{result?.error&&<p role="alert" className="wf-error">{result.error}</p>}{result?.message&&<p className="wf-inline-note">{result.message}</p>}{!isSubNode(node.type)&&<DataViewer items={result?.output||[]} nodeType={node.type}/>}
         {advanced&&!['if','switch'].includes(node.type||'')&&!isSubNode(node.type)&&<button disabled={busy||(!result?.output.length&&data.pinnedOutput==null)} className="wf-pin-button" onClick={()=>update('pinnedOutput',data.pinnedOutput!=null?null:result?.output)}><Pin size={14}/>{data.pinnedOutput!=null?'Lepas pin data':'Pin output untuk pengujian'}</button>}

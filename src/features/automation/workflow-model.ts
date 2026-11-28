@@ -4,7 +4,7 @@ import { workflowInput, type DataItem } from '../../../shared/workflow-engine.js
 
 export function workflowInputFields(items:DataItem[]):string[] {
   const sample=items.slice(0,20)
-  const hidden=new Set(['constructor','prototype','agentModel','agentRun','toolSteps','model','sessionId','imageModel','imageMime','splitIndex','statusCode','searchedAt','researchMode','researchPlan','searchProvider','driveSelection','driveHasMore','driveAccount'])
+  const hidden=new Set(['constructor','prototype','agentModel','agentRun','toolSteps','model','sessionId','imageModel','imageMime','videoModel','videoMime','videoJobId','splitIndex','statusCode','searchedAt','researchMode','researchPlan','searchProvider','driveSelection','driveHasMore','driveAccount'])
   const seen=new Set([JSON.stringify(sample.map(item=>workflowInput(item.json)))])
   return [...new Set(sample.flatMap(item=>Object.keys(item.json)))].filter(key=>{
     if(key.startsWith('_')||hidden.has(key))return false
@@ -20,6 +20,10 @@ export type StudioNode = Node<WorkflowData>
 export type { NodeResult, ExecutionResult }
 export function workflowImagePreview(json:Record<string,unknown>):string {
   const candidate=json.imagePreviewUrl||json.imageUrl
+  return typeof candidate==='string'&&(candidate.startsWith('/api/workflow-media/')||candidate.startsWith('https://'))?candidate:''
+}
+export function workflowVideoPreview(json:Record<string,unknown>):string {
+  const candidate=json.videoPreviewUrl||json.videoUrl
   return typeof candidate==='string'&&(candidate.startsWith('/api/workflow-media/')||candidate.startsWith('https://'))?candidate:''
 }
 export function workflowNodeImages(node:Pick<StudioNode,'type'|'data'>):string[] {
@@ -51,6 +55,7 @@ export const catalog = [
   {type:'approval',title:'Persetujuan Manual',group:'Logika',description:'Hentikan cabang alur sampai Anda meninjau dan menyetujui konten yang masuk.',data:{label:'Persetujuan Manual',approvedItems:null}},
   {type:'imageGenerate',title:'Generate Gambar',group:'AI',description:'Buat satu gambar per ide atau slide dengan model gambar 9router.',data:{label:'Generate Gambar',model:'',prompt:''}},
   {type:'imageEdit',title:'Edit & Olah Gambar',group:'AI',description:'Sesuaikan rasio IG 4:5 + teks overlay, atau edit gambar memakai AI.',data:{label:'Edit & Olah Gambar',editMode:'igFormat',aspectRatio:'4:5',overlayTitle:'',overlaySubtitle:'',watermark:'',textPosition:'bottom',model:'',prompt:'',resolution:'1K'}},
+  {type:'videoGenerate',title:'Generate Video (Google Flow)',group:'AI',description:'Buat video Veo / Omni Flash memakai Google Flow lokal tanpa biaya API.',data:{label:'Generate Video · Google Flow',accountId:'',model:'ui-default',aspectRatio:'9:16',upscale:'none',prompt:'',useInputImage:true,flowProject:'',referenceImagePath:'',timeoutSeconds:'480'}},
   {type:'aiVision',title:'Analisis Gambar (Vision)',group:'AI',description:'Periksa kualitas atau baca isi gambar memakai model AI multimodal.',data:{label:'Analisis Gambar',model:PROMPT_TRIGGER_DEFAULT_MODEL,prompt:'Periksa kualitas visual, keterbacaan, dan kesesuaian gambar dengan brief.',qaMode:true}},
   {type:'aiAgent',title:'AI Agent',group:'AI',description:'Meminta AI mengolah data dan menyelesaikan tugas sesuai instruksi Anda.',data:{label:'AI Agent',executionMode:'live',aiPrompt:'',systemMessage:'',maxIterations:'3'}},
   {type:'instagram',title:'Post to Instagram',group:'Publikasi',description:'Terbitkan gambar/carousel/reel/story, baca komentar, atau lihat statistik akun profesional.',data:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''}},

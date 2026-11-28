@@ -21,6 +21,7 @@ const defaults={
   googleDrive:{label:'Google Drive',accountId:'',operation:'shared',mediaFilter:'images',sharedLink:'',selectionMode:'random',nameFilter:''},
   imageGenerate:{label:'Generate Gambar',model:'',prompt:''},
   imageEdit:{label:'Edit & Olah Gambar',editMode:'igFormat',aspectRatio:'4:5',overlayTitle:'',overlaySubtitle:'',watermark:'',textPosition:'bottom',model:'',prompt:'',resolution:'1K'},
+  videoGenerate:{label:'Generate Video · Google Flow',accountId:'',model:'ui-default',aspectRatio:'9:16',upscale:'none',prompt:'',useInputImage:true,flowProject:'',referenceImagePath:'',timeoutSeconds:'480'},
   aiVision:{label:'Analisis Gambar',model:'ag/gemini-3.8-flash',prompt:'Periksa kualitas gambar, keterbacaan, dan kesesuaian dengan brief.',qaMode:true},
   instagram:{label:'Post to Instagram',operation:'publish',accountId:'',caption:'',imageUrl:'',videoUrl:'',coverUrl:'',mediaId:''},
   notify:{label:'Kirim Notifikasi',channelId:'',message:'',includeImage:false},
@@ -40,6 +41,7 @@ const editable={
   googleDrive:['label','operation','mediaFilter','sharedLink','selectionMode','nameFilter','search','fileId'],
   imageGenerate:['label','prompt'],
   imageEdit:['label','editMode','aspectRatio','overlayTitle','overlaySubtitle','watermark','textPosition','prompt','resolution'],
+  videoGenerate:['label','prompt','model','aspectRatio','upscale','useInputImage','flowProject'],
   aiVision:['label','prompt','qaMode'],
   instagram:['label','operation','caption','imageUrl','videoUrl','coverUrl','mediaId'],
   notify:['label','message','includeImage'],
@@ -56,7 +58,7 @@ function safePatch(type,patch) {
   const result={}
   for(const [key,value] of Object.entries(patch)){
     if(!editable[type]?.includes(key))continue
-    if((key==='keepInput'||key==='qaMode'||key==='includeImage')&&typeof value==='boolean')result[key]=value
+    if((key==='keepInput'||key==='qaMode'||key==='includeImage'||key==='useInputImage')&&typeof value==='boolean')result[key]=value
     else if(typeof value==='string'&&value.length<=4000)result[key]=value
   }
   if(result.label)result.label=result.label.slice(0,100)
@@ -145,7 +147,7 @@ const purposes={
   set:'Bentuk atau ubah data yang diteruskan.',splitOut:'Pisahkan daftar prompts hasil AI Agent menjadi beberapa item.',merge:'Gabungkan data dari beberapa cabang (posisi, append, atau rangkum 1 item).',jsonParse:'Urai teks JSON menjadi field atau pecah array JSON apa saja menjadi item.',
   if:'Cabangkan alur berdasarkan kondisi true atau false.',switch:'Cabangkan alur hingga 4 jalur (case1, case2, case3, fallback).',wait:'Tunda eksekusi beberapa detik sebelum langkah berikutnya.',approval:'Hentikan alur sampai pengguna menyetujui hasil.',
   searchContent:'Susun pencarian, baca banyak sumber, atau baca satu URL HTTPS langsung.',httpRequest:'Node lama untuk membaca URL HTTPS.',apiRequest:'Panggil API HTTPS eksternal (GET/POST/PUT/PATCH/DELETE) dengan header & body JSON.',
-  googleDrive:'Pilih dan unduh gambar atau video dari Google Drive.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',imageEdit:'Sesuaikan rasio IG 4:5 + teks overlay atau edit gambar memakai AI.',aiVision:'Analisis dan periksa kualitas gambar memakai AI Vision.',
+  googleDrive:'Pilih dan unduh gambar atau video dari Google Drive.',imageGenerate:'Buat gambar dari prompt dan model gambar yang dipilih pengguna.',imageEdit:'Sesuaikan rasio IG 4:5 + teks overlay atau edit gambar memakai AI.',videoGenerate:'Buat video dengan Google Flow (Veo / Omni Flash) lewat akun lokal tanpa biaya API.',aiVision:'Analisis dan periksa kualitas gambar memakai AI Vision.',
   instagram:'Terbitkan foto, carousel, Reels, Story, baca komentar, atau lihat statistik Instagram.',notify:'Kirim notifikasi ke Telegram, Discord, atau Webhook.',
   aiAgent:'Jalankan instruksi memakai Model AI dan Memory opsional.',chatModel:'Pilih model 9router untuk AI Agent.',memory:'Simpan konteks percakapan AI Agent.',tool:'Node lama untuk workflow terdahulu.',
 }

@@ -7,7 +7,7 @@ import { db, dataDirectory } from './db.js'
 
 export const mediaDirectory = path.join(dataDirectory, 'workflow-media')
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
-const MAX_VIDEO_BYTES = 30 * 1024 * 1024
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024
 
 export function mediaPublicBase() {
   const candidates = [process.env.PUBLIC_BASE_URL, process.env.APP_ORIGIN]
@@ -45,7 +45,7 @@ export async function storeWorkflowImage(userId, encoded, mimeHint = '') {
 }
 
 export async function storeWorkflowVideo(userId, buffer, mimeType) {
-  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_VIDEO_BYTES) throw new Error('Ukuran video maksimal 30 MB.')
+  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_VIDEO_BYTES) throw new Error('Ukuran video maksimal 100 MB.')
   if (!['video/mp4', 'video/quicktime'].includes(mimeType)) throw new Error('Format video harus MP4 atau MOV.')
   if (buffer.length < 12 || buffer.subarray(4, 8).toString('ascii') !== 'ftyp') throw new Error('Berkas video bukan MP4/MOV yang valid.')
   const publicBase = mediaPublicBase()
@@ -59,24 +59,32 @@ export async function storeWorkflowVideo(userId, buffer, mimeType) {
   return { previewUrl, videoUrl: publicBase ? publicBase + previewUrl : '', mimeType, token }
 }
 
-export async function readWorkflowMedia(userId, urlOrPreview) {
+export function extractWorkflowMediaToken(urlOrPreview) {
   const raw = String(urlOrPreview || '').trim()
-  let token = ''
   const relative = raw.match(/^\/api\/workflow-media\/([a-f0-9]{48})(?:[?#].*)?$/i)
-  if (relative) token = relative[1].toLowerCase()
-  else {
-    try {
-      const parsed = new URL(raw)
-      const match = parsed.pathname.match(/^\/api\/workflow-media\/([a-f0-9]{48})$/i)
-      const base = mediaPublicBase()
-      if (match && (!base || parsed.origin === base)) token = match[1].toLowerCase()
-    } catch { return null }
-  }
+  if (relative) return relative[1].toLowerCase()
+  try {
+    const parsed = new URL(raw)
+    const match = parsed.pathname.match(/^\/api\/workflow-media\/([a-f0-9]{48})$/i)
+    const base = mediaPublicBase()
+    if (match && (!base || parsed.origin === base)) return match[1].toLowerCase()
+  } catch { return '' }
+  return ''
+}
+
+export function resolveWorkflowMediaFilePath(userId, urlOrPreview) {
+  const token = extractWorkflowMediaToken(urlOrPreview)
   if (!token) return null
   const row = db.prepare('select filename,mime_type from workflow_media where token=? and user_id=?').get(token, userId)
   if (!row) throw new Error('Media workflow tidak ditemukan atau bukan milik akun Anda.')
-  const buffer = await readFile(path.join(mediaDirectory, row.filename))
-  return { buffer, mimeType: row.mime_type, token }
+  return { filePath: path.join(mediaDirectory, row.filename), mimeType: row.mime_type, token }
+}
+
+export async function readWorkflowMedia(userId, urlOrPreview) {
+  const resolved = resolveWorkflowMediaFilePath(userId, urlOrPreview)
+  if (!resolved) return null
+  const buffer = await readFile(resolved.filePath)
+  return { buffer, mimeType: resolved.mimeType, token: resolved.token }
 }
 
 export const workflowMediaRouter = Router()

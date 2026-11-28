@@ -14,6 +14,7 @@ function nodeSummary(type:string|undefined,data:StudioNode['data']):string {
   if(type==='chatModel')return data.model?formatModelLabel(String(data.model)):'Model belum dipilih'
   if(type==='imageGenerate')return data.model?formatModelLabel(String(data.model)):'Model gambar belum dipilih'
   if(type==='imageEdit')return data.editMode==='aiEdit'?(data.model?`AI Edit · ${formatModelLabel(String(data.model))}`:'AI Edit · pilih model'):`Format IG ${String(data.aspectRatio||'4:5')}`
+  if(type==='videoGenerate'){const ratio=data.aspectRatio&&data.aspectRatio!=='ui-default'?String(data.aspectRatio):'Auto';const model=data.model&&data.model!=='ui-default'?String(data.model):'Google Flow';return `${ratio} · ${model}`}
   if(type==='aiVision')return data.model?`Vision · ${formatModelLabel(String(data.model))}`:'Analisis gambar AI'
   if(type==='aiAgent')return data.executionMode==='preview'?'Mode pratinjau':'Mode AI aktif'
   if(type==='memory')return `${String(data.windowSize||5)} percakapan terakhir`

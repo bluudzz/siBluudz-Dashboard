@@ -15,7 +15,10 @@
     "test": "node --experimental-strip-types --test \"tests/*.test.ts\"",
     "preview": "vite preview",
     "worker:run": "node scripts/opencode-worker.mjs run",
-    "worker:status": "node scripts/opencode-worker.mjs status"
+    "worker:status": "node scripts/opencode-worker.mjs status",
+    "flow:extension": "powershell -NoProfile -ExecutionPolicy Bypass -File data/google-flow-mcp/scripts/install-extension.ps1",
+    "flow:connect": "node data/google-flow-mcp/dist/cli.js account connect personal \"Google Flow Pro\"",
+    "flow:accounts": "node data/google-flow-mcp/dist/cli.js account list"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
