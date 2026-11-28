@@ -24,7 +24,7 @@ export function validateGraph(nodes, edges, forRun = false) {
     if (['__proto__', 'constructor', 'prototype'].includes(node?.id) || node?.id?.length > 200) errors.push('ID node tidak valid.')
     if (!TYPES.has(node?.type)) errors.push(`Tipe node tidak didukung: ${node?.type || 'kosong'}.`)
     if (!object(node?.data)) errors.push(`Parameter node ${node?.id} tidak valid.`)
-    for(const key of ['inputSource','inputField'])if(node?.data?.[key]!==undefined&&(typeof node.data[key]!=='string'||node.data[key].length>200))errors.push(`Pengaturan input node ${node?.id} tidak valid.`)
+    for (const key of ['inputSource', 'inputField']) if (node?.data?.[key] !== undefined && (typeof node.data[key] !== 'string' || node.data[key].length > 200)) errors.push(`Pengaturan input node ${node?.id} tidak valid.`)
     if (!Number.isFinite(node?.position?.x) || !Number.isFinite(node?.position?.y)) errors.push(`Posisi node ${node?.id} tidak valid.`)
   }
   if (errors.length) return [...new Set(errors)]
@@ -41,13 +41,13 @@ export function validateGraph(nodes, edges, forRun = false) {
     connections.add(signature)
     const source = nodes.find(n => n.id === edge.source)
     const target = nodes.find(n => n.id === edge.target)
-    if(isSubNode(source.type)||isSubNode(target.type)||isAiConnection(edge)) {
-      if(!isSubNode(source.type)||target.type!=='aiAgent'||edge.targetHandle!==aiPorts[source.type]||edge.sourceHandle!==aiPorts[source.type])errors.push('Hubungkan sub-node ke port AI Agent yang sesuai: Chat Model, Memory, atau Tool.')
-      if(['chatModel','memory'].includes(source.type)&&edges.filter(other=>other.target===edge.target&&other.targetHandle===edge.targetHandle).length>1)errors.push('AI Agent hanya dapat memakai satu Chat Model dan satu Memory.')
+    if (isSubNode(source.type) || isSubNode(target.type) || isAiConnection(edge)) {
+      if (!isSubNode(source.type) || target.type !== 'aiAgent' || edge.targetHandle !== aiPorts[source.type] || edge.sourceHandle !== aiPorts[source.type]) errors.push('Hubungkan sub-node ke port AI Agent yang sesuai: Chat Model, Memory, atau Tool.')
+      if (['chatModel', 'memory'].includes(source.type) && edges.filter(other => other.target === edge.target && other.targetHandle === edge.targetHandle).length > 1) errors.push('AI Agent hanya dapat memakai satu Chat Model dan satu Memory.')
     } else {
-    if (source.type === 'if' && !['true', 'false'].includes(edge.sourceHandle)) errors.push('Koneksi IF harus memakai output true atau false.')
-    if (source.type === 'switch' && !['case1', 'case2', 'case3', 'fallback'].includes(edge.sourceHandle)) errors.push('Koneksi Switch harus memakai output case1, case2, case3, atau fallback.')
-    if (isTrigger(target.type)) errors.push('Trigger tidak boleh menerima koneksi masuk.')
+      if (source.type === 'if' && !['true', 'false'].includes(edge.sourceHandle)) errors.push('Koneksi IF harus memakai output true atau false.')
+      if (source.type === 'switch' && !['case1', 'case2', 'case3', 'fallback'].includes(edge.sourceHandle)) errors.push('Koneksi Switch harus memakai output case1, case2, case3, atau fallback.')
+      if (isTrigger(target.type)) errors.push('Trigger tidak boleh menerima koneksi masuk.')
     }
     outgoing.get(edge.source).push(edge.target)
     degrees.set(edge.target, degrees.get(edge.target) + 1)
@@ -102,71 +102,71 @@ function parseItems(value, fallback = []) {
 }
 
 export function workflowInput(json) {
-  if(Object.hasOwn(json,'output'))return json.output
-  if(Array.isArray(json.pages)||Array.isArray(json.sources))return json
-  for (const key of ['prompt','chatInput','content']) {
-    const value=Object.hasOwn(json,key)?json[key]:undefined
-    if (value!==undefined&&value!==null&&(typeof value!=='string'||value.trim())) return value
+  if (Object.hasOwn(json, 'output')) return json.output
+  if (Array.isArray(json.pages) || Array.isArray(json.sources)) return json
+  for (const key of ['prompt', 'chatInput', 'content']) {
+    const value = Object.hasOwn(json, key) ? json[key] : undefined
+    if (value !== undefined && value !== null && (typeof value !== 'string' || value.trim())) return value
   }
   return json
 }
 
-export function workflowNodeInput(node,edges,results) {
-  const incoming=edges.filter(edge=>edge.target===node.id&&!isAiConnection(edge))
-  const source=String(node.data.inputSource||'')
-  if(source&&!incoming.some(edge=>edge.source===source))throw new Error('Sumber input sudah tidak terhubung. Pilih Otomatis atau hubungkan kembali node sumber.')
-  const items=incoming.filter(edge=>!source||edge.source===source).flatMap(edge=>{
-    const parent=results[edge.source]
-    return parent?(parent.branches?parent.branches[edge.sourceHandle]||[]:parent.output):[]
+export function workflowNodeInput(node, edges, results) {
+  const incoming = edges.filter(edge => edge.target === node.id && !isAiConnection(edge))
+  const source = String(node.data.inputSource || '')
+  if (source && !incoming.some(edge => edge.source === source)) throw new Error('Sumber input sudah tidak terhubung. Pilih Otomatis atau hubungkan kembali node sumber.')
+  const items = incoming.filter(edge => !source || edge.source === source).flatMap(edge => {
+    const parent = results[edge.source]
+    return parent ? (parent.branches ? parent.branches[edge.sourceHandle] || [] : parent.output) : []
   })
-  const field=String(node.data.inputField||'').trim()
-  if(!field)return items
-  if(field.split('.').some(key=>!key||['__proto__','prototype','constructor'].includes(key)))throw new Error('Field input tidak valid.')
-  return items.map(item=>{
-    const value=getPath(item.json,field)
-    return {json:{...item.json,output:value,...(typeof value==='string'?{prompt:value,chatInput:value}:{})}}
+  const field = String(node.data.inputField || '').trim()
+  if (!field) return items
+  if (field.split('.').some(key => !key || ['__proto__', 'prototype', 'constructor'].includes(key))) throw new Error('Field input tidak valid.')
+  return items.map(item => {
+    const value = getPath(item.json, field)
+    return { json: { ...item.json, output: value, ...(typeof value === 'string' ? { prompt: value, chatInput: value } : {}) } }
   })
 }
 
 export function workflowInputNode(node) {
-  if(!String(node.data.inputField||'').trim())return node
-  const operation=node.data.operation||'publish'
-  const key={
-    httpRequest:'url',
-    apiRequest:'url',
-    googleDrive:{shared:'sharedLink',list:'search',view:'fileId',download:'fileId'}[node.data.operation||'list'],
-    instagram:{publish:'imageUrl',stories:'imageUrl',reels:'videoUrl',inspect:'mediaId',comments:'mediaId'}[operation],
-    if:'field',
-    switch:'field',
-    notify:'message',
+  if (!String(node.data.inputField || '').trim()) return node
+  const operation = node.data.operation || 'publish'
+  const key = {
+    httpRequest: 'url',
+    apiRequest: 'url',
+    googleDrive: { shared: 'sharedLink', list: 'search', view: 'fileId', download: 'fileId' }[node.data.operation || 'list'],
+    instagram: { publish: 'imageUrl', stories: 'imageUrl', reels: 'videoUrl', inspect: 'mediaId', comments: 'mediaId' }[operation],
+    if: 'field',
+    switch: 'field',
+    notify: 'message',
   }[node.type]
-  const changes=node.type==='imageGenerate'||node.type==='imageEdit'||node.type==='aiVision'
-    ?{prompt:''}
-    :node.type==='searchContent'
-      ?(node.data.sourceMode==='url'?{url:'{{ $json.output }}'}:{query:''})
-      :key
-        ?{[key]:(node.type==='if'||node.type==='switch')?'output':'{{ $json.output }}'}
-        :{}
-  return {...node,data:{...node.data,...changes}}
+  const changes = node.type === 'imageGenerate' || node.type === 'imageEdit' || node.type === 'aiVision'
+    ? { prompt: '' }
+    : node.type === 'searchContent'
+      ? (node.data.sourceMode === 'url' ? { url: '{{ $json.output }}' } : { query: '' })
+      : key
+        ? { [key]: (node.type === 'if' || node.type === 'switch') ? 'output' : '{{ $json.output }}' }
+        : {}
+  return { ...node, data: { ...node.data, ...changes } }
 }
 
-function currentNodeOutput(node,json) {
-  const type=node.type
-  const operation=node.data.operation||(type==='googleDrive'?'list':'publish')
-  if (type==='aiAgent'||type==='aiVision') return {...json,prompt:json.output}
-  if (type==='apiRequest') return {...json,output:json.responseBody}
-  if (type==='splitOut') return {...json,output:workflowInput(json)}
-  if (type==='httpRequest'||type==='searchContent'&&json.researchMode==='url') return {...json,output:json.content}
-  const fields={
-    searchContent:['query','queries','followUpQueries','pages','sources','sourceCount','readCount','coverage','note'],
-    mediaFile:['referenceMedia','referenceCount','imagePreviewUrl','imageUrl','videoPreviewUrl','videoUrl','prompt'],
-    imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt'],
-    imageEdit:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','editMode','editedWidth','editedHeight'],
-    notify:['notificationStatus','notificationChannel','notificationMessage'],
-    googleDrive:operation==='list'?['driveFiles','driveHasMore','driveAccount']:['driveFile','driveDownloadUrl','driveSelection',...(['shared','download'].includes(operation)&&['image/jpeg','image/png'].includes(json.driveFile?.mimeType)?['imageUrl','imagePreviewUrl','imageMime']:[]),...(['shared','download'].includes(operation)&&['video/mp4','video/quicktime'].includes(json.driveFile?.mimeType)?['videoUrl','videoPreviewUrl','videoMime']:[])],
-    instagram:{list:['instagramPosts'],inspect:['instagramPost'],comments:['instagramComments'],insights:['instagramInsights']}[operation]||['instagramStatus','instagramMediaId','instagramImageCount','instagramMediaType'],
+function currentNodeOutput(node, json) {
+  const type = node.type
+  const operation = node.data.operation || (type === 'googleDrive' ? 'list' : 'publish')
+  if (type === 'aiAgent' || type === 'aiVision') return { ...json, prompt: json.output }
+  if (type === 'apiRequest') return { ...json, output: json.responseBody }
+  if (type === 'splitOut') return { ...json, output: workflowInput(json) }
+  if (type === 'httpRequest' || type === 'searchContent' && json.researchMode === 'url') return { ...json, output: json.content }
+  const fields = {
+    searchContent: ['query', 'queries', 'followUpQueries', 'pages', 'sources', 'sourceCount', 'readCount', 'coverage', 'note'],
+    mediaFile: ['referenceMedia', 'referenceCount', 'imagePreviewUrl', 'imageUrl', 'videoPreviewUrl', 'videoUrl', 'prompt'],
+    imageGenerate: ['imageUrl', 'imagePreviewUrl', 'imageMime', 'imageModel', 'imagePrompt'],
+    imageEdit: ['imageUrl', 'imagePreviewUrl', 'imageMime', 'imageModel', 'imagePrompt', 'editMode', 'editedWidth', 'editedHeight'],
+    notify: ['notificationStatus', 'notificationChannel', 'notificationMessage'],
+    googleDrive: operation === 'list' ? ['driveFiles', 'driveHasMore', 'driveAccount'] : ['driveFile', 'driveDownloadUrl', 'driveSelection', ...(['shared', 'download'].includes(operation) && ['image/jpeg', 'image/png'].includes(json.driveFile?.mimeType) ? ['imageUrl', 'imagePreviewUrl', 'imageMime'] : []), ...(['shared', 'download'].includes(operation) && ['video/mp4', 'video/quicktime'].includes(json.driveFile?.mimeType) ? ['videoUrl', 'videoPreviewUrl', 'videoMime'] : [])],
+    instagram: { list: ['instagramPosts'], inspect: ['instagramPost'], comments: ['instagramComments'], insights: ['instagramInsights'] }[operation] || ['instagramStatus', 'instagramMediaId', 'instagramImageCount', 'instagramMediaType'],
   }[type]
-  return fields?{...json,output:Object.fromEntries(fields.filter(key=>Object.hasOwn(json,key)).map(key=>[key,json[key]]))}:json
+  return fields ? { ...json, output: Object.fromEntries(fields.filter(key => Object.hasOwn(json, key)).map(key => [key, json[key]])) } : json
 }
 
 function findBalancedJsonEnd(text, start) {
@@ -196,14 +196,14 @@ function extractJsonValue(raw) {
   const trimmed = raw.trim()
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
   const candidate = fenced ? fenced[1].trim() : trimmed
-  try { return JSON.parse(candidate) } catch {}
+  try { return JSON.parse(candidate) } catch { }
   const objStart = candidate.indexOf('{')
   const arrStart = candidate.indexOf('[')
   const start = objStart >= 0 && arrStart >= 0 ? Math.min(objStart, arrStart) : Math.max(objStart, arrStart)
   if (start >= 0) {
     const end = findBalancedJsonEnd(candidate, start)
     if (end > start) {
-      try { return JSON.parse(candidate.slice(start, end + 1)) } catch {}
+      try { return JSON.parse(candidate.slice(start, end + 1)) } catch { }
     }
   }
   throw new Error('Teks input bukan JSON yang valid.')
@@ -226,11 +226,11 @@ function evaluateCondition(value, operator, expected) {
   throw new Error('Operator kondisi tidak didukung.')
 }
 
-function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{}) {
-  const edges=allEdges.filter(edge=>!isAiConnection(edge))
+function* graphSteps(nodes, allEdges, targetNodeId, live = false, onProgress = () => { }) {
+  const edges = allEdges.filter(edge => !isAiConnection(edge))
   const errors = validateGraph(nodes, allEdges, true)
   if (targetNodeId && !nodes.some(n => n.id === targetNodeId)) errors.push('Node tujuan tidak ditemukan.')
-  if(targetNodeId&&isSubNode(nodes.find(node=>node.id===targetNodeId)?.type))errors.push('Sub-node dijalankan melalui AI Agent. Pilih Execute step pada AI Agent.')
+  if (targetNodeId && isSubNode(nodes.find(node => node.id === targetNodeId)?.type)) errors.push('Sub-node dijalankan melalui AI Agent. Pilih Execute step pada AI Agent.')
   if (errors.length) throw new Error(errors.join(' '))
   const allowed = new Set()
   if (targetNodeId) {
@@ -241,7 +241,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
   const degrees = new Map(nodes.map(n => [n.id, edges.filter(e => e.target === n.id).length]))
   const queue = nodes.filter(n => degrees.get(n.id) === 0).map(n => n.id)
   const order = []
-  while (queue.length) { const id = queue.shift(); order.push(id); for (const edge of edges.filter(e => e.source === id)) { degrees.set(edge.target, degrees.get(edge.target)-1); if (degrees.get(edge.target) === 0) queue.push(edge.target) } }
+  while (queue.length) { const id = queue.shift(); order.push(id); for (const edge of edges.filter(e => e.source === id)) { degrees.set(edge.target, degrees.get(edge.target) - 1); if (degrees.get(edge.target) === 0) queue.push(edge.target) } }
   const nodeResults = {}
   const logs = []
   let failed = false
@@ -258,7 +258,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
   for (const id of order) {
     if (!allowed.has(id)) continue
     const node = workflowInputNode(nodes.find(n => n.id === id))
-    if(isSubNode(node.type))continue
+    if (isSubNode(node.type)) continue
     const data = node.data
     const start = Date.now()
     let input = edges.filter(e => e.target === id).flatMap(e => {
@@ -268,17 +268,19 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
     })
     const result = { nodeId: id, label: data.label || node.type, status: 'success', input, output: [], durationMs: 0 }
     nodeResults[id] = result
-    onProgress({phase:'start',nodeId:id,label:result.label})
+    onProgress({ phase: 'start', nodeId: id, label: result.label })
     try {
-      if(!failed&&!blocked.has(id)&&!data.disabled&&data.pinnedOutput==null&&!isStartNode(node,edges)) {
-        input=workflowNodeInput(node,edges,nodeResults)
-        result.input=input
+      if (!failed && !blocked.has(id) && !data.disabled && data.pinnedOutput == null && !isStartNode(node, edges)) {
+        input = workflowNodeInput(node, edges, nodeResults)
+        result.input = input
       }
       if (input.length > 1000) throw new Error('Input gabungan melebihi batas 1000 item per node.')
       if (failed || blocked.has(id) || (!isStartNode(node, edges) && input.length === 0)) { result.status = 'skipped'; result.message = blocked.has(id) ? 'Menunggu persetujuan manual.' : failed ? 'Dilewati karena eksekusi sebelumnya gagal.' : 'Tidak ada item masuk pada cabang ini.' }
-      else if (data.disabled) { result.status = 'skipped'; result.output = input; result.message = 'Node dinonaktifkan; input diteruskan.'; if(node.type === 'if') result.branches = {true:input,false:[]}; if(node.type === 'switch') result.branches = {case1:input,case2:[],case3:[],fallback:[]} }
-      else if (data.pinnedOutput !== undefined && data.pinnedOutput !== null) { result.output = parseItems(data.pinnedOutput); result.status = 'pinned'; result.message = 'Menggunakan data pin untuk pengujian.'; if(node.type === 'if') throw new Error('Pin pada IF belum didukung. Pin data pada node sebelum IF.'); if(node.type === 'switch') throw new Error('Pin pada Switch belum didukung. Pin data pada node sebelum Switch.') }
+      else if (data.disabled) { result.status = 'skipped'; result.output = input; result.message = 'Node dinonaktifkan; input diteruskan.'; if (node.type === 'if') result.branches = { true: input, false: [] }; if (node.type === 'switch') result.branches = { case1: input, case2: [], case3: [], fallback: [] } }
+      else if (data.pinnedOutput !== undefined && data.pinnedOutput !== null) { result.output = parseItems(data.pinnedOutput); result.status = 'pinned'; result.message = 'Menggunakan data pin untuk pengujian.'; if (node.type === 'if') throw new Error('Pin pada IF belum didukung. Pin data pada node sebelum IF.'); if (node.type === 'switch') throw new Error('Pin pada Switch belum didukung. Pin data pada node sebelum Switch.') }
       else if (node.type === 'mediaFile') {
+        const nodePrompt = String(data.prompt || '').trim()
+        if (nodePrompt.length > 20000) throw new Error('Prompt referensi maksimal 20.000 karakter.')
         const rawFiles = Array.isArray(data.files) ? data.files : []
         const files = rawFiles
           .filter(file => object(file) && typeof file.previewUrl === 'string' && /^\/api\/workflow-media\/[a-f0-9]{48}$/i.test(file.previewUrl))
@@ -290,12 +292,11 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
             mimeType: typeof file.mimeType === 'string' && file.mimeType ? file.mimeType : (file.mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
             fileName: typeof file.fileName === 'string' ? file.fileName.slice(0, 120) : '',
             category: typeof file.category === 'string' && file.category ? file.category : ((file.mediaType === 'video' || String(file.mimeType || '').startsWith('video/')) ? 'motion' : 'subject'),
+            ...(nodePrompt ? { note: nodePrompt } : {}),
           }))
         if (!files.length) throw new Error('Unggah minimal 1 foto atau video referensi pada node File / Media Referensi.')
         const firstImage = files.find(file => file.mediaType === 'image')
         const firstVideo = files.find(file => file.mediaType === 'video')
-        const nodePrompt = String(data.prompt || '').trim()
-        if (nodePrompt.length > 20000) throw new Error('Prompt referensi maksimal 20.000 karakter.')
         const mediaFields = {
           referenceMedia: files,
           referenceCount: files.length,
@@ -309,21 +310,21 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
       }
       else if (node.type === 'trigger') result.output = parseItems(data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
       else if (node.type === 'webhookTrigger') result.output = parseItems(data.webhookPayload ?? data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
-      else if (node.type === 'chatTrigger') result.output = [{json:{chatInput:String(data.chatInput||''),sessionId:String(data.sessionId||'test-session')}}]
+      else if (node.type === 'chatTrigger') result.output = [{ json: { chatInput: String(data.chatInput || ''), sessionId: String(data.sessionId || 'test-session') } }]
       else if (node.type === 'promptTrigger') {
-        const prompt=String(data.prompt||'').trim()
-        if(!prompt||prompt.length>16000)throw new Error('Tulis prompt pemicu, maksimal 16.000 karakter.')
-        const mode=String(data.promptMode||'normal')
-        if(mode==='normal') {
-          result.output=[{json:{prompt,originalPrompt:prompt}}]
-          result.message='Prompt diteruskan tanpa memanggil AI.'
-        } else if(mode==='ai') {
-          if(!live)throw new Error('Mode AI Prompt Trigger hanya dapat dijalankan melalui backend.')
-          const response=yield {kind:'promptTrigger',node,input:[]}
-          if(response.error)throw new Error(response.error)
-          result.output=response.output
-          result.message='AI menyelesaikan prompt dan mengirim hasilnya ke langkah berikutnya.'
-          usedLive=true
+        const prompt = String(data.prompt || '').trim()
+        if (!prompt || prompt.length > 16000) throw new Error('Tulis prompt pemicu, maksimal 16.000 karakter.')
+        const mode = String(data.promptMode || 'normal')
+        if (mode === 'normal') {
+          result.output = [{ json: { prompt, originalPrompt: prompt } }]
+          result.message = 'Prompt diteruskan tanpa memanggil AI.'
+        } else if (mode === 'ai') {
+          if (!live) throw new Error('Mode AI Prompt Trigger hanya dapat dijalankan melalui backend.')
+          const response = yield { kind: 'promptTrigger', node, input: [] }
+          if (response.error) throw new Error(response.error)
+          result.output = response.output
+          result.message = 'AI menyelesaikan prompt dan mengirim hasilnya ke langkah berikutnya.'
+          usedLive = true
         } else throw new Error('Mode Prompt Trigger tidak didukung.')
       }
       else if (node.type === 'approval') {
@@ -332,12 +333,12 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
       }
       else if (node.type === 'searchContent' || node.type === 'httpRequest' || node.type === 'apiRequest' || node.type === 'googleDrive') {
         if (!live) throw new Error('Langkah internet hanya dapat diuji lewat backend.')
-        const kind = node.type==='googleDrive'?'googleDrive':node.type==='searchContent'?'research':node.type==='apiRequest'?'apiRequest':'external'
-        const response = yield {kind,node,input}
+        const kind = node.type === 'googleDrive' ? 'googleDrive' : node.type === 'searchContent' ? 'research' : node.type === 'apiRequest' ? 'apiRequest' : 'external'
+        const response = yield { kind, node, input }
         if (response.error) throw new Error(response.error)
         result.output = response.output
         usedLive = true
-        result.message = node.type === 'searchContent' ? 'Informasi dan isi sumber berhasil diambil; gunakan hanya halaman yang berhasil dibaca.' : node.type==='googleDrive'?'File Google Drive berhasil dibaca.':node.type==='apiRequest'?'Permintaan HTTP selesai; lihat status dan respons di Output.':'Respons halaman/API berhasil diambil.'
+        result.message = node.type === 'searchContent' ? 'Informasi dan isi sumber berhasil diambil; gunakan hanya halaman yang berhasil dibaca.' : node.type === 'googleDrive' ? 'File Google Drive berhasil dibaca.' : node.type === 'apiRequest' ? 'Permintaan HTTP selesai; lihat status dan respons di Output.' : 'Respons halaman/API berhasil diambil.'
       }
       else if (node.type === 'imageGenerate' || node.type === 'imageEdit' || node.type === 'videoGenerate' || node.type === 'aiVision' || node.type === 'instagram' || node.type === 'notify') {
         if (!live) throw new Error('Langkah ini hanya dapat diuji lewat backend.')
@@ -348,22 +349,22 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
           const approved = nodes.some(candidate => candidate.type === 'approval' && parents.has(candidate.id) && nodeResults[candidate.id]?.status === 'success' && nodeResults[candidate.id].output.length > 0)
           if (!approved) throw new Error('Publikasi memerlukan hasil Persetujuan Manual yang benar-benar sudah dijalankan.')
         }
-        const response = yield {kind:node.type,node,input}
+        const response = yield { kind: node.type, node, input }
         if (response.error) throw new Error(response.error)
         result.output = response.output
         usedLive = true
         result.message = node.type === 'imageGenerate' ? (data.provider === 'googleFlow' ? 'Gambar dibuat lewat Google Flow; periksa hasil sebelum langkah berikutnya.' : 'Gambar dibuat dengan model 9router; periksa hasil sebelum publikasi.')
           : node.type === 'imageEdit' ? 'Gambar selesai diolah; periksa hasil sebelum langkah berikutnya.'
-          : node.type === 'videoGenerate' ? 'Video selesai dibuat lewat Google Flow; periksa pratinjau sebelum langkah berikutnya.'
-          : node.type === 'aiVision' ? 'Gambar selesai dianalisis oleh AI Vision.'
-          : node.type === 'notify' ? 'Notifikasi berhasil dikirim.'
-          : 'Operasi Instagram selesai; lihat ID dan status post pada hasil.'
+            : node.type === 'videoGenerate' ? 'Video selesai dibuat lewat Google Flow; periksa pratinjau sebelum langkah berikutnya.'
+              : node.type === 'aiVision' ? 'Gambar selesai dianalisis oleh AI Vision.'
+                : node.type === 'notify' ? 'Notifikasi berhasil dikirim.'
+                  : 'Operasi Instagram selesai; lihat ID dan status post pada hasil.'
       }
       else if (node.type === 'wait') {
         const seconds = Number(data.durationSeconds ?? 5)
         if (!Number.isFinite(seconds) || seconds < 0.1 || seconds > 300) throw new Error('Durasi tunda harus antara 0,1 dan 300 detik.')
         if (live) {
-          const response = yield {kind:'wait',node,input,durationMs:Math.round(seconds*1000)}
+          const response = yield { kind: 'wait', node, input, durationMs: Math.round(seconds * 1000) }
           if (response.error) throw new Error(response.error)
           result.output = response.output ?? input
           usedLive = true
@@ -447,37 +448,37 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         const fields = typeof data.fields === 'string' ? JSON.parse(data.fields || '{}') : data.fields || {}
         if (!object(fields)) throw new Error('Fields harus berupa objek JSON.')
         result.output = input.map(item => {
-          const updated=resolveValue(fields,item.json)
-          const json={...(data.keepInput!==false?item.json:{}),...updated}
-          const changed=['output','prompt','content','chatInput','query','topic','input','text'].find(key=>Object.hasOwn(updated,key))
-          if(changed){json.output=updated[changed];if(typeof json.output==='string')json.prompt=json.output}
-          return {json}
+          const updated = resolveValue(fields, item.json)
+          const json = { ...(data.keepInput !== false ? item.json : {}), ...updated }
+          const changed = ['output', 'prompt', 'content', 'chatInput', 'query', 'topic', 'input', 'text'].find(key => Object.hasOwn(updated, key))
+          if (changed) { json.output = updated[changed]; if (typeof json.output === 'string') json.prompt = json.output }
+          return { json }
         })
-       } else if (node.type === 'splitOut') {
-         const sourceField = 'output'
-         const arrayField = 'prompts'
-         const expectedCount = Number(data.splitCount ?? 3)
-         result.output = input.flatMap(item => {
-           const source = getPath(item.json, sourceField)
-           const parsed = typeof source === 'string' ? JSON.parse(source) : source
-           const values = object(parsed) && Array.isArray(parsed[arrayField]) ? parsed[arrayField] : null
-           if (!values || values.some(value => !object(value))) throw new Error('Hasil AI Agent harus berupa JSON dengan daftar prompts berisi objek.')
-           if (values.length !== expectedCount) throw new Error(`Split Out meminta ${expectedCount} output, tetapi AI Agent menghasilkan ${values.length}. Periksa instruksi AI Agent.`)
-           return values.map((value, index) => ({json:{...value,splitIndex:index+1}}))
-         })
-       } else if (node.type === 'if') {
+      } else if (node.type === 'splitOut') {
+        const sourceField = 'output'
+        const arrayField = 'prompts'
+        const expectedCount = Number(data.splitCount ?? 3)
+        result.output = input.flatMap(item => {
+          const source = getPath(item.json, sourceField)
+          const parsed = typeof source === 'string' ? JSON.parse(source) : source
+          const values = object(parsed) && Array.isArray(parsed[arrayField]) ? parsed[arrayField] : null
+          if (!values || values.some(value => !object(value))) throw new Error('Hasil AI Agent harus berupa JSON dengan daftar prompts berisi objek.')
+          if (values.length !== expectedCount) throw new Error(`Split Out meminta ${expectedCount} output, tetapi AI Agent menghasilkan ${values.length}. Periksa instruksi AI Agent.`)
+          return values.map((value, index) => ({ json: { ...value, splitIndex: index + 1 } }))
+        })
+      } else if (node.type === 'if') {
         const yes = [], no = []
         const operator = String(data.operator || 'equals')
         if (!CONDITION_OPERATORS.includes(operator)) throw new Error('Operator IF tidak didukung.')
         for (const item of input) {
           let value
-          try { value = getPath(item.json, String(data.field || '')) } catch (error) { if(!['exists', 'isEmpty'].includes(operator)) throw error }
+          try { value = getPath(item.json, String(data.field || '')) } catch (error) { if (!['exists', 'isEmpty'].includes(operator)) throw error }
           const expected = ['exists', 'isEmpty'].includes(operator) ? '' : resolveValue(data.value ?? '', item.json)
           const pass = evaluateCondition(value, operator, expected)
-          ;(pass ? yes : no).push(item)
+            ; (pass ? yes : no).push(item)
         }
         result.branches = { true: yes, false: no }; result.output = [...yes, ...no]
-       } else if (node.type === 'switch') {
+      } else if (node.type === 'switch') {
         if (!String(data.field || '').trim()) throw new Error('Pilih informasi yang ingin diperiksa pada node Switch.')
         const branches = { case1: [], case2: [], case3: [], fallback: [] }
         const rules = [1, 2, 3].map(n => ({
@@ -502,52 +503,54 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         }
         result.branches = branches
         result.output = [...branches.case1, ...branches.case2, ...branches.case3, ...branches.fallback]
-       } else if(node.type==='aiAgent'&&data.executionMode==='live') {
-        if(!live)throw new Error('AI Agent aktif memerlukan runtime backend. Gunakan endpoint Execute atau Uji chat.')
-        const resources=agentResources(node.id,nodes,allEdges)
-        if(!resources.model||resources.model.data.disabled)throw new Error('Hubungkan Chat Model yang aktif ke port Chat Model AI Agent.')
-        usedLive=true
-         const splitTarget=edges.map(edge=>nodes.find(candidate=>candidate.id===edge.target)).find(candidate=>candidate?.type==='splitOut'&&edges.some(edge=>edge.source===node.id&&edge.target===candidate.id))
-         const executionNode=splitTarget?{...node,data:{...node.data,splitOutCount:Number(splitTarget.data.splitCount??3)}}:node
-         const response=yield {kind:'agent',node:executionNode,input,resources}
-        if(response.error)throw new Error(response.error)
-         result.output=response.output
-         result.message='AI Agent memanggil model 9router; lihat output dan jejak tool.'
-       }
-       else {
+      } else if (node.type === 'aiAgent' && data.executionMode === 'live') {
+        if (!live) throw new Error('AI Agent aktif memerlukan runtime backend. Gunakan endpoint Execute atau Uji chat.')
+        const resources = agentResources(node.id, nodes, allEdges)
+        if (!resources.model || resources.model.data.disabled) throw new Error('Hubungkan Chat Model yang aktif ke port Chat Model AI Agent.')
+        usedLive = true
+        const splitTarget = edges.map(edge => nodes.find(candidate => candidate.id === edge.target)).find(candidate => candidate?.type === 'splitOut' && edges.some(edge => edge.source === node.id && edge.target === candidate.id))
+        const executionNode = splitTarget ? { ...node, data: { ...node.data, splitOutCount: Number(splitTarget.data.splitCount ?? 3) } } : node
+        const response = yield { kind: 'agent', node: executionNode, input, resources }
+        if (response.error) throw new Error(response.error)
+        result.output = response.output
+        result.message = 'AI Agent memanggil model 9router; lihat output dan jejak tool.'
+      }
+      else {
         result.status = 'simulated'
         result.message = 'Pratinjau konfigurasi; tidak ada layanan eksternal yang dipanggil.'
-        result.output = input.map(item => ({ json: {
-          ...item.json,
-           preview: { type: node.type, model: data.aiModel || data.model || '', prompt: resolveValue(data.aiPrompt || '', item.json), status: 'not_requested' },
-        } }))
+        result.output = input.map(item => ({
+          json: {
+            ...item.json,
+            preview: { type: node.type, model: data.aiModel || data.model || '', prompt: resolveValue(data.aiPrompt || '', item.json), status: 'not_requested' },
+          }
+        }))
       }
     } catch (error) { result.status = 'error'; result.error = error.message; result.output = []; failed = true }
-    if(result.status==='success'&&!data.disabled&&data.pinnedOutput==null&&node.type!=='approval') {
-      result.output=result.output.map(item=>({...item,json:currentNodeOutput(node,item.json)}))
+    if (result.status === 'success' && !data.disabled && data.pinnedOutput == null && node.type !== 'approval') {
+      result.output = result.output.map(item => ({ ...item, json: currentNodeOutput(node, item.json) }))
     }
     result.durationMs = Date.now() - start
-    logs.push({ nodeId:id, step:result.label, status:result.status, time:new Date().toISOString(), message:result.error || result.message || `${result.output.length} item dihasilkan.` })
-    onProgress({phase:'complete',nodeId:id,label:result.label,status:result.status,error:result.error,result})
+    logs.push({ nodeId: id, step: result.label, status: result.status, time: new Date().toISOString(), message: result.error || result.message || `${result.output.length} item dihasilkan.` })
+    onProgress({ phase: 'complete', nodeId: id, label: result.label, status: result.status, error: result.error, result })
   }
-  return { status: failed ? 'error' : awaitingApproval ? 'waiting_approval' : 'completed', mode: usedLive?'live':'simulation', nodeResults, nodeOutputs: Object.fromEntries(Object.entries(nodeResults).map(([id,result]) => [id,result.output])), logs }
+  return { status: failed ? 'error' : awaitingApproval ? 'waiting_approval' : 'completed', mode: usedLive ? 'live' : 'simulation', nodeResults, nodeOutputs: Object.fromEntries(Object.entries(nodeResults).map(([id, result]) => [id, result.output])), logs }
 }
 
-export function executeGraph(nodes,edges,targetNodeId) {
-  return graphSteps(nodes,edges,targetNodeId).next().value
+export function executeGraph(nodes, edges, targetNodeId) {
+  return graphSteps(nodes, edges, targetNodeId).next().value
 }
-export async function executeGraphAsync(nodes,edges,targetNodeId,runAgent,onProgress=()=>{},signal) {
-  const steps=graphSteps(nodes,edges,targetNodeId,true,onProgress)
-  let step=steps.next()
-  while(!step.done){
+export async function executeGraphAsync(nodes, edges, targetNodeId, runAgent, onProgress = () => { }, signal) {
+  const steps = graphSteps(nodes, edges, targetNodeId, true, onProgress)
+  let step = steps.next()
+  while (!step.done) {
     let response
-    if(signal?.aborted)response={error:'Pengujian dihentikan pengguna.'}
-    else try { response={output:await runAgent(step.value)} }
-    catch(error) { response={error:error.message} }
-    step=steps.next(response)
-    if(signal?.aborted){
-      while(!step.done)step=steps.next({error:'Pengujian dihentikan pengguna.'})
-      return {...step.value,status:'cancelled'}
+    if (signal?.aborted) response = { error: 'Pengujian dihentikan pengguna.' }
+    else try { response = { output: await runAgent(step.value) } }
+    catch (error) { response = { error: error.message } }
+    step = steps.next(response)
+    if (signal?.aborted) {
+      while (!step.done) step = steps.next({ error: 'Pengujian dihentikan pengguna.' })
+      return { ...step.value, status: 'cancelled' }
     }
   }
   return step.value

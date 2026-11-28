@@ -270,5 +270,69 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
     assert.equal((fanInCalls[0].args.referenceFiles as string[]).length, 2)
     assert.match(String(fanInCalls[0].args.prompt), /Karakter \/ Subjek/)
     assert.match(String(fanInCalls[0].args.prompt), /Referensi Gerakan/)
+
+    // Exact 3-node parallel workflow: Prompt Trigger + video mediaFile (with note) + photo mediaFile (with note)
+    const parallelNodes = [
+      { id: 'pt-main', type: 'promptTrigger', position: { x: 0, y: 0 }, data: { label: 'Prompt Utama', prompt: 'buat video sesuai gerakan video referensi, memakai wajah foto referensi', promptMode: 'normal' } },
+      { id: 'mf-vid', type: 'mediaFile', position: { x: 0, y: 200 }, data: { label: 'Video Ref', files: [{ ...uploadedVideo, category: 'motion' }], prompt: 'gaya video dan gerakan harus seperti ini' } },
+      { id: 'mf-img', type: 'mediaFile', position: { x: 0, y: 400 }, data: { label: 'Foto Ref', files: [{ ...uploadedPhoto, category: 'subject' }], prompt: 'lalu pakai muka ini' } },
+      { id: 'vg-par', type: 'videoGenerate', position: { x: 320, y: 200 }, data: { label: 'Generate Video', model: 'omni-1-2-flash', aspectRatio: '9:16', useInputImage: true } },
+    ]
+    const parallelEdges = [
+      { id: 'e-pt-vg', source: 'pt-main', target: 'vg-par' },
+      { id: 'e-mv-vg', source: 'mf-vid', target: 'vg-par' },
+      { id: 'e-mi-vg', source: 'mf-img', target: 'vg-par' },
+    ]
+    const parallelCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const parallelResult = await executeGraphAsync(parallelNodes, parallelEdges, undefined, async context => {
+      if (context.kind === 'videoGenerate') {
+        return runVideoNode(context, { id: 'u-media', role: 'admin' }, {
+          callTool: async (name: string, args: Record<string, unknown>) => {
+            parallelCalls.push({ name, args })
+            if (name === 'flow_generate_video') return { id: 'par3-vid-job', status: 'processing' }
+            return { id: 'par3-vid-job', status: 'completed', downloadedFiles: [fakeVidOut] }
+          },
+          outputDirectory: tempDir,
+        })
+      }
+      throw new Error(`Unexpected kind: ${context.kind}`)
+    })
+    assert.equal(parallelResult.status, 'completed')
+    const parGenCalls = parallelCalls.filter(c => c.name === 'flow_generate_video')
+    assert.equal(parGenCalls.length, 1)
+    assert.equal((parGenCalls[0].args.referenceFiles as string[]).length, 2)
+    const parPrompt = String(parGenCalls[0].args.prompt)
+    assert.match(parPrompt, /buat video sesuai gerakan video referensi, memakai wajah foto referensi/)
+    assert.match(parPrompt, /Referensi Gerakan \/ Kamera/)
+    assert.match(parPrompt, /Catatan: gaya video dan gerakan harus seperti ini/)
+    assert.match(parPrompt, /Karakter \/ Subjek utama/)
+    assert.match(parPrompt, /Catatan: lalu pakai muka ini/)
+
+    // Two mediaFile nodes directly merged without a Prompt Trigger
+    const mediaOnlyCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const mediaOnlyOut = await runVideoNode(
+      {
+        node: { id: 'vg-media-only', data: { useInputImage: true } },
+        input: [
+          { json: { referenceMedia: [{ ...uploadedVideo, category: 'motion', note: 'Ikuti gerakan cepat' }], videoPreviewUrl: uploadedVideo.previewUrl, prompt: 'Ikuti gerakan cepat' } },
+          { json: { referenceMedia: [{ ...uploadedPhoto, category: 'subject', note: 'Pakai wajah ini' }], imagePreviewUrl: uploadedPhoto.previewUrl, prompt: 'Pakai wajah ini' } },
+        ],
+      },
+      { id: 'u-media', role: 'admin' },
+      {
+        callTool: async (name: string, args: Record<string, unknown>) => {
+          mediaOnlyCalls.push({ name, args })
+          if (name === 'flow_generate_video') return { id: 'media-only-job', status: 'processing' }
+          return { id: 'media-only-job', status: 'completed', downloadedFiles: [fakeVidOut] }
+        },
+        outputDirectory: tempDir,
+      },
+    )
+    assert.equal(mediaOnlyOut.length, 1)
+    const mediaOnlyGenCalls = mediaOnlyCalls.filter(c => c.name === 'flow_generate_video')
+    assert.equal(mediaOnlyGenCalls.length, 1)
+    assert.equal((mediaOnlyGenCalls[0].args.referenceFiles as string[]).length, 2)
+    assert.match(String(mediaOnlyGenCalls[0].args.prompt), /Ikuti gerakan cepat/)
+    assert.match(String(mediaOnlyGenCalls[0].args.prompt), /Pakai wajah ini/)
   })
 })

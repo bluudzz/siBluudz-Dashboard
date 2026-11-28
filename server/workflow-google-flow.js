@@ -406,25 +406,31 @@ function mergeParallelReferenceInputs(input, node, mediaKind) {
       : latest
     return typeof autoPrompt === 'string' && Boolean(autoPrompt.trim())
   }
-  const hasRefMedia = item => {
+  const isMediaFileItem = item => Array.isArray(item?.json?.referenceMedia) && item.json.referenceMedia.length > 0
+  const hasAnyMedia = item => {
     const j = item?.json || {}
-    return Boolean(
-      (Array.isArray(j.referenceMedia) && j.referenceMedia.length)
-      || j.imagePreviewUrl || j.imageUrl || j.videoPreviewUrl || j.videoUrl,
-    )
+    return isMediaFileItem(item) || Boolean(j.imagePreviewUrl || j.imageUrl || j.videoPreviewUrl || j.videoUrl)
   }
 
-  const promptItems = input.filter(isPromptCarrier)
-  const refOnlyItems = input.filter(item => !isPromptCarrier(item) && hasRefMedia(item))
-  if (!refOnlyItems.length) return input
+  const refCarrierItems = input.filter(item => isMediaFileItem(item) || (!isPromptCarrier(item) && hasAnyMedia(item)))
+  const targetItems = input.filter(item => !refCarrierItems.includes(item))
+  if (!refCarrierItems.length) return input
 
   const combinedRefs = []
+  const refNotes = []
   let firstImage = null
   let firstVideo = null
-  for (const refItem of refOnlyItems) {
+  for (const refItem of refCarrierItems) {
     const j = refItem.json || {}
+    const fallbackNote = typeof j.prompt === 'string' ? j.prompt.trim() : ''
+    if (fallbackNote && !refNotes.includes(fallbackNote)) {
+      refNotes.push(fallbackNote)
+    }
     if (Array.isArray(j.referenceMedia)) {
-      combinedRefs.push(...j.referenceMedia)
+      for (const entry of j.referenceMedia) {
+        const note = String(entry?.note || fallbackNote || '').trim()
+        combinedRefs.push({ ...entry, ...(note ? { note } : {}) })
+      }
     } else {
       if (j.imagePreviewUrl || j.imageUrl) {
         combinedRefs.push({
@@ -433,6 +439,7 @@ function mergeParallelReferenceInputs(input, node, mediaKind) {
           mediaType: 'image',
           fileName: j.fileName || '',
           category: j.category || 'subject',
+          ...(fallbackNote ? { note: fallbackNote } : {}),
         })
       }
       if (j.videoPreviewUrl || j.videoUrl) {
@@ -442,6 +449,7 @@ function mergeParallelReferenceInputs(input, node, mediaKind) {
           mediaType: 'video',
           fileName: j.fileName || '',
           category: j.category || 'motion',
+          ...(fallbackNote ? { note: fallbackNote } : {}),
         })
       }
     }
@@ -453,8 +461,8 @@ function mergeParallelReferenceInputs(input, node, mediaKind) {
     }
   }
 
-  if (promptItems.length > 0) {
-    return promptItems.map(item => ({
+  if (targetItems.length > 0) {
+    return targetItems.map(item => ({
       json: {
         ...item.json,
         ...(firstImage && !item.json.imagePreviewUrl ? firstImage : {}),
@@ -467,12 +475,14 @@ function mergeParallelReferenceInputs(input, node, mediaKind) {
     }))
   }
 
-  if (hasExplicitPrompt) {
+  if (hasExplicitPrompt || refCarrierItems.every(isMediaFileItem)) {
+    const combinedPrompt = refNotes.join('\n').trim()
     return [{
       json: {
         ...(firstImage || {}),
         ...(firstVideo || {}),
         referenceMedia: combinedRefs,
+        ...(combinedPrompt ? { prompt: combinedPrompt } : {}),
       },
     }]
   }
@@ -489,10 +499,12 @@ function resolveReferenceFiles({ node, item, userId, useInputImage, resolveMedia
     seen.add(filePath)
     files.push(filePath)
     const mediaType = meta.mediaType === 'video' ? 'video' : 'image'
+    const note = typeof meta.note === 'string' ? meta.note.trim().replace(/\s+/g, ' ') : ''
     descriptors.push({
       fileName: meta.fileName || path.basename(filePath),
       mediaType,
       category: meta.category || (mediaType === 'video' ? 'motion' : 'subject'),
+      note,
     })
   }
   const addMediaRef = (rawUrl, meta = {}) => {
@@ -542,7 +554,8 @@ function applyReferenceInstructions(prompt, descriptors) {
   if (!Array.isArray(descriptors) || !descriptors.length) return prompt
   const lines = descriptors.map((ref, idx) => {
     const guide = REFERENCE_CATEGORY_GUIDES[ref.category] || REFERENCE_CATEGORY_GUIDES.general
-    return `- Lampiran #${idx + 1} (${ref.fileName}): ${guide}`
+    const notePart = ref.note ? ` — Catatan: ${ref.note}` : ''
+    return `- Lampiran #${idx + 1} (${ref.fileName}): ${guide}${notePart}`
   })
   return `[Gunakan file referensi terlampir sesuai kategori berikut:\n${lines.join('\n')}]\n\n${prompt}`
 }
