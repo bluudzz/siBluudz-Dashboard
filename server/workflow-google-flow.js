@@ -413,6 +413,8 @@ async function runFlowGenerationJob({
   accountId,
   model,
   aspectRatio,
+  outputs = 1,
+  reasoningLevel = 'ui-default',
   upscale,
   referenceFiles,
   targetOutputDir,
@@ -428,7 +430,10 @@ async function runFlowGenerationJob({
       prompt,
       model,
       aspectRatio,
-      outputs: 1,
+      outputs,
+      ...(toolName === 'flow_generate_image' && reasoningLevel && reasoningLevel !== 'ui-default'
+        ? { reasoningLevel }
+        : {}),
       referenceFiles,
       ...(toolName === 'flow_generate_video' ? { upscale } : {}),
       outputDirectory: targetOutputDir,
@@ -463,11 +468,12 @@ async function runFlowGenerationJob({
     job = await callTool('flow_download_job', { jobId: job.id }, { timeoutMs: 120_000, signal })
   }
 
-  const downloadedFile = Array.isArray(job?.downloadedFiles) ? job.downloadedFiles[0] : ''
-  if (!downloadedFile || !existsSync(downloadedFile)) {
+  const downloadedFiles = (Array.isArray(job?.downloadedFiles) ? job.downloadedFiles : [])
+    .filter(filePath => typeof filePath === 'string' && existsSync(filePath))
+  if (!downloadedFiles.length) {
     throw new Error('Google Flow selesai, tetapi file media lokal tidak ditemukan.')
   }
-  return { job, downloadedFile }
+  return { job, downloadedFiles }
 }
 
 function resolveFlowPrompt(node, item, mediaKind) {
@@ -531,6 +537,7 @@ export async function runVideoNode(
   }
   const model = String(node.data.model || 'ui-default').trim() || 'ui-default'
   const aspectRatio = String(node.data.aspectRatio || 'ui-default').trim() || 'ui-default'
+  const outputs = Math.min(4, Math.max(1, Math.round(Number(node.data.outputs) || 1)))
   const upscale = String(node.data.upscale || 'none').trim() || 'none'
   const flowProject = String(node.data.flowProject || '').trim()
   const useInputImage = node.data.useInputImage !== false
@@ -543,12 +550,13 @@ export async function runVideoNode(
     }
     const prompt = resolveFlowPrompt(node, item, 'video')
     const referenceFiles = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
-    const { job, downloadedFile } = await runFlowGenerationJob({
+    const { job, downloadedFiles } = await runFlowGenerationJob({
       toolName: 'flow_generate_video',
       prompt,
       accountId,
       model,
       aspectRatio,
+      outputs,
       upscale,
       referenceFiles,
       targetOutputDir,
@@ -558,27 +566,32 @@ export async function runVideoNode(
       signal,
     })
 
-    const buffer = await readFile(downloadedFile)
-    const mimeType = /\.mov$/i.test(downloadedFile) ? 'video/quicktime' : 'video/mp4'
-    const stored = await storeVideo(user.id, buffer, mimeType)
-    const probe = Array.isArray(job.mediaProbe) ? job.mediaProbe[0] : null
+    for (let idx = 0; idx < downloadedFiles.length; idx += 1) {
+      const downloadedFile = downloadedFiles[idx]
+      const buffer = await readFile(downloadedFile)
+      const mimeType = /\.mov$/i.test(downloadedFile) ? 'video/quicktime' : 'video/mp4'
+      const stored = await storeVideo(user.id, buffer, mimeType)
+      const probe = Array.isArray(job.mediaProbe) ? job.mediaProbe[idx] || job.mediaProbe[0] : null
 
-    output.push({
-      json: {
-        ...item.json,
-        prompt,
-        videoPrompt: prompt,
-        videoUrl: stored.videoUrl || stored.previewUrl,
-        videoPreviewUrl: stored.previewUrl,
-        videoMime: stored.mimeType,
-        videoModel: job.model || model,
-        videoAspectRatio: job.aspectRatio || aspectRatio,
-        videoJobId: job.id || '',
-        localVideoPath: downloadedFile,
-        ...(typeof probe?.durationSeconds === 'number' ? { videoDurationSeconds: probe.durationSeconds } : {}),
-        ...(probe?.width && probe?.height ? { videoResolution: `${probe.width}x${probe.height}` } : {}),
-      },
-    })
+      output.push({
+        json: {
+          ...item.json,
+          prompt,
+          videoPrompt: prompt,
+          videoUrl: stored.videoUrl || stored.previewUrl,
+          videoPreviewUrl: stored.previewUrl,
+          videoMime: stored.mimeType,
+          videoModel: job.model || model,
+          videoAspectRatio: job.aspectRatio || aspectRatio,
+          videoJobId: job.id || '',
+          localVideoPath: downloadedFile,
+          outputIndex: idx + 1,
+          outputCount: downloadedFiles.length,
+          ...(typeof probe?.durationSeconds === 'number' ? { videoDurationSeconds: probe.durationSeconds } : {}),
+          ...(probe?.width && probe?.height ? { videoResolution: `${probe.width}x${probe.height}` } : {}),
+        },
+      })
+    }
   }
 
   return output
@@ -608,6 +621,9 @@ export async function runFlowImageNode(
   }
   const model = String(node.data.model || 'ui-default').trim() || 'ui-default'
   const aspectRatio = String(node.data.aspectRatio || 'ui-default').trim() || 'ui-default'
+  const outputs = Math.min(4, Math.max(1, Math.round(Number(node.data.outputs) || 1)))
+  const rawReasoning = String(node.data.reasoningLevel || 'ui-default').trim()
+  const reasoningLevel = ['ui-default', 'low', 'medium', 'high'].includes(rawReasoning) ? rawReasoning : 'ui-default'
   const flowProject = String(node.data.flowProject || '').trim()
   const useInputImage = Boolean(node.data.useInputImage)
   const timeoutSeconds = Math.min(900, Math.max(60, Math.round(Number(node.data.timeoutSeconds) || 300)))
@@ -619,12 +635,14 @@ export async function runFlowImageNode(
     }
     const prompt = resolveFlowPrompt(node, item, 'image')
     const referenceFiles = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
-    const { job, downloadedFile } = await runFlowGenerationJob({
+    const { job, downloadedFiles } = await runFlowGenerationJob({
       toolName: 'flow_generate_image',
       prompt,
       accountId,
       model,
       aspectRatio,
+      outputs,
+      reasoningLevel,
       upscale: 'none',
       referenceFiles,
       targetOutputDir,
@@ -634,24 +652,31 @@ export async function runFlowImageNode(
       signal,
     })
 
-    const rawBuffer = await readFile(downloadedFile)
-    const { buffer, mimeHint } = await normalizeToStorableImageBuffer(rawBuffer)
-    const stored = await storeImage(user.id, buffer.toString('base64'), mimeHint)
+    for (let idx = 0; idx < downloadedFiles.length; idx += 1) {
+      const downloadedFile = downloadedFiles[idx]
+      const rawBuffer = await readFile(downloadedFile)
+      const { buffer, mimeHint } = await normalizeToStorableImageBuffer(rawBuffer)
+      const stored = await storeImage(user.id, buffer.toString('base64'), mimeHint)
 
-    output.push({
-      json: {
-        ...item.json,
-        prompt,
-        imagePrompt: prompt,
-        imageUrl: stored.imageUrl || stored.previewUrl,
-        imagePreviewUrl: stored.previewUrl,
-        imageMime: stored.mimeType,
-        imageModel: job.model || model,
-        imageProvider: 'googleFlow',
-        imageJobId: job.id || '',
-        localImagePath: downloadedFile,
-      },
-    })
+      output.push({
+        json: {
+          ...item.json,
+          prompt,
+          imagePrompt: prompt,
+          imageUrl: stored.imageUrl || stored.previewUrl,
+          imagePreviewUrl: stored.previewUrl,
+          imageMime: stored.mimeType,
+          imageModel: job.model || model,
+          imageProvider: 'googleFlow',
+          imageAspectRatio: job.aspectRatio || aspectRatio,
+          imageReasoningLevel: reasoningLevel,
+          imageJobId: job.id || '',
+          localImagePath: downloadedFile,
+          outputIndex: idx + 1,
+          outputCount: downloadedFiles.length,
+        },
+      })
+    }
   }
 
   return output

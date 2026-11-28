@@ -139,6 +139,10 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
         if (!String(data.prompt||'').trim()) add('warning','image-input',`${label}: prompt akan dibaca dari data "prompt" pada langkah sebelumnya.`,node.id)
         const ratio = String(data.aspectRatio || 'ui-default')
         if (!['ui-default', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(ratio)) add('error', 'image-aspect', `${label}: pilih rasio gambar Google Flow yang didukung.`, node.id)
+        const outputs = Number(data.outputs ?? 1)
+        if (!Number.isInteger(outputs) || outputs < 1 || outputs > 4) add('error', 'image-outputs', `${label}: jumlah output gambar Google Flow harus 1–4.`, node.id)
+        const reasoning = String(data.reasoningLevel || 'ui-default')
+        if (!['ui-default', 'low', 'medium', 'high'].includes(reasoning)) add('error', 'image-reasoning', `${label}: pilih tingkat penalaran yang didukung.`, node.id)
       } else {
         if (!String(data.model||'').trim()) add('error','image-model',`${label}: pilih model gambar 9router.`,node.id)
         if (String(data.prompt||'').length > 4000) add('error','image-prompt',`${label}: prompt gambar maksimal 4.000 karakter.`,node.id)
@@ -150,6 +154,8 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
       if (!String(data.prompt || '').trim()) add('warning', 'video-input', `${label}: prompt video akan dibaca dari langkah sebelumnya.`, node.id)
       const ratio = String(data.aspectRatio || 'ui-default')
       if (!['ui-default', '16:9', '9:16'].includes(ratio)) add('error', 'video-aspect', `${label}: pilih rasio video yang didukung (16:9, 9:16, atau Bawaan UI).`, node.id)
+      const outputs = Number(data.outputs ?? 1)
+      if (!Number.isInteger(outputs) || outputs < 1 || outputs > 4) add('error', 'video-outputs', `${label}: jumlah output video Google Flow harus 1–4.`, node.id)
       const upscale = String(data.upscale || 'none')
       if (!['none', '1080p', 'highest_available'].includes(upscale)) add('error', 'video-upscale', `${label}: pilih opsi upscale video yang didukung.`, node.id)
     }

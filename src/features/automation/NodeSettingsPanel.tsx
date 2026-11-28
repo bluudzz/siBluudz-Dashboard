@@ -33,7 +33,7 @@ const nodeHelp:Record<string,string>={
   httpRequest:'Node lama untuk membaca satu URL HTTPS.',
   apiRequest:'Panggil API atau webhook HTTPS eksternal dengan metode GET, POST, PUT, PATCH, atau DELETE.',
   googleDrive:'Lihat atau unduh gambar dan video dari Google Drive Anda.',
-  imageGenerate:'Buat gambar memakai Google Flow (1 extension bersama Generate Video) atau model gambar 9router.',
+  imageGenerate:'Buat gambar memakai Google Flow (Background · Tanpa API Key) atau model gambar 9router.',
   imageEdit:'Format gambar ke rasio Instagram (4:5/1:1/9:16) dengan teks overlay atau edit memakai AI.',
   videoGenerate:'Buat video Veo / Omni Flash memakai Google Flow MCP lokal dengan kuota akun Google Anda.',
   aiVision:'Periksa kualitas visual atau analisis isi gambar memakai AI Vision.',
@@ -232,17 +232,21 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
         {node.type==='imageGenerate'&&(()=>{
           const imgProvider=str('provider')||'ninerouter'
           return <>
-            <label className="wf-field"><span>Penyedia gambar</span><select disabled={busy} value={imgProvider} onChange={event=>{const next=event.target.value;onUpdate(node.id,{...data,provider:next,model:next==='googleFlow'?'ui-default':'',aspectRatio:next==='googleFlow'?(str('aspectRatio')||'3:4'):str('aspectRatio')})}}><option value="googleFlow">Google Flow (Akun Google Pro · 1 Extension)</option><option value="ninerouter">9router (API Gambar)</option></select></label>
+            <label className="wf-field"><span>Penyedia gambar</span><select disabled={busy} value={imgProvider} onChange={event=>{const next=event.target.value;onUpdate(node.id,{...data,provider:next,model:next==='googleFlow'?'ui-default':'',aspectRatio:next==='googleFlow'?(str('aspectRatio')||'3:4'):str('aspectRatio'),outputs:next==='googleFlow'?(str('outputs')||'1'):str('outputs'),reasoningLevel:next==='googleFlow'?(str('reasoningLevel')||'high'):str('reasoningLevel')})}}><option value="googleFlow">Google Flow (Background · Tanpa API Key)</option><option value="ninerouter">9router (API Gambar)</option></select></label>
             {imgProvider==='googleFlow'?<>
               <GoogleFlowSettings
                 mediaType="image"
                 accountId={str('accountId')}
                 model={str('model')||'ui-default'}
                 aspectRatio={str('aspectRatio')||'3:4'}
+                outputs={str('outputs')||'1'}
+                reasoningLevel={str('reasoningLevel')||'ui-default'}
                 busy={busy}
                 onChangeAccount={id=>update('accountId',id)}
                 onChangeModel={m=>update('model',m)}
                 onChangeAspectRatio={r=>update('aspectRatio',r)}
+                onChangeOutputs={o=>update('outputs',o)}
+                onChangeReasoningLevel={r=>update('reasoningLevel',r)}
                 onStatusChange={onFlowStatusChange}
               />
               {field('prompt','Prompt gambar (opsional)','Kosong = gunakan prompt dari langkah sebelumnya',true)}
@@ -260,11 +264,13 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
             accountId={str('accountId')}
             model={str('model')||'ui-default'}
             aspectRatio={str('aspectRatio')||'9:16'}
+            outputs={str('outputs')||'1'}
             upscale={str('upscale')||'none'}
             busy={busy}
             onChangeAccount={id=>update('accountId',id)}
             onChangeModel={m=>update('model',m)}
             onChangeAspectRatio={r=>update('aspectRatio',r)}
+            onChangeOutputs={o=>update('outputs',o)}
             onChangeUpscale={u=>update('upscale',u)}
             onStatusChange={onFlowStatusChange}
           />

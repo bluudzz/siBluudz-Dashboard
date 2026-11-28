@@ -51,12 +51,16 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
 
     const badNodes = [nodes[0], { ...nodes[1], data: { label: 'Generate Video', aspectRatio: '4:5', upscale: 'none' } }]
     assert.equal(inspectWorkflow(badNodes, edges).some(i => i.severity === 'error' && i.code === 'video-aspect'), true)
+    const badOutputNodes = [nodes[0], { ...nodes[1], data: { label: 'Generate Video', aspectRatio: '9:16', outputs: '5', upscale: 'none' } }]
+    assert.equal(inspectWorkflow(badOutputNodes, edges).some(i => i.severity === 'error' && i.code === 'video-outputs'), true)
 
     const tinyJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]).toString('base64')
     const storedImg = await storeWorkflowImage('u-video', tinyJpeg, 'image/jpeg')
 
-    const fakeVideoPath = join(tempDir, 'flow-render.mp4')
-    writeFileSync(fakeVideoPath, minimalMp4Buffer())
+    const fakeVideoPath1 = join(tempDir, 'flow-render-1.mp4')
+    const fakeVideoPath2 = join(tempDir, 'flow-render-2.mp4')
+    writeFileSync(fakeVideoPath1, minimalMp4Buffer())
+    writeFileSync(fakeVideoPath2, minimalMp4Buffer())
 
     const calls: Array<{ name: string; args: Record<string, unknown> }> = []
     let pollCount = 0
@@ -73,8 +77,11 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
           status: 'completed',
           model: 'veo-3-1-fast',
           aspectRatio: '9:16',
-          downloadedFiles: [fakeVideoPath],
-          mediaProbe: [{ durationSeconds: 8, width: 1080, height: 1920 }],
+          downloadedFiles: [fakeVideoPath1, fakeVideoPath2],
+          mediaProbe: [
+            { durationSeconds: 8, width: 1080, height: 1920 },
+            { durationSeconds: 8, width: 1080, height: 1920 },
+          ],
         }
       }
       throw new Error(`Unexpected tool: ${name}`)
@@ -82,18 +89,22 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
 
     const out = await runVideoNode(
       {
-        node: { id: 'v1', data: { model: 'veo-3-1-fast', aspectRatio: '9:16', upscale: 'none', useInputImage: true } },
+        node: { id: 'v1', data: { model: 'veo-3-1-fast', aspectRatio: '9:16', outputs: '2', upscale: 'none', useInputImage: true } },
         input: [{ json: { prompt: 'Slow cinematic zoom in', imagePreviewUrl: storedImg.previewUrl } }],
       },
       { id: 'u-video', role: 'admin' },
       { callTool: mockCallTool, outputDirectory: tempDir },
     )
 
-    assert.equal(out.length, 1)
+    assert.equal(out.length, 2)
     assert.equal(pollCount, 2)
     assert.equal(calls[0].name, 'flow_generate_video')
+    assert.equal(calls[0].args.outputs, 2)
     assert.equal(Array.isArray(calls[0].args.referenceFiles), true)
     assert.equal((calls[0].args.referenceFiles as string[]).length, 1)
+    assert.equal(out[0].json.outputIndex, 1)
+    assert.equal(out[1].json.outputIndex, 2)
+    assert.equal(out[0].json.outputCount, 2)
     assert.match(out[0].json.videoPreviewUrl, /^\/api\/workflow-media\/[a-f0-9]{48}$/)
     assert.equal(out[0].json.videoUrl, `https://panel.example.com${out[0].json.videoPreviewUrl}`)
     assert.equal(out[0].json.videoMime, 'video/mp4')
@@ -121,25 +132,29 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
 
     const nodes = [
       { id: 't1', type: 'promptTrigger', position: { x: 0, y: 0 }, data: { label: 'Prompt', prompt: 'Foto produk estetik', promptMode: 'normal' } },
-      { id: 'i1', type: 'imageGenerate', position: { x: 300, y: 0 }, data: { label: 'Generate Gambar', provider: 'googleFlow', aspectRatio: '3:4' } },
+      { id: 'i1', type: 'imageGenerate', position: { x: 300, y: 0 }, data: { label: 'Generate Gambar', provider: 'googleFlow', aspectRatio: '3:4', outputs: '2', reasoningLevel: 'high' } },
     ]
     const edges = [{ id: 'e1', source: 't1', target: 'i1' }]
     assert.equal(inspectWorkflow(nodes, edges).some(i => i.severity === 'error'), false)
+    assert.equal(inspectWorkflow([nodes[0], { ...nodes[1], data: { label: 'Generate Gambar', provider: 'googleFlow', outputs: '0' } }], edges).some(i => i.severity === 'error' && i.code === 'image-outputs'), true)
+    assert.equal(inspectWorkflow([nodes[0], { ...nodes[1], data: { label: 'Generate Gambar', provider: 'googleFlow', reasoningLevel: 'ultra' } }], edges).some(i => i.severity === 'error' && i.code === 'image-reasoning'), true)
 
-    const fakeWebpPath = join(tempDir, 'flow-image.webp')
+    const fakeWebpPath1 = join(tempDir, 'flow-image-1.webp')
+    const fakeWebpPath2 = join(tempDir, 'flow-image-2.webp')
     const webpBuf = await sharp({ create: { width: 4, height: 4, channels: 4, background: '#336699' } }).webp().toBuffer()
-    writeFileSync(fakeWebpPath, webpBuf)
+    writeFileSync(fakeWebpPath1, webpBuf)
+    writeFileSync(fakeWebpPath2, webpBuf)
 
-    const called: string[] = []
+    const imageCalls: Array<{ name: string; args: Record<string, unknown> }> = []
     const result = await runImageNode(
-      { node: { id: 'i1', data: { provider: 'googleFlow', model: 'nano-banana-2', aspectRatio: '3:4', prompt: 'Botol parfum kaca' } }, input: [{ json: {} }] },
+      { node: { id: 'i1', data: { provider: 'googleFlow', model: 'nano-banana-2-1', aspectRatio: '3:4', outputs: '2', reasoningLevel: 'high', prompt: 'Botol parfum kaca' } }, input: [{ json: {} }] },
       { id: 'u-flow-img', role: 'admin' },
       {
-        callTool: async (name: string) => {
-          called.push(name)
+        callTool: async (name: string, args: Record<string, unknown>) => {
+          imageCalls.push({ name, args })
           if (name === 'flow_generate_image') return { id: 'img-job-1', status: 'processing' }
           if (name === 'flow_job_status') {
-            return { id: 'img-job-1', status: 'completed', model: 'nano-banana-2', downloadedFiles: [fakeWebpPath] }
+            return { id: 'img-job-1', status: 'completed', model: 'nano-banana-2-1', aspectRatio: '3:4', downloadedFiles: [fakeWebpPath1, fakeWebpPath2] }
           }
           throw new Error(`Unexpected tool ${name}`)
         },
@@ -147,10 +162,15 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
       },
     )
 
-    assert.deepEqual(called, ['flow_generate_image', 'flow_job_status'])
-    assert.equal(result.length, 1)
+    assert.deepEqual(imageCalls.map(c => c.name), ['flow_generate_image', 'flow_job_status'])
+    assert.equal(imageCalls[0].args.outputs, 2)
+    assert.equal(imageCalls[0].args.reasoningLevel, 'high')
+    assert.equal(result.length, 2)
     assert.equal(result[0].json.imageProvider, 'googleFlow')
-    assert.equal(result[0].json.imageModel, 'nano-banana-2')
+    assert.equal(result[0].json.imageModel, 'nano-banana-2-1')
+    assert.equal(result[0].json.imageReasoningLevel, 'high')
+    assert.equal(result[0].json.outputIndex, 1)
+    assert.equal(result[1].json.outputIndex, 2)
     assert.equal(result[0].json.imageMime, 'image/jpeg')
     assert.match(result[0].json.imagePreviewUrl, /^\/api\/workflow-media\/[a-f0-9]{48}$/)
   })

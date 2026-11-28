@@ -22,6 +22,14 @@ interface FlowStatusResponse {
   bridgeError?: string
 }
 
+interface FlowModelOption {
+  id: string
+  label: string
+  icon?: string
+  note?: string
+  selected?: boolean
+}
+
 interface FlowInspectResponse {
   signedIn?: boolean
   workspaceAvailable?: boolean
@@ -34,29 +42,47 @@ interface FlowInspectResponse {
     image?: string[]
     video?: string[]
   }
+  outputCountsByMedia?: {
+    image?: number[]
+    video?: number[]
+  }
   availableUpscales?: string[]
 }
 
-const DEFAULT_VIDEO_MODELS = [
-  { id: 'ui-default', label: 'Bawaan UI Flow' },
+const DEFAULT_VIDEO_MODELS: FlowModelOption[] = [
   { id: 'omni-1-2-flash', label: 'Omni 1.2 Flash' },
-  { id: 'omni-flash', label: 'Omni Flash' },
-  { id: 'veo-3-1-fast', label: 'Veo 3.1 - Fast' },
+  { id: 'omni-1-1-flash', label: 'Omni 1.1 Flash', note: 'Akan dihentikan pada 5 Des' },
   { id: 'veo-3-1-lite', label: 'Veo 3.1 - Lite' },
-  { id: 'veo-3-1-quality', label: 'Veo 3.1 - Quality' },
+  { id: 'veo-3-1-fast', label: 'Veo 3.1 - Fast', note: 'Akan dihentikan pada 5 Des' },
+  { id: 'veo-3-1-quality', label: 'Veo 3.1 - Quality', note: 'Akan dihentikan pada 5 Des' },
 ]
 
-const DEFAULT_IMAGE_MODELS = [
-  { id: 'ui-default', label: 'Bawaan UI Flow' },
-  { id: 'nano-banana-2-1', label: 'Nano Banana 2.1' },
-  { id: 'nano-banana-pro', label: 'Nano Banana Pro' },
-  { id: 'nano-banana-2', label: 'Nano Banana 2' },
-  { id: 'nano-banana-2-lite', label: 'Nano Banana 2 Lite' },
+const DEFAULT_IMAGE_MODELS: FlowModelOption[] = [
+  { id: 'nano-banana-pro', label: 'Nano Banana Pro', icon: '🍌' },
+  { id: 'nano-banana-2-lite', label: 'Nano Banana 2 Lite', icon: '🍌' },
+  { id: 'nano-banana-2-1', label: 'Nano Banana 2.1', icon: '🍌' },
 ]
 
-const DEFAULT_VIDEO_RATIOS = ['9:16', '16:9', 'ui-default']
-const DEFAULT_IMAGE_RATIOS = ['3:4', '1:1', '9:16', '16:9', '4:3', 'ui-default']
+const IMAGE_MODEL_META = new Map(DEFAULT_IMAGE_MODELS.map(item => [item.id, item]))
+const VIDEO_MODEL_META = new Map(DEFAULT_VIDEO_MODELS.map(item => [item.id, item]))
+
+const DEFAULT_VIDEO_RATIOS = ['16:9', '9:16']
+const DEFAULT_IMAGE_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16']
+const DEFAULT_OUTPUT_COUNTS = ['1', '2', '3', '4']
+const REASONING_OPTIONS = [
+  { id: 'low', label: 'Rendah', hint: 'Cepat & ringkas' },
+  { id: 'medium', label: 'Sedang', hint: 'Seimbang antara kecepatan & detail' },
+  { id: 'high', label: 'Tinggi', hint: 'Sangat menyeluruh' },
+] as const
 const DEFAULT_UPSCALES = ['none', '1080p', 'highest_available']
+
+function ratioClassName(ratio: string): string {
+  if (ratio === '16:9') return 'r-16-9'
+  if (ratio === '4:3') return 'r-4-3'
+  if (ratio === '1:1') return 'r-1-1'
+  if (ratio === '3:4') return 'r-3-4'
+  return 'r-9-16'
+}
 
 function computeFlowConnection(status: FlowStatusResponse | null, accountId: string) {
   const accounts = status?.accounts || []
@@ -81,11 +107,15 @@ export function GoogleFlowSettings({
   accountId,
   model,
   aspectRatio,
+  outputs = '1',
+  reasoningLevel = 'ui-default',
   upscale = 'none',
   busy,
   onChangeAccount,
   onChangeModel,
   onChangeAspectRatio,
+  onChangeOutputs,
+  onChangeReasoningLevel,
   onChangeUpscale,
   onStatusChange,
 }: {
@@ -93,11 +123,15 @@ export function GoogleFlowSettings({
   accountId: string
   model: string
   aspectRatio: string
+  outputs?: string
+  reasoningLevel?: string
   upscale?: string
   busy: boolean
   onChangeAccount: (id: string) => void
   onChangeModel: (m: string) => void
   onChangeAspectRatio: (r: string) => void
+  onChangeOutputs?: (o: string) => void
+  onChangeReasoningLevel?: (r: string) => void
   onChangeUpscale?: (u: string) => void
   onStatusChange?: (connected: boolean, accountLabel: string) => void
 }) {
@@ -218,21 +252,40 @@ export function GoogleFlowSettings({
 
   const { isConnected, accountLabel } = computeFlowConnection(status, accountId)
 
-  const liveModels = mediaType === 'image'
-    ? (inspectInfo?.models?.image?.length
-      ? [{ id: 'ui-default', label: 'Bawaan UI Flow' }, ...inspectInfo.models.image]
-      : DEFAULT_IMAGE_MODELS)
-    : (inspectInfo?.models?.video?.length
-      ? [{ id: 'ui-default', label: 'Bawaan UI Flow' }, ...inspectInfo.models.video]
-      : DEFAULT_VIDEO_MODELS)
+  const metaMap = mediaType === 'image' ? IMAGE_MODEL_META : VIDEO_MODEL_META
+  const fallbackModels = mediaType === 'image' ? DEFAULT_IMAGE_MODELS : DEFAULT_VIDEO_MODELS
+  const discoveredModels: FlowModelOption[] = inspectInfo?.models?.[mediaType]?.length
+    ? inspectInfo.models[mediaType]!.map(item => ({
+      ...metaMap.get(item.id),
+      id: item.id,
+      label: item.label || metaMap.get(item.id)?.label || item.id,
+      selected: item.selected,
+    }))
+    : fallbackModels
 
-  const liveRatios = mediaType === 'image'
-    ? (inspectInfo?.aspectRatiosByMedia?.image?.length
-      ? [...inspectInfo.aspectRatiosByMedia.image, 'ui-default']
-      : DEFAULT_IMAGE_RATIOS)
-    : (inspectInfo?.aspectRatiosByMedia?.video?.length
-      ? [...inspectInfo.aspectRatiosByMedia.video, 'ui-default']
-      : DEFAULT_VIDEO_RATIOS)
+  const currentModel = model || 'ui-default'
+  const liveModels: FlowModelOption[] = [
+    ...discoveredModels,
+    ...(currentModel !== 'ui-default' && !discoveredModels.some(item => item.id === currentModel)
+      ? [{ id: currentModel, label: currentModel }]
+      : []),
+    { id: 'ui-default', label: 'Bawaan UI Flow (otomatis)' },
+  ]
+
+  const discoveredRatios = inspectInfo?.aspectRatiosByMedia?.[mediaType]?.length
+    ? inspectInfo.aspectRatiosByMedia[mediaType]!
+    : (mediaType === 'image' ? DEFAULT_IMAGE_RATIOS : DEFAULT_VIDEO_RATIOS)
+  const liveRatios = [...new Set(discoveredRatios)]
+  const currentRatio = aspectRatio || (mediaType === 'image' ? '3:4' : '9:16')
+
+  const liveOutputs = inspectInfo?.outputCountsByMedia?.[mediaType]?.length
+    ? inspectInfo.outputCountsByMedia[mediaType]!.map(String)
+    : DEFAULT_OUTPUT_COUNTS
+  const currentOutputs = String(outputs || '1')
+
+  const currentReasoning = reasoningLevel || 'ui-default'
+  const reasoningHint = REASONING_OPTIONS.find(opt => opt.id === currentReasoning)?.hint
+    || 'Mengikuti bawaan UI Google Flow'
 
   const liveUpscales = inspectInfo?.availableUpscales?.length
     ? ['none', ...inspectInfo.availableUpscales, 'highest_available']
@@ -285,42 +338,130 @@ export function GoogleFlowSettings({
         </button>
       </div>
 
-      <label className="wf-field">
-        <span>{mediaType === 'image' ? 'Model Gambar' : 'Model Video'}</span>
-        <select disabled={busy} value={model || 'ui-default'} onChange={event => onChangeModel(event.target.value)}>
-          {!liveModels.some(item => item.id === (model || 'ui-default')) && model && (
-            <option value={model}>{model}</option>
-          )}
-          {liveModels.map(item => (
-            <option key={item.id} value={item.id}>{item.label}</option>
-          ))}
-        </select>
-      </label>
+      <div className="wf-flow-section">
+        <div className="wf-flow-section-head">
+          <span>Model</span>
+        </div>
+        <div className="wf-flow-radio-list" role="radiogroup" aria-label={mediaType === 'image' ? 'Model Gambar' : 'Model Video'}>
+          {liveModels.map(item => {
+            const selected = currentModel === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={busy}
+                className={`wf-flow-radio-item${selected ? ' is-selected' : ''}`}
+                onClick={() => onChangeModel(item.id)}
+              >
+                <span className="wf-flow-radio-dot" aria-hidden="true" />
+                <span className="wf-flow-radio-text">
+                  <span className="wf-flow-radio-label">
+                    {item.icon ? <span aria-hidden="true">{item.icon}</span> : null}
+                    {item.label}
+                  </span>
+                  {item.note && <span className="wf-flow-model-note">{item.note}</span>}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
-      <label className="wf-field">
-        <span>Rasio Aspek</span>
-        <select
-          disabled={busy}
-          value={aspectRatio || (mediaType === 'image' ? '3:4' : '9:16')}
-          onChange={event => onChangeAspectRatio(event.target.value)}
-        >
-          {[...new Set(liveRatios)].map(r => (
-            <option key={r} value={r}>
-              {r === '9:16'
-                ? '9:16 (Vertikal / Reels / Story)'
-                : r === '16:9'
-                  ? '16:9 (Landscape / YouTube)'
-                  : r === '3:4'
-                    ? '3:4 (Portrait Feed)'
-                    : r === '4:3'
-                      ? '4:3 (Klasik)'
-                      : r === '1:1'
-                        ? '1:1 (Square)'
-                        : 'Bawaan UI Flow'}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="wf-flow-section">
+        <div className="wf-flow-section-head">
+          <span>Rasio aspek</span>
+          <button
+            type="button"
+            disabled={busy}
+            className={`wf-flow-section-reset${currentRatio === 'ui-default' ? ' is-active' : ''}`}
+            onClick={() => onChangeAspectRatio('ui-default')}
+          >
+            Bawaan UI
+          </button>
+        </div>
+        <div className="wf-flow-seg" role="radiogroup" aria-label="Rasio aspek">
+          {liveRatios.map(r => {
+            const selected = currentRatio === r
+            return (
+              <button
+                key={r}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={busy}
+                className={`wf-flow-seg-btn${mediaType === 'video' ? ' is-row' : ''}${selected ? ' is-selected' : ''}`}
+                onClick={() => onChangeAspectRatio(r)}
+              >
+                <span className={`wf-flow-ratio-box ${ratioClassName(r)}`} aria-hidden="true" />
+                <span>{r}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {onChangeOutputs && (
+        <div className="wf-flow-section">
+          <div className="wf-flow-section-head">
+            <span>Jumlah output</span>
+          </div>
+          <div className="wf-flow-seg" role="radiogroup" aria-label="Jumlah output">
+            {liveOutputs.map(count => {
+              const selected = currentOutputs === count
+              return (
+                <button
+                  key={count}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={busy}
+                  className={`wf-flow-seg-btn${selected ? ' is-selected' : ''}`}
+                  onClick={() => onChangeOutputs(count)}
+                >
+                  {`x${count}`}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {mediaType === 'image' && onChangeReasoningLevel && (
+        <div className="wf-flow-section">
+          <div className="wf-flow-section-head">
+            <span>Tingkat penalaran</span>
+            <button
+              type="button"
+              disabled={busy}
+              className={`wf-flow-section-reset${currentReasoning === 'ui-default' ? ' is-active' : ''}`}
+              onClick={() => onChangeReasoningLevel('ui-default')}
+            >
+              Bawaan UI
+            </button>
+          </div>
+          <div className="wf-flow-seg" role="radiogroup" aria-label="Tingkat penalaran">
+            {REASONING_OPTIONS.map(option => {
+              const selected = currentReasoning === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={busy}
+                  className={`wf-flow-seg-btn${selected ? ' is-selected' : ''}`}
+                  onClick={() => onChangeReasoningLevel(option.id)}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="wf-flow-hint">{reasoningHint}</p>
+        </div>
+      )}
 
       {mediaType === 'video' && onChangeUpscale && (
         <label className="wf-field">
