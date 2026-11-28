@@ -123,7 +123,7 @@ export async function workflowRequest<T>(path:string,init?:RequestInit):Promise<
   if(response.status===204)return undefined as T
   const data=await response.json().catch(()=>({}))
   if(!response.ok){
-    const gatewayMessage=response.status===502?'Proxy tidak mendapat jawaban dari backend workflow (502). Coba lagi; jika berulang, periksa status proses backend dan log proxy di VPS.':response.status===503?'Backend workflow sedang tidak tersedia (503). Coba lagi setelah layanan aktif.':response.status===504?'Backend workflow terlalu lama merespons (504). Periksa batas waktu proxy dan log backend di VPS.':`Permintaan workflow gagal (${response.status}).`
+    const gatewayMessage=response.status===502?'Proxy tidak mendapat jawaban dari backend workflow (502). Coba lagi sebentar; pastikan server backend sedang aktif (tidak sedang restart).':response.status===503?'Backend workflow sedang tidak tersedia (503). Coba lagi setelah layanan aktif.':response.status===504?'Backend workflow terlalu lama merespons (504). Periksa batas waktu proxy dan proses backend.':'Permintaan workflow gagal ('+response.status+').'
     const error=Object.assign(new Error(data.error||gatewayMessage),{code:data.code||'',status:response.status})
     throw error
   }

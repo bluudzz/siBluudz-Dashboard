@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, CheckCircle2, Globe, RefreshCw } from 'lucide-react'
 import { workflowRequest } from './workflow-model'
 
@@ -145,10 +145,15 @@ export function GoogleFlowSettings({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const onStatusChangeRef = useRef(onStatusChange)
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange
+  }, [onStatusChange])
+
   const notifyStatus = useCallback((data: FlowStatusResponse | null, accId: string) => {
     const conn = computeFlowConnection(data, accId)
-    onStatusChange?.(conn.isConnected, conn.accountLabel)
-  }, [onStatusChange])
+    onStatusChangeRef.current?.(conn.isConnected, conn.accountLabel)
+  }, [])
 
   const loadStatus = useCallback(async () => {
     setLoading(true)

@@ -58,7 +58,7 @@ if (process.env.NODE_ENV === 'production') {
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')))
 }
 
-app.listen(port, '127.0.0.1', () => {
+const server = app.listen(port, '127.0.0.1', () => {
   console.log(`Local API running at http://127.0.0.1:${port}`)
   console.log(`SQLite database: ${path.join(dataDirectory, 'sibluudz.sqlite')}`)
   console.log(`Google OAuth: ${googleEnabled ? 'configured' : 'not configured'}`)
@@ -74,3 +74,6 @@ app.listen(port, '127.0.0.1', () => {
     })
   }
 })
+server.requestTimeout = 0
+server.keepAliveTimeout = 65_000
+server.headersTimeout = 70_000
