@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Check, CheckCircle2, Copy, Globe, Link2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Check, CheckCircle2, Globe, RefreshCw } from 'lucide-react'
 import { workflowRequest } from './workflow-model'
 
 interface FlowAccount {
@@ -12,7 +12,6 @@ interface FlowAccount {
 
 interface FlowStatusResponse {
   installed: boolean
-  extensionDir?: string
   outputDir?: string
   profileDir?: string
   cdpUrl?: string
@@ -106,9 +105,7 @@ export function GoogleFlowSettings({
   const [inspecting, setInspecting] = useState(false)
   const [connectBusy, setConnectBusy] = useState(false)
   const [chromeOpened, setChromeOpened] = useState(false)
-  const [connectionId, setConnectionId] = useState('')
   const [newLabel, setNewLabel] = useState('Google Flow Pro')
-  const [copiedPath, setCopiedPath] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -164,7 +161,7 @@ export function GoogleFlowSettings({
       setMessage(
         info.workspaceAvailable
           ? 'Workspace Google Flow aktif dan opsi model diperbarui.'
-          : 'Akun Google belum masuk ke workspace Google Flow. Buka Chrome profil permanen dan pastikan sudah masuk workspace.',
+          : 'Akun Google belum masuk ke workspace Google Flow. Buka jendela login untuk memastikan sesi masuk ke Flow.',
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memeriksa UI Google Flow.')
@@ -185,11 +182,11 @@ export function GoogleFlowSettings({
       setChromeOpened(true)
       setMessage(
         res.alreadyRunning
-          ? 'Chrome profil permanen sudah terbuka. Pastikan akun Google AI Pro Anda sudah masuk ke workspace Google Flow, lalu klik tombol 2.'
-          : 'Chrome profil permanen terbuka. Login akun Google AI Pro Anda SEKALI SAJA sampai masuk ke workspace Google Flow, lalu klik tombol 2.',
+          ? 'Jendela login sudah terbuka. Login akun Google AI Pro Anda sampai masuk workspace Flow, lalu klik tombol 2.'
+          : 'Jendela Chrome login terbuka. Login akun Google AI Pro Anda 1× saja sampai masuk workspace Flow, lalu klik tombol 2.',
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal membuka Chrome login permanen.')
+      setError(err instanceof Error ? err.message : 'Gagal membuka jendela login Chrome.')
     } finally {
       setConnectBusy(false)
     }
@@ -206,63 +203,14 @@ export function GoogleFlowSettings({
       })
       if (res?.accountId) onChangeAccount(res.accountId)
       setChromeOpened(false)
-      setMessage(`Sesi permanen "${res?.label || res?.accountId || 'Google Flow Pro'}" tersimpan di laptop. Anda tidak perlu login ulang lagi!`)
+      setMessage(
+        `Sesi "${res?.label || res?.accountId || 'Google Flow Pro'}" tersimpan permanen dan jendela login ditutup. Proses Video & Gambar berjalan tersembunyi di background.`,
+      )
       await loadStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menyimpan akun permanen.')
+      setError(err instanceof Error ? err.message : 'Gagal menyimpan akun Google Flow.')
     } finally {
       setConnectBusy(false)
-    }
-  }
-
-  const beginConnection = async () => {
-    setConnectBusy(true)
-    setError('')
-    setMessage('')
-    try {
-      const res = await workflowRequest<{ connectionId?: string }>('/google-flow/connect/begin', {
-        method: 'POST',
-        body: JSON.stringify({ label: newLabel }),
-      })
-      if (!res.connectionId) throw new Error('Bridge tidak mengembalikan token koneksi.')
-      setConnectionId(res.connectionId)
-      setMessage('Buka ekstensi "Flow Login Bridge" di Chrome lalu klik "Connect Flow". Setelah muncul "Session sent", klik tombol Selesaikan di bawah.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal memulai koneksi Google Flow.')
-    } finally {
-      setConnectBusy(false)
-    }
-  }
-
-  const completeConnection = async () => {
-    if (!connectionId) return
-    setConnectBusy(true)
-    setError('')
-    setMessage('')
-    try {
-      const res = await workflowRequest<{ account?: FlowAccount }>('/google-flow/connect/complete', {
-        method: 'POST',
-        body: JSON.stringify({ connectionId, label: newLabel }),
-      })
-      setConnectionId('')
-      if (res?.account?.id) onChangeAccount(res.account.id)
-      setMessage(`Akun Google Flow "${res?.account?.label || res?.account?.id || 'baru'}" berhasil terhubung (siap untuk Video & Gambar).`)
-      await loadStatus()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menyelesaikan koneksi akun.')
-    } finally {
-      setConnectBusy(false)
-    }
-  }
-
-  const copyExtensionPath = async () => {
-    if (!status?.extensionDir) return
-    try {
-      await navigator.clipboard.writeText(status.extensionDir)
-      setCopiedPath(true)
-      setTimeout(() => setCopiedPath(false), 2500)
-    } catch {
-      setCopiedPath(false)
     }
   }
 
@@ -291,7 +239,7 @@ export function GoogleFlowSettings({
   return (
     <div className="wf-flow-box">
       <div className="wf-flow-header">
-        <strong>Google Flow MCP (Video &amp; Gambar)</strong>
+        <strong>Google Flow (Background · Video &amp; Gambar)</strong>
         <button type="button" disabled={busy || loading} onClick={() => void loadStatus()} title="Muat ulang status Google Flow">
           <RefreshCw size={13} />
           {loading ? 'Memuat…' : 'Segarkan'}
@@ -302,11 +250,15 @@ export function GoogleFlowSettings({
         <div className={`wf-flow-status-banner ${isConnected ? 'is-connected' : 'is-disconnected'}`} role="status">
           {isConnected ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
           <div>
-            <strong>{isConnected ? 'Terhubung Permanen · Video & Gambar Siap' : 'Belum Terhubung ke Google Flow'}</strong>
+            <strong>
+              {isConnected
+                ? 'Terhubung · Jalan Tersembunyi di Background (Video & Gambar Siap)'
+                : 'Belum Terhubung ke Google Flow'}
+            </strong>
             <span>
               {isConnected
-                ? `Memakai akun "${accountLabel}" · Profil Chrome lokal tersimpan permanen`
-                : 'Login Google sekali di Chrome khusus profil lokal agar tidak pernah logout lagi.'}
+                ? `Memakai akun "${accountLabel}" · Render berjalan di background tanpa jendela browser muncul`
+                : 'Login Google 1× saja agar generate Video & Gambar otomatis berjalan di background.'}
             </span>
           </div>
         </div>
@@ -382,9 +334,9 @@ export function GoogleFlowSettings({
       )}
 
       <details className="wf-advanced" open={!isConnected}>
-        <summary>Login Permanen Chrome (Anti-Logout · Disarankan)</summary>
+        <summary>Login Permanen (1× Saja · Tanpa Extension)</summary>
         <p className="wf-muted">
-          Data login &amp; profil Chrome disimpan permanen di komputer Anda sehingga tidak akan terlogout seperti salin cookie.
+          Login Google 1 kali di jendela Chrome → klik Simpan → jendela langsung tertutup otomatis. Selanjutnya semua proses Generate Video &amp; Gambar berjalan tersembunyi di background; Anda cukup menunggu hasilnya di Auto Workflow.
         </p>
         <label className="wf-field">
           <span>Nama akun</span>
@@ -393,7 +345,7 @@ export function GoogleFlowSettings({
         <div className="wf-flow-actions">
           <button type="button" disabled={busy || connectBusy || !status?.installed} onClick={() => void openPersistentChrome()}>
             <Globe size={13} />
-            {connectBusy && !chromeOpened ? 'Membuka Chrome…' : '1. Buka Chrome Login Permanen'}
+            {connectBusy && !chromeOpened ? 'Membuka Jendela…' : '1. Buka Jendela Login (1× Saja)'}
           </button>
           <button
             type="button"
@@ -402,35 +354,8 @@ export function GoogleFlowSettings({
             onClick={() => void savePersistentAccount()}
           >
             <Check size={13} />
-            {connectBusy ? 'Menyimpan sesi…' : '2. Sudah Masuk Flow → Simpan Permanen'}
+            {connectBusy ? 'Menyimpan sesi…' : '2. Sudah Masuk Flow → Simpan & Tutup Jendela'}
           </button>
-        </div>
-      </details>
-
-      <details className="wf-advanced">
-        <summary>Metode alternatif: Flow Login Bridge (Extension)</summary>
-        <p className="wf-muted">
-          Catatan: di Chrome Windows terbaru, metode salin cookie kadang ditolak Google sebagai &quot;Signed out&quot;. Gunakan Login Permanen Chrome di atas bila terlogout.
-        </p>
-        {status?.extensionDir && (
-          <div className="wf-flow-ext-row">
-            <input readOnly value={status.extensionDir} aria-label="Lokasi folder ekstensi Flow Login Bridge" />
-            <button type="button" onClick={() => void copyExtensionPath()} title="Salin lokasi folder">
-              {copiedPath ? <Check size={13} /> : <Copy size={13} />}
-            </button>
-          </div>
-        )}
-        <div className="wf-flow-actions">
-          <button type="button" disabled={busy || connectBusy || !status?.installed} onClick={() => void beginConnection()}>
-            <Link2 size={13} />
-            {connectBusy && !connectionId ? 'Menyiapkan…' : '1. Mulai Koneksi Extension'}
-          </button>
-          {connectionId && (
-            <button type="button" className="wf-primary" disabled={busy || connectBusy} onClick={() => void completeConnection()}>
-              <Check size={13} />
-              {connectBusy ? 'Menunggu pemilihan akun…' : '2. Sudah klik Connect Flow → Selesaikan'}
-            </button>
-          )}
         </div>
       </details>
 

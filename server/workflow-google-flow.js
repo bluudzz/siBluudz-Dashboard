@@ -72,32 +72,79 @@ export function getGoogleFlowPaths() {
   }
 }
 
-async function isCdpReachable(cdpUrl = DEFAULT_FLOW_CDP_URL) {
+async function getCdpVersion(cdpUrl = DEFAULT_FLOW_CDP_URL) {
   try {
     const response = await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(1200) })
-    return response.ok
+    if (!response.ok) return null
+    return await response.json().catch(() => ({}))
   } catch {
-    return false
+    return null
   }
 }
 
-export async function ensurePersistentFlowChrome({ openFlowUrl = true } = {}) {
+async function isCdpReachable(cdpUrl = DEFAULT_FLOW_CDP_URL) {
+  return Boolean(await getCdpVersion(cdpUrl))
+}
+
+export async function closePersistentFlowChrome(cdpUrl = DEFAULT_FLOW_CDP_URL) {
+  const version = await getCdpVersion(cdpUrl)
+  if (!version) return false
+
+  const wsUrl = typeof version.webSocketDebuggerUrl === 'string' ? version.webSocketDebuggerUrl : ''
+  if (wsUrl && typeof WebSocket === 'function') {
+    await new Promise(resolve => {
+      const ws = new WebSocket(wsUrl)
+      const finish = () => {
+        clearTimeout(timer)
+        try { ws.close() } catch {}
+        resolve()
+      }
+      const timer = setTimeout(finish, 2500)
+      ws.addEventListener('open', () => {
+        try {
+          ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
+        } catch {}
+        setTimeout(finish, 250)
+      })
+      ws.addEventListener('error', finish)
+      ws.addEventListener('close', finish)
+    })
+  }
+
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    if (!(await isCdpReachable(cdpUrl))) return true
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return !(await isCdpReachable(cdpUrl))
+}
+
+export async function ensurePersistentFlowChrome({ openFlowUrl = true, headless = false } = {}) {
   const paths = getGoogleFlowPaths()
   if (!paths.chromePath) {
     throw new Error('Google Chrome tidak ditemukan di komputer ini.')
   }
   await mkdir(paths.profileDir, { recursive: true })
-  if (await isCdpReachable(paths.cdpUrl)) {
-    return {
-      started: false,
-      alreadyRunning: true,
-      cdpUrl: paths.cdpUrl,
-      profileDir: paths.profileDir,
+
+  const existing = await getCdpVersion(paths.cdpUrl)
+  if (existing) {
+    const runningHeadless = typeof existing.Browser === 'string' && /headless/i.test(existing.Browser)
+    if (!headless && runningHeadless) {
+      await closePersistentFlowChrome(paths.cdpUrl)
+    } else {
+      return {
+        started: false,
+        alreadyRunning: true,
+        headless: runningHeadless,
+        cdpUrl: paths.cdpUrl,
+        profileDir: paths.profileDir,
+      }
     }
   }
 
   // Launch regular Chrome with a dedicated user-data-dir (no --enable-automation)
   // so Google keeps the signed-in session persistently across restarts.
+  // Background automation runs use --headless=new so no browser window pops up.
   const child = spawn(
     paths.chromePath,
     [
@@ -106,9 +153,10 @@ export async function ensurePersistentFlowChrome({ openFlowUrl = true } = {}) {
       '--profile-directory=Default',
       '--no-first-run',
       '--no-default-browser-check',
-      ...(openFlowUrl ? ['https://labs.google/fx/tools/flow'] : []),
+      ...(headless ? ['--headless=new'] : []),
+      ...(openFlowUrl && !headless ? ['https://labs.google/fx/tools/flow'] : []),
     ],
-    { detached: true, stdio: 'ignore', windowsHide: false },
+    { detached: true, stdio: 'ignore', windowsHide: headless },
   )
   child.unref()
 
@@ -118,6 +166,7 @@ export async function ensurePersistentFlowChrome({ openFlowUrl = true } = {}) {
       return {
         started: true,
         alreadyRunning: false,
+        headless,
         cdpUrl: paths.cdpUrl,
         profileDir: paths.profileDir,
       }
@@ -136,7 +185,7 @@ export async function savePersistentBrowserAccount({ accountId = 'personal', lab
     throw new Error('Google Flow MCP belum terpasang di komputer ini.')
   }
   if (!(await isCdpReachable(paths.cdpUrl))) {
-    await ensurePersistentFlowChrome({ openFlowUrl: true })
+    await ensurePersistentFlowChrome({ openFlowUrl: true, headless: false })
   }
 
   const cleanId = String(accountId || 'personal').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40) || 'personal'
@@ -155,11 +204,14 @@ export async function savePersistentBrowserAccount({ accountId = 'personal', lab
       },
     )
     await closeGoogleFlowClient()
+    // Gracefully close the login window so cookies flush to disk and future runs execute invisibly.
+    const closedLoginWindow = await closePersistentFlowChrome(paths.cdpUrl)
     return {
       accountId: cleanId,
       label: cleanLabel,
       cdpUrl: paths.cdpUrl,
       profileDir: paths.profileDir,
+      closedLoginWindow,
       output: String(stdout || '').trim(),
     }
   } catch (error) {
@@ -299,7 +351,8 @@ async function ensureChromeIfCdpAccount(accountId = '') {
     || accounts.find(a => a.connectionStatus === 'connected')
     || accounts[0]
   if (target?.browserMode === 'attach_cdp' && target.cdpUrl === status.cdpUrl) {
-    await ensurePersistentFlowChrome({ openFlowUrl: false })
+    const headless = process.env.GOOGLE_FLOW_VISIBLE !== '1'
+    await ensurePersistentFlowChrome({ openFlowUrl: false, headless })
   }
 }
 
