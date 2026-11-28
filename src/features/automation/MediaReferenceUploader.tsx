@@ -1,6 +1,16 @@
 import { useRef, useState } from 'react'
 import { Film, Upload, X } from 'lucide-react'
 
+export type ReferenceCategory =
+  | 'subject'
+  | 'product'
+  | 'startFrame'
+  | 'endFrame'
+  | 'style'
+  | 'background'
+  | 'motion'
+  | 'general'
+
 export interface UploadedReferenceMedia {
   token?: string
   previewUrl: string
@@ -9,6 +19,22 @@ export interface UploadedReferenceMedia {
   mimeType: string
   fileName: string
   sizeBytes?: number
+  category?: ReferenceCategory
+}
+
+const REFERENCE_CATEGORY_OPTIONS: Array<{ value: ReferenceCategory; label: string }> = [
+  { value: 'subject', label: 'Karakter / Subjek' },
+  { value: 'product', label: 'Produk / Objek' },
+  { value: 'startFrame', label: 'Frame Awal' },
+  { value: 'endFrame', label: 'Frame Akhir' },
+  { value: 'style', label: 'Gaya / Pencahayaan' },
+  { value: 'background', label: 'Latar / Lokasi' },
+  { value: 'motion', label: 'Referensi Gerakan / Video' },
+  { value: 'general', label: 'Bahan Umum' },
+]
+
+function defaultCategoryForMedia(mediaType: 'image' | 'video'): ReferenceCategory {
+  return mediaType === 'video' ? 'motion' : 'subject'
 }
 
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'])
@@ -92,6 +118,7 @@ export function MediaReferenceUploader({
           mimeType: data.mimeType || mime,
           fileName: data.fileName || file.name,
           sizeBytes: data.sizeBytes ?? file.size,
+          category: defaultCategoryForMedia(data.mediaType === 'video' || isVideo ? 'video' : 'image'),
         })
       }
       if (uploaded.length) {
@@ -165,6 +192,17 @@ export function MediaReferenceUploader({
               <div className="wf-media-meta">
                 <strong title={item.fileName}>{item.fileName || `File ${index + 1}`}</strong>
                 <span>{item.mediaType === 'video' ? 'Video' : 'Foto'}{item.sizeBytes ? ` · ${formatBytes(item.sizeBytes)}` : ''}</span>
+                <select
+                  aria-label="Kategori referensi"
+                  className="wf-media-category"
+                  disabled={disabled || uploading}
+                  value={item.category || defaultCategoryForMedia(item.mediaType)}
+                  onChange={event => onChange(files.map((f, i) => (i === index ? { ...f, category: event.target.value as ReferenceCategory } : f)))}
+                >
+                  {REFERENCE_CATEGORY_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               <button
                 type="button"

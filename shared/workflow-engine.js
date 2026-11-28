@@ -289,6 +289,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
             mediaType: file.mediaType === 'video' || String(file.mimeType || '').startsWith('video/') ? 'video' : 'image',
             mimeType: typeof file.mimeType === 'string' && file.mimeType ? file.mimeType : (file.mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
             fileName: typeof file.fileName === 'string' ? file.fileName.slice(0, 120) : '',
+            category: typeof file.category === 'string' && file.category ? file.category : ((file.mediaType === 'video' || String(file.mimeType || '').startsWith('video/')) ? 'motion' : 'subject'),
           }))
         if (!files.length) throw new Error('Unggah minimal 1 foto atau video referensi pada node File / Media Referensi.')
         const firstImage = files.find(file => file.mediaType === 'image')

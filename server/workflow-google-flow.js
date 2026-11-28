@@ -384,25 +384,131 @@ export async function completeGoogleFlowConnection({ connectionId, accountId = '
   return callFlowTool('flow_complete_account_connection', args, { timeoutMs: 360_000 })
 }
 
+const REFERENCE_CATEGORY_GUIDES = {
+  subject: 'Karakter / Subjek utama (pertahankan wajah, postur, pakaian, dan identitas subjek pada file ini)',
+  product: 'Produk / Objek utama (tampilkan bentuk, warna, label, dan detail produk sesuai foto ini)',
+  startFrame: 'Frame Awal video (mulai adegan dari komposisi dan subjek pada gambar ini)',
+  endFrame: 'Frame Akhir video (arahkan akhir adegan menuju tampilan ini)',
+  style: 'Referensi Gaya & Pencahayaan (ikuti tone warna, mood, pencahayaan, dan estetika visualnya)',
+  background: 'Referensi Latar / Lokasi (gunakan lingkungan, arsitektur, atau suasana tempat ini)',
+  motion: 'Referensi Gerakan / Kamera (ikuti alur gerakan subjek dan pergerakan kameranya)',
+  general: 'Bahan referensi visual pendukung',
+}
+
+function mergeParallelReferenceInputs(input, node, mediaKind) {
+  if (!Array.isArray(input) || input.length <= 1) return input
+  const hasExplicitPrompt = typeof node.data.prompt === 'string' && Boolean(node.data.prompt.trim())
+  const isPromptCarrier = item => {
+    const j = item?.json || {}
+    const latest = workflowInput(j)
+    const autoPrompt = latest && typeof latest === 'object'
+      ? (mediaKind === 'video' ? (latest.videoPrompt ?? latest.prompt) : (latest.imagePrompt ?? latest.prompt))
+      : latest
+    return typeof autoPrompt === 'string' && Boolean(autoPrompt.trim())
+  }
+  const hasRefMedia = item => {
+    const j = item?.json || {}
+    return Boolean(
+      (Array.isArray(j.referenceMedia) && j.referenceMedia.length)
+      || j.imagePreviewUrl || j.imageUrl || j.videoPreviewUrl || j.videoUrl,
+    )
+  }
+
+  const promptItems = input.filter(isPromptCarrier)
+  const refOnlyItems = input.filter(item => !isPromptCarrier(item) && hasRefMedia(item))
+  if (!refOnlyItems.length) return input
+
+  const combinedRefs = []
+  let firstImage = null
+  let firstVideo = null
+  for (const refItem of refOnlyItems) {
+    const j = refItem.json || {}
+    if (Array.isArray(j.referenceMedia)) {
+      combinedRefs.push(...j.referenceMedia)
+    } else {
+      if (j.imagePreviewUrl || j.imageUrl) {
+        combinedRefs.push({
+          previewUrl: j.imagePreviewUrl || j.imageUrl,
+          url: j.imageUrl || j.imagePreviewUrl,
+          mediaType: 'image',
+          fileName: j.fileName || '',
+          category: j.category || 'subject',
+        })
+      }
+      if (j.videoPreviewUrl || j.videoUrl) {
+        combinedRefs.push({
+          previewUrl: j.videoPreviewUrl || j.videoUrl,
+          url: j.videoUrl || j.videoPreviewUrl,
+          mediaType: 'video',
+          fileName: j.fileName || '',
+          category: j.category || 'motion',
+        })
+      }
+    }
+    if (!firstImage && (j.imagePreviewUrl || j.imageUrl)) {
+      firstImage = { imagePreviewUrl: j.imagePreviewUrl || j.imageUrl, imageUrl: j.imageUrl || j.imagePreviewUrl }
+    }
+    if (!firstVideo && (j.videoPreviewUrl || j.videoUrl)) {
+      firstVideo = { videoPreviewUrl: j.videoPreviewUrl || j.videoUrl, videoUrl: j.videoUrl || j.videoPreviewUrl }
+    }
+  }
+
+  if (promptItems.length > 0) {
+    return promptItems.map(item => ({
+      json: {
+        ...item.json,
+        ...(firstImage && !item.json.imagePreviewUrl ? firstImage : {}),
+        ...(firstVideo && !item.json.videoPreviewUrl ? firstVideo : {}),
+        referenceMedia: [
+          ...(Array.isArray(item.json.referenceMedia) ? item.json.referenceMedia : []),
+          ...combinedRefs,
+        ],
+      },
+    }))
+  }
+
+  if (hasExplicitPrompt) {
+    return [{
+      json: {
+        ...(firstImage || {}),
+        ...(firstVideo || {}),
+        referenceMedia: combinedRefs,
+      },
+    }]
+  }
+
+  return input
+}
+
 function resolveReferenceFiles({ node, item, userId, useInputImage, resolveMediaPath }) {
   const seen = new Set()
-  const referenceFiles = []
-  const addFile = filePath => {
-    if (!filePath || seen.has(filePath) || referenceFiles.length >= 10) return
+  const files = []
+  const descriptors = []
+  const addFile = (filePath, meta = {}) => {
+    if (!filePath || seen.has(filePath) || files.length >= 10) return
     seen.add(filePath)
-    referenceFiles.push(filePath)
+    files.push(filePath)
+    const mediaType = meta.mediaType === 'video' ? 'video' : 'image'
+    descriptors.push({
+      fileName: meta.fileName || path.basename(filePath),
+      mediaType,
+      category: meta.category || (mediaType === 'video' ? 'motion' : 'subject'),
+    })
   }
-  const addMediaRef = rawUrl => {
+  const addMediaRef = (rawUrl, meta = {}) => {
     if (typeof rawUrl !== 'string' || !rawUrl.trim()) return
     const localMedia = resolveMediaPath(userId, rawUrl)
     if (localMedia?.filePath && existsSync(localMedia.filePath)) {
-      addFile(localMedia.filePath)
+      addFile(localMedia.filePath, {
+        ...meta,
+        mediaType: meta.mediaType || (String(localMedia.mimeType || '').startsWith('video/') ? 'video' : 'image'),
+      })
     }
   }
 
   if (Array.isArray(node.data.referenceFiles)) {
     for (const entry of node.data.referenceFiles) {
-      addMediaRef(entry?.previewUrl || entry?.url)
+      addMediaRef(entry?.previewUrl || entry?.url, entry)
     }
   }
 
@@ -412,21 +518,33 @@ function resolveReferenceFiles({ node, item, userId, useInputImage, resolveMedia
     if (!path.isAbsolute(resolvedPath) || !existsSync(resolvedPath)) {
       throw new Error(`File referensi media tidak ditemukan: ${resolvedPath || rawRefPath}`)
     }
-    addFile(resolvedPath)
+    addFile(resolvedPath, {
+      fileName: path.basename(resolvedPath),
+      mediaType: /\.(mp4|mov)$/i.test(resolvedPath) ? 'video' : 'image',
+    })
   }
 
   if (Array.isArray(item.json.referenceMedia)) {
     for (const entry of item.json.referenceMedia) {
-      addMediaRef(entry?.previewUrl || entry?.url)
+      addMediaRef(entry?.previewUrl || entry?.url, entry)
     }
   }
 
   if (useInputImage) {
-    addMediaRef(item.json.imagePreviewUrl || item.json.imageUrl)
-    addMediaRef(item.json.videoPreviewUrl || item.json.videoUrl)
+    addMediaRef(item.json.imagePreviewUrl || item.json.imageUrl, { mediaType: 'image', category: 'startFrame' })
+    addMediaRef(item.json.videoPreviewUrl || item.json.videoUrl, { mediaType: 'video', category: 'motion' })
   }
 
-  return referenceFiles
+  return { files, descriptors }
+}
+
+function applyReferenceInstructions(prompt, descriptors) {
+  if (!Array.isArray(descriptors) || !descriptors.length) return prompt
+  const lines = descriptors.map((ref, idx) => {
+    const guide = REFERENCE_CATEGORY_GUIDES[ref.category] || REFERENCE_CATEGORY_GUIDES.general
+    return `- Lampiran #${idx + 1} (${ref.fileName}): ${guide}`
+  })
+  return `[Gunakan file referensi terlampir sesuai kategori berikut:\n${lines.join('\n')}]\n\n${prompt}`
 }
 
 async function runFlowGenerationJob({
@@ -565,13 +683,15 @@ export async function runVideoNode(
   const useInputImage = node.data.useInputImage !== false
   const timeoutSeconds = Math.min(900, Math.max(60, Math.round(Number(node.data.timeoutSeconds) || 480)))
 
+  const normalizedInput = mergeParallelReferenceInputs(input, node, 'video')
   const output = []
-  for (const item of input) {
+  for (const item of normalizedInput) {
     if (signal?.aborted) {
       throw signal.reason instanceof Error ? signal.reason : new Error('Pengujian dihentikan pengguna.')
     }
-    const prompt = resolveFlowPrompt(node, item, 'video')
-    const referenceFiles = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
+    const basePrompt = resolveFlowPrompt(node, item, 'video')
+    const { files: referenceFiles, descriptors } = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
+    const prompt = applyReferenceInstructions(basePrompt, descriptors)
     const { job, downloadedFiles } = await runFlowGenerationJob({
       toolName: 'flow_generate_video',
       prompt,
@@ -650,13 +770,15 @@ export async function runFlowImageNode(
   const useInputImage = Boolean(node.data.useInputImage)
   const timeoutSeconds = Math.min(900, Math.max(60, Math.round(Number(node.data.timeoutSeconds) || 300)))
 
+  const normalizedInput = mergeParallelReferenceInputs(input, node, 'image')
   const output = []
-  for (const item of input) {
+  for (const item of normalizedInput) {
     if (signal?.aborted) {
       throw signal.reason instanceof Error ? signal.reason : new Error('Pengujian dihentikan pengguna.')
     }
-    const prompt = resolveFlowPrompt(node, item, 'image')
-    const referenceFiles = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
+    const basePrompt = resolveFlowPrompt(node, item, 'image')
+    const { files: referenceFiles, descriptors } = resolveReferenceFiles({ node, item, userId: user.id, useInputImage, resolveMediaPath })
+    const prompt = applyReferenceInstructions(basePrompt, descriptors)
     const { job, downloadedFiles } = await runFlowGenerationJob({
       toolName: 'flow_generate_image',
       prompt,

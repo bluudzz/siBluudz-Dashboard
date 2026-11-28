@@ -239,5 +239,36 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
     )
     assert.equal(videoCalls[0].name, 'flow_generate_video')
     assert.equal((videoCalls[0].args.referenceFiles as string[]).length, 2)
+
+    const fanInCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const fanOut = await runVideoNode(
+      {
+        node: { id: 'v3', data: { useInputImage: true } },
+        input: [
+          { json: { prompt: 'Buat orang ini berjalan menyusuri lorong bioskop' } },
+          {
+            json: {
+              referenceMedia: [{ ...uploadedPhoto, category: 'subject' }, { ...uploadedVideo, category: 'motion' }],
+              imagePreviewUrl: uploadedPhoto.previewUrl,
+              videoPreviewUrl: uploadedVideo.previewUrl,
+            },
+          },
+        ],
+      },
+      { id: 'u-media', role: 'admin' },
+      {
+        callTool: async (name: string, args: Record<string, unknown>) => {
+          fanInCalls.push({ name, args })
+          if (name === 'flow_generate_video') return { id: 'fan-vid-job', status: 'processing' }
+          return { id: 'fan-vid-job', status: 'completed', downloadedFiles: [fakeVidOut] }
+        },
+        outputDirectory: tempDir,
+      },
+    )
+    assert.equal(fanOut.length, 1)
+    assert.equal(fanInCalls.filter(c => c.name === 'flow_generate_video').length, 1)
+    assert.equal((fanInCalls[0].args.referenceFiles as string[]).length, 2)
+    assert.match(String(fanInCalls[0].args.prompt), /Karakter \/ Subjek/)
+    assert.match(String(fanInCalls[0].args.prompt), /Referensi Gerakan/)
   })
 })
