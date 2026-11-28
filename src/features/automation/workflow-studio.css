@@ -613,7 +613,8 @@
 .dark .wf-node-main .wf-node-flow-badge.is-connected { border-color:#4db88a55; background:#4db88a1c; color:#7dc7a7; }
 .wf-node-main .wf-node-flow-badge.is-disconnected { border-color:#c68a3855; background:#c68a3816; color:#a66c1f; }
 .dark .wf-node-main .wf-node-flow-badge.is-disconnected { border-color:#d4973f55; background:#d4973f1c; color:#eab86d; }
-.wf-flow-dot { width:7px; height:7px; border-radius:50%; flex:none; background:currentColor; }
+.wf-node-main .wf-node-flow-badge .wf-flow-dot,
+.wf-footer-flow-pill .wf-flow-dot { width:7px; height:7px; border-radius:50%; flex:none; color:inherit; background:currentColor; }
 .wf-footer-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .wf-footer-flow-pill { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid var(--wf-line); }
 .wf-footer-flow-pill.is-connected { border-color:#28816155; background:#28816114; color:#207557; }

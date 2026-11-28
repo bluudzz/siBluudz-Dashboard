@@ -306,9 +306,7 @@ export function GoogleFlowSettings({
           {isConnected ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
           <div>
             <strong>
-              {isConnected
-                ? 'Terhubung · Jalan Tersembunyi di Background (Video & Gambar Siap)'
-                : 'Belum Terhubung ke Google Flow'}
+              {isConnected ? 'Flow Terhubung' : 'Flow Tidak Terhubung'}
             </strong>
             <span>
               {isConnected
