@@ -39,6 +39,7 @@ interface FlowInspectResponse {
 
 const DEFAULT_VIDEO_MODELS = [
   { id: 'ui-default', label: 'Bawaan UI Flow' },
+  { id: 'omni-1-2-flash', label: 'Omni 1.2 Flash' },
   { id: 'omni-flash', label: 'Omni Flash' },
   { id: 'veo-3-1-fast', label: 'Veo 3.1 - Fast' },
   { id: 'veo-3-1-lite', label: 'Veo 3.1 - Lite' },
@@ -47,6 +48,7 @@ const DEFAULT_VIDEO_MODELS = [
 
 const DEFAULT_IMAGE_MODELS = [
   { id: 'ui-default', label: 'Bawaan UI Flow' },
+  { id: 'nano-banana-2-1', label: 'Nano Banana 2.1' },
   { id: 'nano-banana-pro', label: 'Nano Banana Pro' },
   { id: 'nano-banana-2', label: 'Nano Banana 2' },
   { id: 'nano-banana-2-lite', label: 'Nano Banana 2 Lite' },

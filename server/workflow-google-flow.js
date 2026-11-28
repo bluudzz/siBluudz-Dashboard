@@ -153,8 +153,8 @@ export async function ensurePersistentFlowChrome({ openFlowUrl = true, headless 
       '--profile-directory=Default',
       '--no-first-run',
       '--no-default-browser-check',
-      ...(headless ? ['--headless=new'] : []),
-      ...(openFlowUrl && !headless ? ['https://labs.google/fx/tools/flow'] : []),
+      ...(headless ? ['--headless=new', '--window-size=1440,900'] : []),
+      ...(openFlowUrl && !headless ? ['https://flow.google.com/'] : []),
     ],
     { detached: true, stdio: 'ignore', windowsHide: headless },
   )
