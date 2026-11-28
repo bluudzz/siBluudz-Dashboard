@@ -9,7 +9,7 @@ const videoKeys=new Set(['videoUrl','videoPreviewUrl','videoMime','videoModel'])
 const contractFields:Record<string,string[]>={
   searchContent:['query','queries','followUpQueries','coverage','sources','pages','sourceCount','readCount','note'],
   aiAgent:['output','summary','facts','recommendations','agentModel','toolSteps'],
-  imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','prompt'],
+  imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imageProvider','localImagePath','imagePrompt','prompt'],
   imageEdit:['imageUrl','imagePreviewUrl','imageMime','editMode','editedWidth','editedHeight','imageModel','imagePrompt'],
   videoGenerate:['videoPrompt','videoModel','videoAspectRatio','videoDurationSeconds','videoResolution','localVideoPath','videoJobId'],
   aiVision:['visionPassed','visionScore','visionSummary','visionIssues','visionModel','output'],

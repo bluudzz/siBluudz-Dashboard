@@ -134,9 +134,16 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
       }
     }
     if (node.type === 'imageGenerate') {
-      if (!String(data.model||'').trim()) add('error','image-model',`${label}: pilih model gambar 9router.`,node.id)
-      if (String(data.prompt||'').length > 4000) add('error','image-prompt',`${label}: prompt gambar maksimal 4.000 karakter.`,node.id)
-      if (!String(data.prompt||'').trim()) add('warning','image-input',`${label}: prompt akan dibaca dari data "prompt" pada langkah sebelumnya.`,node.id)
+      if (data.provider === 'googleFlow') {
+        if (String(data.prompt||'').length > 20000) add('error','image-prompt',`${label}: prompt gambar maksimal 20.000 karakter.`,node.id)
+        if (!String(data.prompt||'').trim()) add('warning','image-input',`${label}: prompt akan dibaca dari data "prompt" pada langkah sebelumnya.`,node.id)
+        const ratio = String(data.aspectRatio || 'ui-default')
+        if (!['ui-default', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(ratio)) add('error', 'image-aspect', `${label}: pilih rasio gambar Google Flow yang didukung.`, node.id)
+      } else {
+        if (!String(data.model||'').trim()) add('error','image-model',`${label}: pilih model gambar 9router.`,node.id)
+        if (String(data.prompt||'').length > 4000) add('error','image-prompt',`${label}: prompt gambar maksimal 4.000 karakter.`,node.id)
+        if (!String(data.prompt||'').trim()) add('warning','image-input',`${label}: prompt akan dibaca dari data "prompt" pada langkah sebelumnya.`,node.id)
+      }
     }
     if (node.type === 'videoGenerate') {
       if (String(data.prompt || '').length > 20000) add('error', 'video-prompt', `${label}: prompt video maksimal 20.000 karakter.`, node.id)

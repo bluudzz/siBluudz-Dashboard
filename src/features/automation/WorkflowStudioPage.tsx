@@ -134,6 +134,7 @@ function Studio() {
   const [undoStack,setUndoStack]=useState<Snapshot[]>([])
   const [redoStack,setRedoStack]=useState<Snapshot[]>([])
   const [hoveredEdgeId,setHoveredEdgeId]=useState<string|null>(null)
+  const [flowConn,setFlowConn]=useState<{installed:boolean;connected:boolean;accountLabel:string}|null>(null)
   const [paletteTarget,setPaletteTarget]=useState<PaletteTarget>(null)
   const edgeHoverTimer=useRef<ReturnType<typeof setTimeout>|null>(null)
   const edgeActionsRef=useRef<{insert:(edgeId:string)=>void;remove:(edgeId:string)=>void;hover:(edgeId:string|null)=>void}>({insert:()=>{},remove:()=>{},hover:()=>{}})
@@ -184,6 +185,19 @@ function Studio() {
     finally{setBusyKind('')}
   },[loadDetail])
   useEffect(()=>{void loadList()},[loadList])
+  useEffect(()=>{
+    let cancelled=false
+    workflowRequest<{installed:boolean;defaultAccountId?:string;accounts?:{id:string;label?:string;connectionStatus?:string}[]}>('/google-flow/status')
+      .then(data=>{
+        if(cancelled)return
+        const accounts=Array.isArray(data?.accounts)?data.accounts:[]
+        const active=(data.defaultAccountId&&accounts.find(a=>a.id===data.defaultAccountId))||accounts.find(a=>a.connectionStatus==='connected')||accounts[0]
+        const connected=Boolean(data.installed&&active&&active.connectionStatus!=='needs_reconnect'&&active.connectionStatus!=='access_unavailable')
+        setFlowConn({installed:Boolean(data.installed),connected,accountLabel:active?(active.label||active.id):''})
+      })
+      .catch(()=>{})
+    return()=>{cancelled=true}
+  },[])
   useEffect(()=>{const media=window.matchMedia('(max-width:600px)');const change=()=>setCompact(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change)},[])
   useEffect(()=>{
     if(compact||tab!=='editor'||!canvas.current)return
@@ -635,7 +649,7 @@ function Studio() {
             const nodeStatusById=new Map(nodes.map(node=>[node.id,liveNodeStatus(node)]))
             return <ReactFlow<StudioNode,Edge>
               proOptions={{hideAttribution:true}}
-              nodes={nodes.map(node=>({...node,data:{...node.data,onAddResource:(type:string)=>addNode(type,node.id),connectedAiResources:node.type==='aiAgent'?Object.keys(aiPorts).filter(resource=>edges.some(edge=>edge.target===node.id&&edge.targetHandle===aiPorts[resource])):[]}}))}
+              nodes={nodes.map(node=>({...node,data:{...node.data,googleFlowConn:flowConn,onAddResource:(type:string)=>addNode(type,node.id),connectedAiResources:node.type==='aiAgent'?Object.keys(aiPorts).filter(resource=>edges.some(edge=>edge.target===node.id&&edge.targetHandle===aiPorts[resource])):[]}}))}
               edges={edges.map(edge=>{
                 const ai=isAiConnection(edge)
                 const flowState=edgeFlowState(edge,nodeStatusById)
@@ -685,11 +699,11 @@ function Studio() {
           })()}
           {!nodes.length&&<div className="wf-empty-canvas"><Workflow size={28}/><h2>{workflowId?'Mulai dengan trigger':'Buat workflow pertama'}</h2><p>{workflowId?'Tambahkan node pemicu, lalu hubungkan langkah berikutnya.':'Pilih template alur data atau mulai dari kanvas kosong.'}</p><button disabled={busy} onClick={()=>{if(workflowId){setPaletteTarget(null);setSearch('');setPalette(true)}else setNewOpen(true)}}><Plus size={16}/>{workflowId?'Tambah node':'Workflow baru'}</button></div>}
           {workflowId&&<WorkflowAssistantPanel key={workflowId} workflowId={workflowId} nodes={nodes} edges={edges} busy={busy} visible={assistantOpen} initialDraft={assistantDrafts.current.get(workflowId)||''} onDraftChange={draft=>assistantDrafts.current.set(workflowId,draft)} onApply={(nextNodes,nextEdges)=>{commit(nextNodes,nextEdges);setSelectedId(null);setDetailOpen(false);setNotice('Usulan asisten diterapkan ke draft. Periksa lalu simpan.') }} onClose={()=>setAssistantOpen(false)}/>}
-          {detailOpen&&selectedNode&&<NodeSettingsPanel key={selectedNode.id} workflowId={workflowId} webhookToken={webhookToken} onGenerateWebhookToken={generateWebhookToken} node={selectedNode} nodes={nodes} edges={edges} busy={busy} onUpdate={updateNode} onDelete={removeNode} onClose={()=>setDetailOpen(false)} onExecute={id=>void run(id)} onSelect={id=>{setSelectedId(id);setDetailOpen(true)}} onAddResource={addNode}/>}
+          {detailOpen&&selectedNode&&<NodeSettingsPanel key={selectedNode.id} workflowId={workflowId} webhookToken={webhookToken} onGenerateWebhookToken={generateWebhookToken} node={selectedNode} nodes={nodes} edges={edges} busy={busy} onUpdate={updateNode} onDelete={removeNode} onClose={()=>setDetailOpen(false)} onExecute={id=>void run(id)} onSelect={id=>{setSelectedId(id);setDetailOpen(true)}} onAddResource={addNode} onFlowStatusChange={(connected,accountLabel)=>setFlowConn(prev=>({installed:prev?.installed??true,connected,accountLabel}))}/>}
           {toast}
         </div>
         {chatOpen&&<section className="wf-test-chat" aria-label="Uji chat workflow"><header><div><h3>Uji chat</h3><p>Setiap pesan menjalankan workflow dan memakai kuota model 9router.</p></div><button disabled={busy} onClick={()=>{setChatMessages([]);setChatSession(crypto.randomUUID())}}>Sesi baru</button><button type="button" className="wf-section-close" aria-label="Tutup uji chat" onClick={()=>setChatOpen(false)}><X size={16}/></button></header><div className="wf-chat-messages" aria-live="polite">{!chatMessages.length?<p className="wf-muted">Pilih Model AI, tambahkan Memory bila percakapan perlu diingat, lalu kirim pesan.</p>:chatMessages.map((message,index)=><article key={index} className={message.role==='Error'?'wf-error':''}><strong>{message.role}</strong><p>{message.text}</p></article>)}{busyKind==='chat'&&<p role="status">AI Agent sedang memproses…</p>}</div><form onSubmit={event=>void sendChat(event)}><label className="wf-field"><span>Pesan untuk AI Agent</span><textarea rows={2} maxLength={16000} value={chatMessage} disabled={busy} onChange={event=>setChatMessage(event.target.value)} placeholder="Contoh: Buat rencana carousel 3 slide untuk produk saya"/></label><button className="wf-primary" disabled={busy||!chatMessage.trim()} type="submit"><Send size={15}/>Kirim</button></form></section>}
-        <div className="wf-canvas-footer"><span>{nodes.length} node · {edges.length} koneksi</span><span>Garis utuh: alur data · Garis putus: sub-node AI · Tarik kabel ke area kosong untuk tambah node</span></div>
+        <div className="wf-canvas-footer"><span className="wf-footer-left"><span>{nodes.length} node · {edges.length} koneksi</span>{flowConn&&<span className={'wf-footer-flow-pill '+(flowConn.connected?'is-connected':'is-disconnected')}><span className="wf-flow-dot"/>{flowConn.connected?`Google Flow Terhubung (Video & Gambar${flowConn.accountLabel?` · ${flowConn.accountLabel}`:''})`:'Google Flow Belum Terhubung (Video & Gambar)'}</span>}</span><span>Garis utuh: alur data · Garis putus: sub-node AI · Tarik kabel ke area kosong untuk tambah node</span></div>
       </div>:tab==='executions'?<div className="wf-executions">
          <header><div><h2>Riwayat pengujian</h2><p className="wf-muted">Pilih pengujian untuk melihat langkah, input, dan outputnya.</p></div><button disabled={runsLoading} onClick={()=>void loadRuns()}><RefreshCw size={14}/>Muat ulang</button></header>
         {runsLoading?<p role="status">Memuat riwayat…</p>:!runs.length?<div className="wf-empty-history"><h3>Belum ada eksekusi</h3><p>Klik Jalankan alur di editor untuk merekam input dan output node.</p></div>:<div className="wf-history-grid">

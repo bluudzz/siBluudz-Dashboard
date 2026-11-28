@@ -12,7 +12,7 @@ function nodeSummary(type:string|undefined,data:StudioNode['data']):string {
   if(type==='promptTrigger')return data.promptMode==='ai'?'Mode AI':'Mode Normal'
   if(type==='webhookTrigger')return 'Pemicu dari URL luar'
   if(type==='chatModel')return data.model?formatModelLabel(String(data.model)):'Model belum dipilih'
-  if(type==='imageGenerate')return data.model?formatModelLabel(String(data.model)):'Model gambar belum dipilih'
+  if(type==='imageGenerate'){if(data.provider==='googleFlow'){const ratio=data.aspectRatio&&data.aspectRatio!=='ui-default'?String(data.aspectRatio):'Auto';const model=data.model&&data.model!=='ui-default'?String(data.model):'Google Flow';return `${ratio} · ${model}`}return data.model?formatModelLabel(String(data.model)):'Model gambar belum dipilih'}
   if(type==='imageEdit')return data.editMode==='aiEdit'?(data.model?`AI Edit · ${formatModelLabel(String(data.model))}`:'AI Edit · pilih model'):`Format IG ${String(data.aspectRatio||'4:5')}`
   if(type==='videoGenerate'){const ratio=data.aspectRatio&&data.aspectRatio!=='ui-default'?String(data.aspectRatio):'Auto';const model=data.model&&data.model!=='ui-default'?String(data.model):'Google Flow';return `${ratio} · ${model}`}
   if(type==='aiVision')return data.model?`Vision · ${formatModelLabel(String(data.model))}`:'Analisis gambar AI'
@@ -48,12 +48,14 @@ function WorkflowNodeCard({data,type,selected}:NodeProps<StudioNode>) {
    const nodeLabel=data.label||definition?.title||'Node lama'
    const nodeTypeLabel=definition?.title||type||'Node lama'
    const summary=nodeSummary(type,data)
+   const usesGoogleFlow=type==='videoGenerate'||(type==='imageGenerate'&&data.provider==='googleFlow')
+   const flowConn=data.googleFlowConn as {installed?:boolean;connected?:boolean;accountLabel?:string}|null|undefined
    const resultCount=type==='searchContent'?Number(data.result?.output?.[0]?.json?.sourceCount||data.result?.output?.length||0):data.result?.output.length
    return <div aria-label={String(nodeLabel)} className={'wf-node wf-kind-'+type+' '+(selected?'is-selected ':'')+'status-'+status+(images.length?' has-image':'')}>
     {!isTrigger(type)&&!isSubNode(type)&&<Handle type="target" id={port.input} position={Position.Left} />}
      <div className="wf-node-main">
        {!images.length&&<><div className="wf-node-heading"><div className="wf-node-icon"><Icon size={20}/></div><strong>{nodeLabel}</strong>{data.pinnedOutput!=null&&<Pin className="wf-node-pin" size={13}/>}</div>
-       <div className="wf-node-meta"><span className="wf-node-type">{nodeTypeLabel}</span><span className="wf-node-summary">{summary}</span></div></>}
+       <div className="wf-node-meta"><span className="wf-node-type">{nodeTypeLabel}</span><span className="wf-node-summary">{summary}</span>{usesGoogleFlow&&flowConn&&<span className={'wf-node-flow-badge '+(flowConn.connected?'is-connected':'is-disconnected')}><span className="wf-flow-dot"/>{flowConn.connected?(flowConn.accountLabel?`Flow Terhubung · ${flowConn.accountLabel}`:'Flow Terhubung'):'Flow Belum Terhubung'}</span>}</div></>}
        {images.length>0&&<div className="wf-node-images">{images.map((url,index)=><img key={url+index} src={url} alt={`Hasil gambar ${index+1}`} loading="lazy" draggable={false} referrerPolicy="no-referrer"/>)}</div>}
      </div>
     <div className="wf-node-footer"><span>{status==='error'?<AlertCircle size={12}/>:status==='success'?<Check size={12}/>:null}{images.length?'Selesai':isSubNode(type)&&status==='idle'?'Dipakai oleh AI Agent':statusText[status]}</span>{images.length>0?<span>{((data.result?.durationMs||0)/1000).toFixed(1)} s</span>:data.result&&<span>{resultCount} {type==='searchContent'?'sumber':'hasil'}</span>}</div>

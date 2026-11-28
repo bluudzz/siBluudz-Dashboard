@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { db, getNineRouterConfig, getSetting } from './db.js'
 import { resolveValue, workflowInput } from '../shared/workflow-engine.js'
 import { storeWorkflowImage } from './workflow-media.js'
+import { runFlowImageNode } from './workflow-google-flow.js'
 
 const MAX_PROMPT = 4000
 
@@ -41,7 +42,11 @@ async function requestImage(config,model,prompt,fetchImpl,signal) {
   return parseImageResponse(data)
 }
 
-export async function runImageNode({node,input},user,{fetchImpl=fetch,storeImage=storeWorkflowImage,signal}={}) {
+export async function runImageNode({node,input},user,options={}) {
+  if (node?.data?.provider === 'googleFlow') {
+    return runFlowImageNode({ node, input }, user, options)
+  }
+  const {fetchImpl=fetch,storeImage=storeWorkflowImage,signal} = options
   const config=getNineRouterConfig()
   if (!config.apiKey) throw new Error('Hubungkan API Key 9router sebelum membuat gambar.')
   const model=String(node.data.model||getSetting('ninerouter_image_model','')).trim()

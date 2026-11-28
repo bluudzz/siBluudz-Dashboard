@@ -599,3 +599,24 @@
 .wf-flow-ext-row { display:flex; gap:6px; align-items:center; }
 .wf-flow-ext-row input { flex:1; min-width:0; font-size:11px; padding:6px 8px; }
 .workflow-studio .wf-flow-ext-row button { flex:none; min-height:32px; min-width:32px; padding:6px; }
+.wf-flow-status-banner { display:flex; align-items:flex-start; gap:8px; padding:9px 10px; border-radius:7px; font-size:12px; border:1px solid var(--wf-line); }
+.wf-flow-status-banner > svg { flex:none; margin-top:2px; }
+.wf-flow-status-banner > div { display:grid; gap:2px; min-width:0; }
+.wf-flow-status-banner strong { font-size:12px; line-height:1.35; }
+.wf-flow-status-banner span { font-size:11px; color:var(--wf-muted); line-height:1.4; overflow-wrap:anywhere; }
+.wf-flow-status-banner.is-connected { border-color:#288161; background:#28816114; color:#207557; }
+.dark .wf-flow-status-banner.is-connected { border-color:#4db88a; background:#4db88a18; color:#7dc7a7; }
+.wf-flow-status-banner.is-disconnected { border-color:#c68a38; background:#c68a3814; color:#a66c1f; }
+.dark .wf-flow-status-banner.is-disconnected { border-color:#d4973f; background:#d4973f18; color:#eab86d; }
+.wf-node-main .wf-node-flow-badge { display:inline-flex; align-items:center; gap:5px; margin-top:4px; padding:2px 7px; border-radius:999px; font-size:10.5px; font-weight:600; width:fit-content; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid var(--wf-line); }
+.wf-node-main .wf-node-flow-badge.is-connected { border-color:#28816155; background:#28816116; color:#207557; }
+.dark .wf-node-main .wf-node-flow-badge.is-connected { border-color:#4db88a55; background:#4db88a1c; color:#7dc7a7; }
+.wf-node-main .wf-node-flow-badge.is-disconnected { border-color:#c68a3855; background:#c68a3816; color:#a66c1f; }
+.dark .wf-node-main .wf-node-flow-badge.is-disconnected { border-color:#d4973f55; background:#d4973f1c; color:#eab86d; }
+.wf-flow-dot { width:7px; height:7px; border-radius:50%; flex:none; background:currentColor; }
+.wf-footer-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.wf-footer-flow-pill { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid var(--wf-line); }
+.wf-footer-flow-pill.is-connected { border-color:#28816155; background:#28816114; color:#207557; }
+.dark .wf-footer-flow-pill.is-connected { border-color:#4db88a55; background:#4db88a1c; color:#7dc7a7; }
+.wf-footer-flow-pill.is-disconnected { border-color:#c68a3855; background:#c68a3814; color:#a66c1f; }
+.dark .wf-footer-flow-pill.is-disconnected { border-color:#d4973f55; background:#d4973f1c; color:#eab86d; }

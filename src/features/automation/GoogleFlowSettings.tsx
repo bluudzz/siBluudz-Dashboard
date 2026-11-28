@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Copy, Link2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Check, CheckCircle2, Copy, Link2, RefreshCw } from 'lucide-react'
 import { workflowRequest } from './workflow-model'
 
 interface FlowAccount {
@@ -24,9 +24,11 @@ interface FlowInspectResponse {
   workspaceAvailable?: boolean
   pageKind?: string
   models?: {
+    image?: Array<{ id: string; label: string; selected?: boolean }>
     video?: Array<{ id: string; label: string; selected?: boolean }>
   }
   aspectRatiosByMedia?: {
+    image?: string[]
     video?: string[]
   }
   availableUpscales?: string[]
@@ -40,29 +42,59 @@ const DEFAULT_VIDEO_MODELS = [
   { id: 'veo-3-1-quality', label: 'Veo 3.1 - Quality' },
 ]
 
-const DEFAULT_RATIOS = ['9:16', '16:9', 'ui-default']
+const DEFAULT_IMAGE_MODELS = [
+  { id: 'ui-default', label: 'Bawaan UI Flow' },
+  { id: 'nano-banana-pro', label: 'Nano Banana Pro' },
+  { id: 'nano-banana-2', label: 'Nano Banana 2' },
+  { id: 'nano-banana-2-lite', label: 'Nano Banana 2 Lite' },
+]
+
+const DEFAULT_VIDEO_RATIOS = ['9:16', '16:9', 'ui-default']
+const DEFAULT_IMAGE_RATIOS = ['3:4', '1:1', '9:16', '16:9', '4:3', 'ui-default']
 const DEFAULT_UPSCALES = ['none', '1080p', 'highest_available']
 
+function computeFlowConnection(status: FlowStatusResponse | null, accountId: string) {
+  const accounts = status?.accounts || []
+  const selected = (accountId && accounts.find(a => a.id === accountId))
+    || (status?.defaultAccountId && accounts.find(a => a.id === status.defaultAccountId))
+    || accounts.find(a => a.connectionStatus === 'connected')
+    || accounts[0]
+  const isConnected = Boolean(
+    status?.installed
+    && selected
+    && selected.connectionStatus !== 'needs_reconnect'
+    && selected.connectionStatus !== 'access_unavailable',
+  )
+  return {
+    isConnected,
+    accountLabel: selected ? (selected.label || selected.id) : '',
+  }
+}
+
 export function GoogleFlowSettings({
+  mediaType = 'video',
   accountId,
   model,
   aspectRatio,
-  upscale,
+  upscale = 'none',
   busy,
   onChangeAccount,
   onChangeModel,
   onChangeAspectRatio,
   onChangeUpscale,
+  onStatusChange,
 }: {
+  mediaType?: 'video' | 'image'
   accountId: string
   model: string
   aspectRatio: string
-  upscale: string
+  upscale?: string
   busy: boolean
   onChangeAccount: (id: string) => void
   onChangeModel: (m: string) => void
   onChangeAspectRatio: (r: string) => void
-  onChangeUpscale: (u: string) => void
+  onChangeUpscale?: (u: string) => void
+  onStatusChange?: (connected: boolean, accountLabel: string) => void
 }) {
   const [status, setStatus] = useState<FlowStatusResponse | null>(null)
   const [inspectInfo, setInspectInfo] = useState<FlowInspectResponse | null>(null)
@@ -75,19 +107,25 @@ export function GoogleFlowSettings({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const notifyStatus = useCallback((data: FlowStatusResponse | null, accId: string) => {
+    const conn = computeFlowConnection(data, accId)
+    onStatusChange?.(conn.isConnected, conn.accountLabel)
+  }, [onStatusChange])
+
   const loadStatus = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const data = await workflowRequest<FlowStatusResponse>('/google-flow/status')
       setStatus(data)
+      notifyStatus(data, accountId)
       if (data.bridgeError) setError(data.bridgeError)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memeriksa Google Flow MCP.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [accountId, notifyStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -95,13 +133,14 @@ export function GoogleFlowSettings({
       .then(data => {
         if (cancelled) return
         setStatus(data)
+        notifyStatus(data, accountId)
         if (data.bridgeError) setError(data.bridgeError)
       })
       .catch(err => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Gagal memeriksa Google Flow MCP.')
       })
     return () => { cancelled = true }
-  }, [])
+  }, [accountId, notifyStatus])
 
   const inspectAccount = async () => {
     setInspecting(true)
@@ -113,6 +152,10 @@ export function GoogleFlowSettings({
         body: JSON.stringify({ accountId }),
       })
       setInspectInfo(info)
+      if (info.workspaceAvailable) {
+        const conn = computeFlowConnection(status, accountId)
+        onStatusChange?.(true, conn.accountLabel || 'Aktif')
+      }
       setMessage(
         info.workspaceAvailable
           ? 'Workspace Google Flow aktif dan opsi model diperbarui.'
@@ -156,7 +199,7 @@ export function GoogleFlowSettings({
       })
       setConnectionId('')
       if (res?.account?.id) onChangeAccount(res.account.id)
-      setMessage(`Akun Google Flow "${res?.account?.label || res?.account?.id || 'baru'}" berhasil terhubung.`)
+      setMessage(`Akun Google Flow "${res?.account?.label || res?.account?.id || 'baru'}" berhasil terhubung (siap untuk Video & Gambar).`)
       await loadStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal menyelesaikan koneksi akun.')
@@ -176,12 +219,24 @@ export function GoogleFlowSettings({
     }
   }
 
-  const liveModels = inspectInfo?.models?.video?.length
-    ? [{ id: 'ui-default', label: 'Bawaan UI Flow' }, ...inspectInfo.models.video]
-    : DEFAULT_VIDEO_MODELS
-  const liveRatios = inspectInfo?.aspectRatiosByMedia?.video?.length
-    ? [...inspectInfo.aspectRatiosByMedia.video, 'ui-default']
-    : DEFAULT_RATIOS
+  const { isConnected, accountLabel } = computeFlowConnection(status, accountId)
+
+  const liveModels = mediaType === 'image'
+    ? (inspectInfo?.models?.image?.length
+      ? [{ id: 'ui-default', label: 'Bawaan UI Flow' }, ...inspectInfo.models.image]
+      : DEFAULT_IMAGE_MODELS)
+    : (inspectInfo?.models?.video?.length
+      ? [{ id: 'ui-default', label: 'Bawaan UI Flow' }, ...inspectInfo.models.video]
+      : DEFAULT_VIDEO_MODELS)
+
+  const liveRatios = mediaType === 'image'
+    ? (inspectInfo?.aspectRatiosByMedia?.image?.length
+      ? [...inspectInfo.aspectRatiosByMedia.image, 'ui-default']
+      : DEFAULT_IMAGE_RATIOS)
+    : (inspectInfo?.aspectRatiosByMedia?.video?.length
+      ? [...inspectInfo.aspectRatiosByMedia.video, 'ui-default']
+      : DEFAULT_VIDEO_RATIOS)
+
   const liveUpscales = inspectInfo?.availableUpscales?.length
     ? ['none', ...inspectInfo.availableUpscales, 'highest_available']
     : DEFAULT_UPSCALES
@@ -189,18 +244,26 @@ export function GoogleFlowSettings({
   return (
     <div className="wf-flow-box">
       <div className="wf-flow-header">
-        <strong>Google Flow MCP (Lokal)</strong>
+        <strong>Google Flow MCP (1 Extension · Video &amp; Gambar)</strong>
         <button type="button" disabled={busy || loading} onClick={() => void loadStatus()} title="Muat ulang status Google Flow">
           <RefreshCw size={13} />
           {loading ? 'Memuat…' : 'Segarkan'}
         </button>
       </div>
 
-      <p className="wf-muted">
-        {status?.installed
-          ? `Terpasang · ${status.accounts.length} akun terhubung${status.chromePath ? '' : ' (Chrome tidak terdeteksi)'}`
-          : 'Google Flow MCP belum ditemukan di folder data/google-flow-mcp.'}
-      </p>
+      {status && (
+        <div className={`wf-flow-status-banner ${isConnected ? 'is-connected' : 'is-disconnected'}`} role="status">
+          {isConnected ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+          <div>
+            <strong>{isConnected ? 'Terhubung · Video & Gambar Siap' : 'Belum Terhubung ke Google Flow'}</strong>
+            <span>
+              {isConnected
+                ? `Memakai akun "${accountLabel}" · 1 extension Flow Login Bridge`
+                : 'Hubungkan akun Google Pro Anda sekali saja untuk Video & Gambar.'}
+            </span>
+          </div>
+        </div>
+      )}
 
       <label className="wf-field">
         <span>Akun Google Flow</span>
@@ -222,7 +285,7 @@ export function GoogleFlowSettings({
       </div>
 
       <label className="wf-field">
-        <span>Model Video</span>
+        <span>{mediaType === 'image' ? 'Model Gambar' : 'Model Video'}</span>
         <select disabled={busy} value={model || 'ui-default'} onChange={event => onChangeModel(event.target.value)}>
           {!liveModels.some(item => item.id === (model || 'ui-default')) && model && (
             <option value={model}>{model}</option>
@@ -235,25 +298,41 @@ export function GoogleFlowSettings({
 
       <label className="wf-field">
         <span>Rasio Aspek</span>
-        <select disabled={busy} value={aspectRatio || '9:16'} onChange={event => onChangeAspectRatio(event.target.value)}>
-          {liveRatios.map(r => (
+        <select
+          disabled={busy}
+          value={aspectRatio || (mediaType === 'image' ? '3:4' : '9:16')}
+          onChange={event => onChangeAspectRatio(event.target.value)}
+        >
+          {[...new Set(liveRatios)].map(r => (
             <option key={r} value={r}>
-              {r === '9:16' ? '9:16 (Vertikal / Reels)' : r === '16:9' ? '16:9 (Landscape / YouTube)' : 'Bawaan UI Flow'}
+              {r === '9:16'
+                ? '9:16 (Vertikal / Reels / Story)'
+                : r === '16:9'
+                  ? '16:9 (Landscape / YouTube)'
+                  : r === '3:4'
+                    ? '3:4 (Portrait Feed)'
+                    : r === '4:3'
+                      ? '4:3 (Klasik)'
+                      : r === '1:1'
+                        ? '1:1 (Square)'
+                        : 'Bawaan UI Flow'}
             </option>
           ))}
         </select>
       </label>
 
-      <label className="wf-field">
-        <span>Upscale Video</span>
-        <select disabled={busy} value={upscale || 'none'} onChange={event => onChangeUpscale(event.target.value)}>
-          {[...new Set(liveUpscales)].map(u => (
-            <option key={u} value={u}>
-              {u === 'none' ? 'Tanpa upscale (cepat)' : u === 'highest_available' ? 'Tertinggi yang tersedia' : u}
-            </option>
-          ))}
-        </select>
-      </label>
+      {mediaType === 'video' && onChangeUpscale && (
+        <label className="wf-field">
+          <span>Upscale Video</span>
+          <select disabled={busy} value={upscale || 'none'} onChange={event => onChangeUpscale(event.target.value)}>
+            {[...new Set(liveUpscales)].map(u => (
+              <option key={u} value={u}>
+                {u === 'none' ? 'Tanpa upscale (cepat)' : u === 'highest_available' ? 'Tertinggi yang tersedia' : u}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <details className="wf-advanced" open={status?.installed && status.accounts.length === 0}>
         <summary>Hubungkan Akun Google Flow (Flow Login Bridge)</summary>

@@ -322,7 +322,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
         if (response.error) throw new Error(response.error)
         result.output = response.output
         usedLive = true
-        result.message = node.type === 'imageGenerate' ? 'Gambar dibuat dengan model 9router; periksa hasil sebelum publikasi.'
+        result.message = node.type === 'imageGenerate' ? (data.provider === 'googleFlow' ? 'Gambar dibuat lewat Google Flow; periksa hasil sebelum langkah berikutnya.' : 'Gambar dibuat dengan model 9router; periksa hasil sebelum publikasi.')
           : node.type === 'imageEdit' ? 'Gambar selesai diolah; periksa hasil sebelum langkah berikutnya.'
           : node.type === 'videoGenerate' ? 'Video selesai dibuat lewat Google Flow; periksa pratinjau sebelum langkah berikutnya.'
           : node.type === 'aiVision' ? 'Gambar selesai dianalisis oleh AI Vision.'
