@@ -2,6 +2,7 @@ export const aiPorts = {chatModel:'ai_languageModel',memory:'ai_memory',tool:'ai
 export const isSubNode = type => Object.hasOwn(aiPorts,type)
 export const isTrigger = type => type==='trigger'||type==='chatTrigger'||type==='promptTrigger'||type==='webhookTrigger'
 export const isAiConnection = edge => Object.values(aiPorts).includes(edge.targetHandle)
+export const isStartNode = (node, edges = []) => isTrigger(node?.type) || (node?.type === 'mediaFile' && !edges.some(edge => !isAiConnection(edge) && edge.target === node.id))
 export function agentResources(agentId,nodes,edges) {
   const connected=type=>edges.filter(edge=>edge.target===agentId&&edge.targetHandle===aiPorts[type]).map(edge=>nodes.find(node=>node.id===edge.source)).filter(Boolean)
   return {model:connected('chatModel')[0],memory:connected('memory')[0],tools:connected('tool')}

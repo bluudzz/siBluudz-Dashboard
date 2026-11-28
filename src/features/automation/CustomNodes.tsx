@@ -1,8 +1,9 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Check, AlertCircle, Pin, Plus } from 'lucide-react'
+import { Check, AlertCircle, Film, Pin, Plus } from 'lucide-react'
 import { catalog, formatModelLabel, ports, workflowNodeImages, type StudioNode } from './workflow-model'
 import { iconForWorkflowNode } from './workflow-node-icons'
 import { aiPorts, isSubNode, isTrigger } from '../../../shared/workflow-connections'
+import type { UploadedReferenceMedia } from './MediaReferenceUploader'
 
 const operationLabels:Record<string,string>={
   publish:'Terbitkan media',reels:'Terbitkan Reel',stories:'Terbitkan Story',comments:'Baca komentar',insights:'Lihat statistik',list:'Lihat / daftar',inspect:'Periksa post',shared:'Link berbagi',view:'Lihat file',download:'Unduh file',
@@ -21,6 +22,13 @@ function nodeSummary(type:string|undefined,data:StudioNode['data']):string {
   if(type==='searchContent')return data.sourceMode==='url'?'Baca URL langsung':'Susun pencarian dan baca sumber'
   if(type==='apiRequest')return `${String(data.method||'GET')} ${data.url?String(data.url).slice(0,24):'API eksternal'}`
   if(type==='googleDrive')return operationLabels[String(data.operation||'shared')]||'Pilih file'
+  if(type==='mediaFile'){
+    const files=Array.isArray(data.files)?(data.files as UploadedReferenceMedia[]):[]
+    if(!files.length)return 'Belum ada file referensi'
+    const photos=files.filter(f=>f.mediaType!=='video').length
+    const videos=files.filter(f=>f.mediaType==='video').length
+    return [photos?`${photos} foto`:'',videos?`${videos} video`:''].filter(Boolean).join(' · ')
+  }
   if(type==='instagram')return operationLabels[String(data.operation||'publish')]||'Tindakan Instagram'
   if(type==='notify')return data.channelId?'Kirim notifikasi':'Pilih channel'
   if(type==='merge')return data.mode==='append'?'Gabung berurutan':data.mode==='aggregate'?'Rangkum 1 objek':'Gabung per posisi'
@@ -50,12 +58,13 @@ function WorkflowNodeCard({data,type,selected}:NodeProps<StudioNode>) {
    const summary=nodeSummary(type,data)
    const usesGoogleFlow=type==='videoGenerate'||(type==='imageGenerate'&&data.provider==='googleFlow')
    const flowConn=data.googleFlowConn as {installed?:boolean;connected?:boolean;accountLabel?:string}|null|undefined
+   const refFiles=type==='mediaFile'&&Array.isArray(data.files)?(data.files as UploadedReferenceMedia[]).filter(f=>f&&typeof f.previewUrl==='string'):[]
    const resultCount=type==='searchContent'?Number(data.result?.output?.[0]?.json?.sourceCount||data.result?.output?.length||0):data.result?.output.length
    return <div aria-label={String(nodeLabel)} className={'wf-node wf-kind-'+type+' '+(selected?'is-selected ':'')+'status-'+status+(images.length?' has-image':'')}>
     {!isTrigger(type)&&!isSubNode(type)&&<Handle type="target" id={port.input} position={Position.Left} />}
      <div className="wf-node-main">
        {!images.length&&<><div className="wf-node-heading"><div className="wf-node-icon"><Icon size={20}/></div><strong>{nodeLabel}</strong>{data.pinnedOutput!=null&&<Pin className="wf-node-pin" size={13}/>}</div>
-       <div className="wf-node-meta"><span className="wf-node-type">{nodeTypeLabel}</span><span className="wf-node-summary">{summary}</span>{usesGoogleFlow&&flowConn&&<span className={'wf-node-flow-badge '+(flowConn.connected?'is-connected':'is-disconnected')}><span className="wf-flow-dot"/>{flowConn.connected?'Flow Terhubung':'Flow Tidak Terhubung'}</span>}</div></>}
+       <div className="wf-node-meta"><span className="wf-node-type">{nodeTypeLabel}</span><span className="wf-node-summary">{summary}</span>{refFiles.length>0&&<div className="wf-node-ref-strip">{refFiles.slice(0,3).map((file,idx)=><span key={`${file.previewUrl}-${idx}`} className="wf-node-ref-thumb">{file.mediaType==='video'?<Film size={14}/>:<img src={file.previewUrl} alt="" loading="lazy"/>}</span>)}{refFiles.length>3&&<span className="wf-node-ref-more">+{refFiles.length-3}</span>}</div>}{usesGoogleFlow&&flowConn&&<span className={'wf-node-flow-badge '+(flowConn.connected?'is-connected':'is-disconnected')}><span className="wf-flow-dot"/>{flowConn.connected?'Flow Terhubung':'Flow Tidak Terhubung'}</span>}</div></>}
        {images.length>0&&<div className="wf-node-images">{images.map((url,index)=><img key={url+index} src={url} alt={`Hasil gambar ${index+1}`} loading="lazy" draggable={false} referrerPolicy="no-referrer"/>)}</div>}
      </div>
     <div className="wf-node-footer"><span>{status==='error'?<AlertCircle size={12}/>:status==='success'?<Check size={12}/>:null}{images.length?'Selesai':isSubNode(type)&&status==='idle'?'Dipakai oleh AI Agent':statusText[status]}</span>{images.length>0?<span>{((data.result?.durationMs||0)/1000).toFixed(1)} s</span>:data.result&&<span>{resultCount} {type==='searchContent'?'sumber':'hasil'}</span>}</div>

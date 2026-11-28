@@ -96,14 +96,14 @@ export async function closePersistentFlowChrome(cdpUrl = DEFAULT_FLOW_CDP_URL) {
       const ws = new WebSocket(wsUrl)
       const finish = () => {
         clearTimeout(timer)
-        try { ws.close() } catch {}
+        try { ws.close() } catch { }
         resolve()
       }
       const timer = setTimeout(finish, 2500)
       ws.addEventListener('open', () => {
         try {
           ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
-        } catch {}
+        } catch { }
         setTimeout(finish, 250)
       })
       ws.addEventListener('error', finish)
@@ -226,8 +226,8 @@ export async function closeGoogleFlowClient() {
   sharedClientState = null
   sharedClientPromise = null
   if (!current) return
-  try { await current.client.close() } catch {}
-  try { await current.transport.close() } catch {}
+  try { await current.client.close() } catch { }
+  try { await current.transport.close() } catch { }
 }
 
 function registerShutdownHooks() {
@@ -280,7 +280,7 @@ async function getFlowClient() {
     } catch (error) {
       sharedClientState = null
       sharedClientPromise = null
-      try { await transport.close() } catch {}
+      try { await transport.close() } catch { }
       throw error
     }
   })()
@@ -300,7 +300,7 @@ export async function callFlowTool(name, args = {}, { timeoutMs = 120_000, signa
 
   let parsed = null
   if (text) {
-    try { parsed = JSON.parse(text) } catch {}
+    try { parsed = JSON.parse(text) } catch { }
   }
   if (result?.isError) {
     const message = parsed?.error || parsed?.message || text || `Tool Google Flow "${name}" gagal.`
@@ -385,25 +385,47 @@ export async function completeGoogleFlowConnection({ connectionId, accountId = '
 }
 
 function resolveReferenceFiles({ node, item, userId, useInputImage, resolveMediaPath }) {
+  const seen = new Set()
   const referenceFiles = []
+  const addFile = filePath => {
+    if (!filePath || seen.has(filePath) || referenceFiles.length >= 10) return
+    seen.add(filePath)
+    referenceFiles.push(filePath)
+  }
+  const addMediaRef = rawUrl => {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) return
+    const localMedia = resolveMediaPath(userId, rawUrl)
+    if (localMedia?.filePath && existsSync(localMedia.filePath)) {
+      addFile(localMedia.filePath)
+    }
+  }
+
+  if (Array.isArray(node.data.referenceFiles)) {
+    for (const entry of node.data.referenceFiles) {
+      addMediaRef(entry?.previewUrl || entry?.url)
+    }
+  }
+
   const rawRefPath = typeof node.data.referenceImagePath === 'string' ? node.data.referenceImagePath.trim() : ''
   if (rawRefPath) {
     const resolvedPath = String(resolveValue(rawRefPath, item.json) || '').trim()
     if (!path.isAbsolute(resolvedPath) || !existsSync(resolvedPath)) {
-      throw new Error(`File referensi gambar tidak ditemukan: ${resolvedPath || rawRefPath}`)
+      throw new Error(`File referensi media tidak ditemukan: ${resolvedPath || rawRefPath}`)
     }
-    referenceFiles.push(resolvedPath)
-    return referenceFiles
+    addFile(resolvedPath)
   }
+
+  if (Array.isArray(item.json.referenceMedia)) {
+    for (const entry of item.json.referenceMedia) {
+      addMediaRef(entry?.previewUrl || entry?.url)
+    }
+  }
+
   if (useInputImage) {
-    const candidateImage = item.json.imagePreviewUrl || item.json.imageUrl
-    if (typeof candidateImage === 'string' && candidateImage.trim()) {
-      const localMedia = resolveMediaPath(userId, candidateImage)
-      if (localMedia?.filePath && existsSync(localMedia.filePath)) {
-        referenceFiles.push(localMedia.filePath)
-      }
-    }
+    addMediaRef(item.json.imagePreviewUrl || item.json.imageUrl)
+    addMediaRef(item.json.videoPreviewUrl || item.json.videoUrl)
   }
+
   return referenceFiles
 }
 

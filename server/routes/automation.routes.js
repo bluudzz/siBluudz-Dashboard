@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { db } from '../db.js'
 import { requireSameOrigin, requireUser } from '../middleware/auth.js'
@@ -8,6 +8,7 @@ import { decodeWorkflowRun } from '../workflow-history.js'
 import { inspectWorkflow } from '../../shared/workflow-readiness.js'
 import { proposeWorkflowChange, loadAssistantHistory, clearAssistantHistory } from '../workflow-assistant.js'
 import { activeRuns, executeStoredWorkflow, normalizedWorkflow, sanitizeGraph } from '../workflow-scheduler.js'
+import { storeWorkflowUploadedMedia } from '../workflow-media.js'
 import {
   beginGoogleFlowConnection,
   completeGoogleFlowConnection,
@@ -173,6 +174,29 @@ router.post('/google-flow/connect/save-browser', requireSameOrigin, requireUser,
     res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal menyimpan akun Google Flow dari Chrome.' })
   }
 })
+router.post(
+  '/media/upload',
+  requireSameOrigin,
+  requireUser,
+  express.raw({
+    type: ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'],
+    limit: '100mb',
+  }),
+  async (req, res) => {
+    try {
+      const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase()
+      let fileName = ''
+      const rawName = typeof req.headers['x-file-name'] === 'string' ? req.headers['x-file-name'] : ''
+      if (rawName) {
+        try { fileName = decodeURIComponent(rawName) } catch { fileName = rawName }
+      }
+      const stored = await storeWorkflowUploadedMedia(req.user.id, req.body, mimeType, fileName)
+      res.status(201).json(stored)
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Gagal mengunggah file referensi.' })
+    }
+  },
+)
 router.get('/:id',requireUser,(req,res)=>{
   const row=findWorkflow(req.params.id,req.user.id)
   if(!row)return res.status(404).json({error:'Workflow tidak ditemukan.'})

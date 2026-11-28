@@ -8,6 +8,7 @@ import { SimpleDataEditor, dataLabel, friendlyPrompt, technicalPrompt } from './
 import { InstagramAccountSettings } from './InstagramAccountSettings'
 import { GoogleDriveSettings } from './GoogleDriveSettings'
 import { GoogleFlowSettings } from './GoogleFlowSettings'
+import { MediaReferenceUploader, normalizeUploadedMediaList } from './MediaReferenceUploader'
 import { NotificationChannelSettings } from './NotificationChannelSettings'
 import { WorkflowDataViewer } from './WorkflowDataViewer'
 import { NodeInputPanel } from './NodeInputPanel'
@@ -33,6 +34,7 @@ const nodeHelp:Record<string,string>={
   httpRequest:'Node lama untuk membaca satu URL HTTPS.',
   apiRequest:'Panggil API atau webhook HTTPS eksternal dengan metode GET, POST, PUT, PATCH, atau DELETE.',
   googleDrive:'Lihat atau unduh gambar dan video dari Google Drive Anda.',
+  mediaFile:'Unggah foto atau video referensi/contoh agar hasil Generate Gambar & Video lebih sesuai keinginan.',
   imageGenerate:'Buat gambar memakai Google Flow (Background · Tanpa API Key) atau model gambar 9router.',
   imageEdit:'Format gambar ke rasio Instagram (4:5/1:1/9:16) dengan teks overlay atau edit memakai AI.',
   videoGenerate:'Buat video Veo / Omni Flash memakai Google Flow MCP lokal dengan kuota akun Google Anda.',
@@ -250,7 +252,16 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
                 onStatusChange={onFlowStatusChange}
               />
               {field('prompt','Prompt gambar (opsional)','Kosong = gunakan prompt dari langkah sebelumnya',true)}
-              {checkbox('useInputImage','Gunakan gambar langkah sebelumnya sebagai referensi / edit (jika ada)',Boolean(data.useInputImage))}
+              {checkbox('useInputImage','Gunakan foto/video referensi dari langkah sebelumnya (jika ada)',Boolean(data.useInputImage))}
+              <details className="wf-advanced" open={normalizeUploadedMediaList(data.referenceFiles).length>0}>
+                <summary>Upload foto / video referensi langsung ({normalizeUploadedMediaList(data.referenceFiles).length} file)</summary>
+                <MediaReferenceUploader
+                  compact
+                  files={normalizeUploadedMediaList(data.referenceFiles)}
+                  disabled={busy}
+                  onChange={files=>update('referenceFiles',files)}
+                />
+              </details>
               {field('flowProject','Nama Project Flow (opsional)','Kosong = pakai atau buat project otomatis')}
             </>:<>
               <label className="wf-field"><span>Model gambar</span>{imageModelIds.length?<select disabled={busy} value={str('model')} onChange={event=>update('model',event.target.value)}><option value="">Pilih model gambar…</option>{str('model')&&!imageModelIds.includes(str('model'))&&<option value={str('model')}>{formatModelLabel(str('model'))} (tidak tersedia di 9router)</option>}{imageModelIds.map(id=><option key={id} value={id}>{formatModelLabel(id)}</option>)}</select>:<input value={str('model')} disabled={busy} onChange={event=>update('model',event.target.value)} placeholder="ID model gambar dari 9router"/>}</label>
@@ -275,7 +286,16 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
             onStatusChange={onFlowStatusChange}
           />
           {field('prompt','Prompt video (opsional)','Kosong = ambil prompt dari langkah sebelumnya',true)}
-          {checkbox('useInputImage','Gunakan gambar langkah sebelumnya sebagai Start Frame / referensi (jika ada)',data.useInputImage!==false)}
+          {checkbox('useInputImage','Gunakan foto/video referensi atau Start Frame dari langkah sebelumnya (jika ada)',data.useInputImage!==false)}
+          <details className="wf-advanced" open={normalizeUploadedMediaList(data.referenceFiles).length>0}>
+            <summary>Upload foto / video referensi langsung ({normalizeUploadedMediaList(data.referenceFiles).length} file)</summary>
+            <MediaReferenceUploader
+              compact
+              files={normalizeUploadedMediaList(data.referenceFiles)}
+              disabled={busy}
+              onChange={files=>update('referenceFiles',files)}
+            />
+          </details>
           {field('flowProject','Nama Project Flow (opsional)','Kosong = pakai atau buat project otomatis')}
         </>}
         {node.type==='imageEdit'&&<>
@@ -301,6 +321,15 @@ export function NodeSettingsPanel({workflowId,webhookToken,onGenerateWebhookToke
         {node.type==='apiRequest'&&<>{choice('method','Metode HTTP',['GET','POST','PUT','PATCH','DELETE'])}{field('url','Alamat HTTPS publik','https://api.contoh.com/endpoint')}{field('headers','Header JSON (opsional)','{"Authorization":"Bearer ..."}',true)}{['POST','PUT','PATCH'].includes(str('method')||'GET')&&field('body','Body JSON (opsional)','{"topic":"{{ $json.topic }}"}',true)}<p className="wf-inline-note">URL lokal, jaringan privat, kredensial di URL, dan redirect diblokir demi keamanan.</p></>}
         {node.type==='httpRequest'&&<>{field('url','Alamat HTTPS publik','https://contoh.com/data.json')}<p className="wf-inline-note">Hanya GET. Respons teks atau JSON disimpan pada output dan riwayat. URL lokal, jaringan privat, kredensial di alamat, dan pengalihan tidak diizinkan.</p></>}
         {node.type==='googleDrive'&&<><GoogleDriveSettings value={str('accountId')} busy={busy} onChange={id=>update('accountId',id)}/><label className="wf-field"><span>Tindakan</span><select disabled={busy} value={str('operation')||'shared'} onChange={event=>update('operation',event.target.value)}><option value="shared">Pilih dari link berbagi</option><option value="list">Cari / lihat daftar file</option><option value="view">Lihat detail file</option><option value="download">Unduh file berdasarkan ID</option></select></label>{(str('operation')||'shared')==='shared'?<>{choice('mediaFilter','Jenis media dari folder',['images','videos','all'])}{field('sharedLink','Link berbagi file atau folder','https://drive.google.com/drive/folders/...')}{choice('selectionMode','Jika link berisi folder',['random','name'])}{str('selectionMode')==='name'&&field('nameFilter','Nama file yang dicari','Boleh sebagian nama, misalnya slide-01')}<p className="wf-inline-note">Link file mengambil file tersebut. Link folder memilih gambar JPEG/PNG atau video MP4/MOV secara acak atau sesuai nama (maks. 300 file).</p></>:(str('operation')||'shared')==='list'?field('search','Nama file (opsional)','Kosong = file terbaru'):field('fileId','ID file Google Drive','Tempel ID file atau pakai dari langkah sebelumnya')}{['shared','download'].includes(str('operation')||'shared')&&<p className="wf-inline-note">Gambar (maks. 12 MB) diteruskan sebagai imageUrl; video MP4/MOV (maks. 30 MB) diteruskan sebagai videoUrl untuk Reels.</p>}</>}
+        {node.type==='mediaFile'&&<>
+          <MediaReferenceUploader
+            files={normalizeUploadedMediaList(data.files)}
+            disabled={busy}
+            onChange={files=>update('files',files)}
+          />
+          {field('prompt','Prompt / catatan referensi (opsional)','Contoh: Gunakan foto produk dan gaya pencahayaan ini untuk hasil akhir.',true)}
+          <p className="wf-inline-note">Hubungkan node ini langsung ke Generate Gambar atau Generate Video (atau gabungkan lewat Merge bersama Prompt Trigger).</p>
+        </>}
          {node.type==='aiAgent'&&<>
            {advanced&&str('executionMode')!=='live'&&<label className="wf-field"><span>Model teks (pratinjau lama)</span><input list="wf-model-ids" disabled={busy} value={str('aiModel')||str('model')} onChange={e=>onUpdate(node.id,{...data,aiModel:e.target.value,model:e.target.value})} placeholder="Pilih dari katalog atau ketik ID model"/><datalist id="wf-model-ids">{modelIds.map(id=><option key={id} value={id} label={formatModelLabel(id)}>{formatModelLabel(id)}</option>)}</datalist></label>}
           

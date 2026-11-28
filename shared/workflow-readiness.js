@@ -1,5 +1,5 @@
 import { CONDITION_OPERATORS, validateGraph, workflowInputNode, workflowNodeInput } from './workflow-engine.js'
-import { agentResources, isAiConnection, isSubNode, isTrigger } from './workflow-connections.js'
+import { agentResources, isAiConnection, isStartNode, isSubNode } from './workflow-connections.js'
 import { parseGoogleDriveLink } from './google-drive-link.js'
 import { validateCron } from './workflow-cron.js'
 
@@ -25,8 +25,8 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
   }
   if (targetNodeId) ancestors(targetNodeId)
   else nodes.filter(node => !isSubNode(node.type)).forEach(node => scope.add(node.id))
-  const triggers = nodes.filter(node => scope.has(node.id) && isTrigger(node.type) && !node.data.disabled)
-  if (!triggers.length) add('error', 'trigger', targetNodeId ? 'Hubungkan langkah ini ke trigger yang aktif.' : 'Tambahkan Prompt Trigger, Manual Trigger, Webhook Trigger, atau Chat Trigger yang aktif.')
+  const triggers = nodes.filter(node => scope.has(node.id) && isStartNode(node, dataEdges) && !node.data.disabled)
+  if (!triggers.length) add('error', 'trigger', targetNodeId ? 'Hubungkan langkah ini ke trigger atau node File / Media Referensi yang aktif.' : 'Tambahkan Prompt Trigger, Manual Trigger, Webhook Trigger, Chat Trigger, atau node File / Media Referensi yang aktif.')
   const reachable = new Set()
   const visit = id => {
     if (reachable.has(id)) return
@@ -59,6 +59,13 @@ export function inspectWorkflow(nodes, edges, targetNodeId) {
         const check = validateCron(cron)
         if (!cron || !check.valid) add('error', 'cron', `${label}: ${check.error || 'isi jadwal cron 5 bagian yang valid (contoh: 0 10 * * *).'}`, node.id)
       }
+    }
+    if (node.type === 'mediaFile') {
+      const files = Array.isArray(data.files) ? data.files : []
+      const validFiles = files.filter(f => object(f) && typeof f.previewUrl === 'string' && /^\/api\/workflow-media\/[a-f0-9]{48}$/i.test(f.previewUrl))
+      if (!validFiles.length) add('error', 'media-files', `${label}: unggah minimal 1 foto atau video referensi.`, node.id)
+      else if (files.length > 10) add('error', 'media-files', `${label}: maksimal 10 file referensi per node.`, node.id)
+      if (String(data.prompt || '').length > 20000) add('error', 'media-prompt', `${label}: prompt maksimal 20.000 karakter.`, node.id)
     }
     if (node.type === 'promptTrigger') {
       if (!String(data.prompt||'').trim() || String(data.prompt||'').length>16000) add('error','prompt-trigger-text',`${label}: tulis prompt, maksimal 16.000 karakter.`,node.id)

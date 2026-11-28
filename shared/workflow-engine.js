@@ -1,6 +1,6 @@
-import { aiPorts, isSubNode, isTrigger, isAiConnection, agentResources } from './workflow-connections.js'
+import { aiPorts, isSubNode, isTrigger, isStartNode, isAiConnection, agentResources } from './workflow-connections.js'
 export const WORKFLOW_NODE_TYPES = new Set([
-  'trigger', 'chatTrigger', 'promptTrigger', 'webhookTrigger',
+  'trigger', 'chatTrigger', 'promptTrigger', 'webhookTrigger', 'mediaFile',
   'chatModel', 'memory', 'tool',
   'set', 'splitOut', 'merge', 'jsonParse',
   'if', 'switch', 'wait', 'approval',
@@ -68,7 +68,7 @@ export function validateGraph(nodes, edges, forRun = false) {
     for (const next of outgoing.get(id) || []) { degrees.set(next, degrees.get(next) - 1); if (degrees.get(next) === 0) queue.push(next) }
   }
   if (count !== nodes.length) errors.push('Workflow berisi koneksi melingkar. Hapus koneksi yang kembali ke node sebelumnya.')
-  if (forRun && !nodes.some(n => isTrigger(n.type) && !n.data?.disabled)) errors.push('Tambahkan setidaknya satu trigger yang aktif sebelum menjalankan workflow.')
+  if (forRun && !nodes.some(n => isStartNode(n, edges) && !n.data?.disabled)) errors.push('Tambahkan trigger atau node File / Media Referensi yang aktif sebelum menjalankan workflow.')
   return [...new Set(errors)]
 }
 
@@ -159,6 +159,7 @@ function currentNodeOutput(node,json) {
   if (type==='httpRequest'||type==='searchContent'&&json.researchMode==='url') return {...json,output:json.content}
   const fields={
     searchContent:['query','queries','followUpQueries','pages','sources','sourceCount','readCount','coverage','note'],
+    mediaFile:['referenceMedia','referenceCount','imagePreviewUrl','imageUrl','videoPreviewUrl','videoUrl','prompt'],
     imageGenerate:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt'],
     imageEdit:['imageUrl','imagePreviewUrl','imageMime','imageModel','imagePrompt','editMode','editedWidth','editedHeight'],
     notify:['notificationStatus','notificationChannel','notificationMessage'],
@@ -235,7 +236,7 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
   if (targetNodeId) {
     const collect = id => { if (allowed.has(id)) return; allowed.add(id); edges.filter(e => e.target === id).forEach(e => collect(e.source)) }
     collect(targetNodeId)
-    if (!nodes.some(n => allowed.has(n.id) && isTrigger(n.type) && !n.data.disabled)) throw new Error('Hubungkan node tujuan ke trigger yang aktif sebelum Execute step.')
+    if (!nodes.some(n => allowed.has(n.id) && isStartNode(n, edges) && !n.data.disabled)) throw new Error('Hubungkan node tujuan ke trigger atau File / Media Referensi yang aktif sebelum Execute step.')
   } else nodes.forEach(n => allowed.add(n.id))
   const degrees = new Map(nodes.map(n => [n.id, edges.filter(e => e.target === n.id).length]))
   const queue = nodes.filter(n => degrees.get(n.id) === 0).map(n => n.id)
@@ -269,14 +270,42 @@ function* graphSteps(nodes, allEdges, targetNodeId, live=false, onProgress=()=>{
     nodeResults[id] = result
     onProgress({phase:'start',nodeId:id,label:result.label})
     try {
-      if(!failed&&!blocked.has(id)&&!data.disabled&&data.pinnedOutput==null&&!isTrigger(node.type)) {
+      if(!failed&&!blocked.has(id)&&!data.disabled&&data.pinnedOutput==null&&!isStartNode(node,edges)) {
         input=workflowNodeInput(node,edges,nodeResults)
         result.input=input
       }
       if (input.length > 1000) throw new Error('Input gabungan melebihi batas 1000 item per node.')
-      if (failed || blocked.has(id) || (!isTrigger(node.type) && input.length === 0)) { result.status = 'skipped'; result.message = blocked.has(id) ? 'Menunggu persetujuan manual.' : failed ? 'Dilewati karena eksekusi sebelumnya gagal.' : 'Tidak ada item masuk pada cabang ini.' }
+      if (failed || blocked.has(id) || (!isStartNode(node, edges) && input.length === 0)) { result.status = 'skipped'; result.message = blocked.has(id) ? 'Menunggu persetujuan manual.' : failed ? 'Dilewati karena eksekusi sebelumnya gagal.' : 'Tidak ada item masuk pada cabang ini.' }
       else if (data.disabled) { result.status = 'skipped'; result.output = input; result.message = 'Node dinonaktifkan; input diteruskan.'; if(node.type === 'if') result.branches = {true:input,false:[]}; if(node.type === 'switch') result.branches = {case1:input,case2:[],case3:[],fallback:[]} }
       else if (data.pinnedOutput !== undefined && data.pinnedOutput !== null) { result.output = parseItems(data.pinnedOutput); result.status = 'pinned'; result.message = 'Menggunakan data pin untuk pengujian.'; if(node.type === 'if') throw new Error('Pin pada IF belum didukung. Pin data pada node sebelum IF.'); if(node.type === 'switch') throw new Error('Pin pada Switch belum didukung. Pin data pada node sebelum Switch.') }
+      else if (node.type === 'mediaFile') {
+        const rawFiles = Array.isArray(data.files) ? data.files : []
+        const files = rawFiles
+          .filter(file => object(file) && typeof file.previewUrl === 'string' && /^\/api\/workflow-media\/[a-f0-9]{48}$/i.test(file.previewUrl))
+          .slice(0, 10)
+          .map(file => ({
+            previewUrl: file.previewUrl,
+            url: typeof file.url === 'string' && file.url ? file.url : file.previewUrl,
+            mediaType: file.mediaType === 'video' || String(file.mimeType || '').startsWith('video/') ? 'video' : 'image',
+            mimeType: typeof file.mimeType === 'string' && file.mimeType ? file.mimeType : (file.mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
+            fileName: typeof file.fileName === 'string' ? file.fileName.slice(0, 120) : '',
+          }))
+        if (!files.length) throw new Error('Unggah minimal 1 foto atau video referensi pada node File / Media Referensi.')
+        const firstImage = files.find(file => file.mediaType === 'image')
+        const firstVideo = files.find(file => file.mediaType === 'video')
+        const nodePrompt = String(data.prompt || '').trim()
+        if (nodePrompt.length > 20000) throw new Error('Prompt referensi maksimal 20.000 karakter.')
+        const mediaFields = {
+          referenceMedia: files,
+          referenceCount: files.length,
+          ...(firstImage ? { imagePreviewUrl: firstImage.previewUrl, imageUrl: firstImage.url, imageMime: firstImage.mimeType } : {}),
+          ...(firstVideo ? { videoPreviewUrl: firstVideo.previewUrl, videoUrl: firstVideo.url, videoMime: firstVideo.mimeType } : {}),
+        }
+        result.output = input.length
+          ? input.map(item => ({ json: { ...item.json, ...mediaFields, ...(nodePrompt ? { prompt: nodePrompt } : {}) } }))
+          : [{ json: { ...mediaFields, ...(nodePrompt ? { prompt: nodePrompt } : {}) } }]
+        result.message = `Menyiapkan ${files.length} file referensi media.`
+      }
       else if (node.type === 'trigger') result.output = parseItems(data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
       else if (node.type === 'webhookTrigger') result.output = parseItems(data.webhookPayload ?? data.sampleData, [{ json: { triggeredAt: new Date().toISOString() } }])
       else if (node.type === 'chatTrigger') result.output = [{json:{chatInput:String(data.chatInput||''),sessionId:String(data.sessionId||'test-session')}}]

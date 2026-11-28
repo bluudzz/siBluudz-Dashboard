@@ -1,4 +1,4 @@
-import { Bell, Bot, Brain, Braces, Camera, Clapperboard, Clock, Eye, FileJson, GitBranch, Globe, HardDrive, Images, List, Merge, MessageCircle, Search, Send, Settings, ShieldCheck, Split, SquarePen, Timer, Wand2, Webhook, Wrench, type LucideIcon } from 'lucide-react'
+import { Bell, Bot, Brain, Braces, Camera, Clapperboard, Clock, Eye, FileJson, FileUp, GitBranch, Globe, HardDrive, Images, List, Merge, MessageCircle, Search, Send, Settings, ShieldCheck, Split, SquarePen, Timer, Wand2, Webhook, Wrench, type LucideIcon } from 'lucide-react'
 
 export const workflowNodeIcons:Record<string,LucideIcon> = {
   trigger:Clock,
@@ -13,6 +13,7 @@ export const workflowNodeIcons:Record<string,LucideIcon> = {
   httpRequest:Globe,
   apiRequest:Send,
   googleDrive:HardDrive,
+  mediaFile:FileUp,
   if:GitBranch,
   switch:Split,
   wait:Timer,

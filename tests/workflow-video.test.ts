@@ -18,10 +18,10 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
   process.env.PUBLIC_BASE_URL = 'https://panel.example.com'
 
   const { db } = await import('../server/db.js')
-  const { storeWorkflowImage } = await import('../server/workflow-media.js')
+  const { storeWorkflowImage, storeWorkflowUploadedMedia } = await import('../server/workflow-media.js')
   const { runVideoNode, getGoogleFlowPaths } = await import('../server/workflow-google-flow.js')
   const { runImageNode } = await import('../server/workflow-image.js')
-  const { validateGraph } = await import('../shared/workflow-engine.js')
+  const { validateGraph, executeGraphAsync } = await import('../shared/workflow-engine.js')
   const { inspectWorkflow } = await import('../shared/workflow-readiness.js')
   const { default: sharp } = await import('sharp')
 
@@ -173,5 +173,71 @@ test('Google Flow MCP supports both videoGenerate and flow-backed imageGenerate'
     assert.equal(result[1].json.outputIndex, 2)
     assert.equal(result[0].json.imageMime, 'image/jpeg')
     assert.match(result[0].json.imagePreviewUrl, /^\/api\/workflow-media\/[a-f0-9]{48}$/)
+  })
+
+  await t.test('mediaFile upload stores photos & videos and forwards multi-file references to Google Flow nodes', async () => {
+    db.prepare('insert into users (id,email,name,role) values (?,?,?,?)').run('u-media', 'media@example.test', 'Media User', 'admin')
+
+    const webpBuf = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#225588' } }).webp().toBuffer()
+    const uploadedPhoto = await storeWorkflowUploadedMedia('u-media', webpBuf, 'image/webp', 'produk-utama.webp')
+    const uploadedVideo = await storeWorkflowUploadedMedia('u-media', minimalMp4Buffer(), 'video/mp4', 'gerak-kamera.mp4')
+    assert.equal(uploadedPhoto.mediaType, 'image')
+    assert.equal(uploadedPhoto.mimeType, 'image/jpeg')
+    assert.equal(uploadedVideo.mediaType, 'video')
+    assert.equal(uploadedVideo.mimeType, 'video/mp4')
+    await assert.rejects(() => storeWorkflowUploadedMedia('u-media', Buffer.from('bad'), 'application/pdf', 'doc.pdf'), /Format file tidak didukung/)
+
+    const standaloneNodes = [
+      { id: 'm1', type: 'mediaFile', position: { x: 0, y: 0 }, data: { label: 'Media Ref', files: [uploadedPhoto, uploadedVideo], prompt: 'Ikuti gaya studio produk ini' } },
+      { id: 'i1', type: 'imageGenerate', position: { x: 300, y: 0 }, data: { label: 'Generate Gambar', provider: 'googleFlow', aspectRatio: '3:4', useInputImage: false } },
+    ]
+    const standaloneEdges = [{ id: 'e-m1-i1', source: 'm1', target: 'i1' }]
+    assert.deepEqual(validateGraph(standaloneNodes, standaloneEdges, true), [])
+    assert.equal(inspectWorkflow(standaloneNodes, standaloneEdges).some(i => i.severity === 'error'), false)
+
+    const emptyMediaNodes = [{ ...standaloneNodes[0], data: { label: 'Media Ref', files: [] } }, standaloneNodes[1]]
+    assert.equal(inspectWorkflow(emptyMediaNodes, standaloneEdges).some(i => i.severity === 'error' && i.code === 'media-files'), true)
+
+    const outImgPath = join(tempDir, 'ref-out.webp')
+    writeFileSync(outImgPath, webpBuf)
+    const imageCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runtimeResult = await executeGraphAsync(standaloneNodes, standaloneEdges, undefined, async context => {
+      if (context.kind === 'imageGenerate') {
+        return runImageNode(context, { id: 'u-media', role: 'admin' }, {
+          callTool: async (name: string, args: Record<string, unknown>) => {
+            imageCalls.push({ name, args })
+            if (name === 'flow_generate_image') return { id: 'ref-img-job', status: 'processing' }
+            return { id: 'ref-img-job', status: 'completed', downloadedFiles: [outImgPath] }
+          },
+          outputDirectory: tempDir,
+        })
+      }
+      throw new Error(`Unexpected kind: ${context.kind}`)
+    })
+
+    assert.equal(runtimeResult.status, 'completed')
+    assert.equal(imageCalls[0].name, 'flow_generate_image')
+    assert.equal((imageCalls[0].args.referenceFiles as string[]).length, 2)
+
+    const videoCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const fakeVidOut = join(tempDir, 'ref-vid-out.mp4')
+    writeFileSync(fakeVidOut, minimalMp4Buffer())
+    await runVideoNode(
+      {
+        node: { id: 'v2', data: { prompt: 'Gerakkan perlahan', useInputImage: true, referenceFiles: [uploadedPhoto] } },
+        input: [{ json: { referenceMedia: [uploadedPhoto, uploadedVideo], imagePreviewUrl: uploadedPhoto.previewUrl, videoPreviewUrl: uploadedVideo.previewUrl } }],
+      },
+      { id: 'u-media', role: 'admin' },
+      {
+        callTool: async (name: string, args: Record<string, unknown>) => {
+          videoCalls.push({ name, args })
+          if (name === 'flow_generate_video') return { id: 'ref-vid-job', status: 'processing' }
+          return { id: 'ref-vid-job', status: 'completed', downloadedFiles: [fakeVidOut] }
+        },
+        outputDirectory: tempDir,
+      },
+    )
+    assert.equal(videoCalls[0].name, 'flow_generate_video')
+    assert.equal((videoCalls[0].args.referenceFiles as string[]).length, 2)
   })
 })

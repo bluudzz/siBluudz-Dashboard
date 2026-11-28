@@ -59,6 +59,61 @@ export async function storeWorkflowVideo(userId, buffer, mimeType) {
   return { previewUrl, videoUrl: publicBase ? publicBase + previewUrl : '', mimeType, token }
 }
 
+export async function storeWorkflowUploadedMedia(userId, buffer, mimeType, fileName = '') {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    throw new Error('File yang diunggah kosong.')
+  }
+  const cleanMime = String(mimeType || '').split(';')[0].trim().toLowerCase()
+  const cleanName = String(fileName || '').replace(/[^\w.\- ()]/g, '_').trim().slice(0, 120)
+
+  if (['image/jpeg', 'image/png', 'image/webp'].includes(cleanMime)) {
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      throw new Error('Ukuran foto maksimal 12 MB.')
+    }
+    let normalized = buffer
+    if (cleanMime !== 'image/jpeg') {
+      try {
+        normalized = await sharp(buffer, { limitInputPixels: 25_000_000 })
+          .flatten({ background: '#ffffff' })
+          .jpeg({ quality: 92 })
+          .toBuffer()
+      } catch {
+        throw new Error('Foto tidak valid atau tidak dapat dibaca.')
+      }
+      if (normalized.length > MAX_IMAGE_BYTES) {
+        throw new Error('Ukuran foto setelah dikonversi melebihi 12 MB.')
+      }
+    }
+    const stored = await storeWorkflowImage(userId, normalized.toString('base64'), 'image/jpeg')
+    return {
+      token: stored.token,
+      previewUrl: stored.previewUrl,
+      imageUrl: stored.imageUrl,
+      url: stored.imageUrl || stored.previewUrl,
+      mimeType: 'image/jpeg',
+      mediaType: 'image',
+      fileName: cleanName || `${stored.token.slice(0, 8)}.jpg`,
+      sizeBytes: normalized.length,
+    }
+  }
+
+  if (['video/mp4', 'video/quicktime'].includes(cleanMime)) {
+    const stored = await storeWorkflowVideo(userId, buffer, cleanMime)
+    return {
+      token: stored.token,
+      previewUrl: stored.previewUrl,
+      videoUrl: stored.videoUrl,
+      url: stored.videoUrl || stored.previewUrl,
+      mimeType: stored.mimeType,
+      mediaType: 'video',
+      fileName: cleanName || `${stored.token.slice(0, 8)}.${cleanMime === 'video/quicktime' ? 'mov' : 'mp4'}`,
+      sizeBytes: buffer.length,
+    }
+  }
+
+  throw new Error('Format file tidak didukung. Gunakan foto JPG/PNG/WebP atau video MP4/MOV.')
+}
+
 export function extractWorkflowMediaToken(urlOrPreview) {
   const raw = String(urlOrPreview || '').trim()
   const relative = raw.match(/^\/api\/workflow-media\/([a-f0-9]{48})(?:[?#].*)?$/i)

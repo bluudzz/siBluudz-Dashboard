@@ -72,6 +72,7 @@ const nodeTypes={
   httpRequest:SetNode,
   apiRequest:SetNode,
   googleDrive:SetNode,
+  mediaFile:SetNode,
   imageGenerate:SetNode,
   imageEdit:SetNode,
   videoGenerate:SetNode,
